@@ -1,0 +1,16 @@
+{
+  "name": "listenledger-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ListenLedger owner dashboard — mobile-first SPA shell (HTML, CSS, TypeScript)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

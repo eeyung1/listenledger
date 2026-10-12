@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="ListenLedger — live sales and inventory command centre" />
+    <!-- Views are declared in src/app.ts and rendered into #app by the router. -->
+    <title>ListenLedger</title>
+  </head>
+  <body>
+    <!--
+      Application shell. The router owns #app and swaps in the view template
+      for the current route; the nav below is static and the router only
+      toggles its active state.
+    -->
+    <header class="app-header">
+      <span class="app-brand">ListenLedger</span>
+      <nav class="app-nav" aria-label="Main">
+        <a href="#/home" data-route="/home">Overview</a>
+        <a href="#/transactions" data-route="/transactions">Transactions</a>
+        <a href="#/inventory" data-route="/inventory">Inventory</a>
+      </nav>
+    </header>
+
+    <main id="app" class="app-main" aria-live="polite">
+      <!-- Current view is rendered here. -->
+    </main>
+
+    <script type="module" src="./dist/app.js"></script>
+  </body>
+</html>

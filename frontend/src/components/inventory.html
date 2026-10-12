@@ -1,0 +1,63 @@
+<!--
+  Inventory & Catalogue Management (route: #/inventory)
+
+  The business's source of truth for what it sells: official names, SKUs,
+  prices, stock on hand, and — critically for recognition accuracy — the local
+  aliases each product is actually called in this shop.
+
+  Packaging rules (1 carton = 12 packs) live here too: they are what lets a
+  restock spoken in cartons adjust stock counted in packs.
+-->
+<section class="view view--inventory">
+  <header class="view__header">
+    <h1 class="view__title">Inventory</h1>
+    <p class="view__subtitle">
+      <span data-hook="inventory-count">—</span> products in the catalogue.
+    </p>
+  </header>
+
+  <section class="panel" aria-labelledby="catalogue-heading">
+    <h2 class="panel__title" id="catalogue-heading">Catalogue</h2>
+
+    <!-- data-hook: catalogue search by name, SKU or alias -->
+    <form class="filters" data-hook="catalogue-search" role="search">
+      <label class="filters__field">
+        Search
+        <input
+          type="search"
+          name="q"
+          placeholder="Name, SKU or alias"
+          data-hook="catalogue-query"
+        />
+      </label>
+      <!-- Adding a product routes to the editor; unrecognised products
+           captured by voice are confirmed here before entering the catalogue. -->
+      <button type="button" class="button" data-hook="catalogue-add">
+        Add product
+      </button>
+    </form>
+
+    <table class="table" data-hook="catalogue-table">
+      <caption class="visually-hidden">Product catalogue</caption>
+      <thead>
+        <tr>
+          <th scope="col">Product</th>
+          <th scope="col">SKU</th>
+          <th scope="col">Aliases</th>
+          <th scope="col">Price</th>
+          <th scope="col">Stock</th>
+          <th scope="col">Packaging</th>
+          <th scope="col" class="table__actions-header">
+            <span class="visually-hidden">Actions</span>
+          </th>
+        </tr>
+      </thead>
+      <!-- Rows are appended here by the data layer. -->
+      <tbody data-hook="catalogue-body">
+        <tr class="table__empty" data-hook="catalogue-empty">
+          <td colspan="7">No products yet. Add the first one to get started.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</section>

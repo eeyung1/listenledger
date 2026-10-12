@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+edge/target/
+
+# SQLite database and its write-ahead log. Created at runtime by the backend
+# (-db flag); never commit a real shop's ledger.
+*.db
+*.db-wal
+*.db-shm
+
+# Local configuration and secrets
+.env
+.env.*

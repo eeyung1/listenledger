@@ -1,0 +1,86 @@
+<!--
+  Transactions & Review System (route: #/transactions)
+
+  Two jobs in one view, per the blueprint: the unified ledger of every stock
+  movement in and out, and the Review Queue where the owner adjudicates
+  captures the validation engine was not confident about.
+
+  Nothing in the ledger is final until it is Confirmed or Rejected — a
+  Review Required row has had no effect on inventory or revenue.
+-->
+<section class="view view--transactions">
+  <header class="view__header">
+    <h1 class="view__title">Transactions</h1>
+    <p class="view__subtitle">
+      Sales and restocks, newest first.
+    </p>
+  </header>
+
+  <section class="panel panel--review" aria-labelledby="review-queue-heading">
+    <h2 class="panel__title" id="review-queue-heading">
+      Review queue
+      <span class="badge" data-hook="review-queue-count">0</span>
+    </h2>
+    <p class="panel__hint">
+      Low-confidence captures. Correct the product, quantity or amount, then
+      confirm or reject. Confirming is what applies the change to stock.
+    </p>
+    <!--
+      One card per held transaction. Each shows the per-anchor confidence
+      scores (product / quantity / amount) so the owner can see which field
+      the system doubted, and the raw transcript for context.
+    -->
+    <ul class="review-list" data-hook="review-queue">
+      <li class="review-list__empty" data-hook="review-queue-empty">
+        Nothing waiting on you.
+      </li>
+    </ul>
+  </section>
+
+  <section class="panel" aria-labelledby="ledger-heading">
+    <h2 class="panel__title" id="ledger-heading">Ledger</h2>
+
+    <!-- data-hook: ledger filters (date range, type, status) -->
+    <form class="filters" data-hook="ledger-filters">
+      <label class="filters__field">
+        Direction
+        <select name="type" data-hook="filter-type">
+          <option value="">All</option>
+          <option value="sale">Sales (stock out)</option>
+          <option value="restock">Restocks (stock in)</option>
+        </select>
+      </label>
+      <label class="filters__field">
+        Status
+        <select name="status" data-hook="filter-status">
+          <option value="">All</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="review_required">Review required</option>
+          <option value="rejected">Rejected</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </label>
+    </form>
+
+    <table class="table" data-hook="ledger-table">
+      <caption class="visually-hidden">All captured stock movements</caption>
+      <thead>
+        <tr>
+          <th scope="col">Time</th>
+          <th scope="col">Direction</th>
+          <th scope="col">Product</th>
+          <th scope="col">Qty</th>
+          <th scope="col">Amount</th>
+          <th scope="col">Confidence</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <!-- Rows are appended here by the update layer. -->
+      <tbody data-hook="ledger-body">
+        <tr class="table__empty" data-hook="ledger-empty">
+          <td colspan="7">No transactions recorded yet.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</section>

@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    /* Native ESM, no bundler: the browser loads dist/app.js directly, so
+       relative imports must be written with an explicit .js extension. NodeNext
+       is what resolves "./ws.js" to src/ws.ts at compile time and preserves the
+       extension in the emitted JavaScript. */
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    /* Emit: src/app.ts -> dist/app.js, loaded directly by the browser as an
+       ES module. No bundler in V1, so relative imports must carry an explicit
+       .js extension once they are added. */
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": true,
+
+    /* Strictness: the dashboard is driven by server-pushed data, so the
+       compiler is the main defence against shape drift from the Go models. */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,64 @@
+<!--
+  Overview / Command Centre (route: #/home)
+
+  The live view of the business: today's KPIs, the incoming transaction feed,
+  and the high-priority alerts an owner acts on. Every value here is rendered
+  by the WebSocket layer once it is wired up; the placeholders below are the
+  empty state, not sample data.
+
+  Convention: elements carrying a data-hook attribute are the mount points the
+  update layer fills. Amounts arrive from the API as integer minor units (kobo)
+  and must be formatted for display, never divided into floats ad hoc.
+-->
+<section class="view view--home">
+  <header class="view__header">
+    <h1 class="view__title">Overview</h1>
+    <!-- data-hook: connection status of the live feed (live / reconnecting / offline) -->
+    <p class="view__subtitle" data-hook="connection-status">Connecting…</p>
+  </header>
+
+  <section class="kpis" aria-label="Today at a glance">
+    <article class="kpi">
+      <h2 class="kpi__label">Sales today</h2>
+      <p class="kpi__value" data-hook="kpi-sales-today">—</p>
+    </article>
+    <article class="kpi">
+      <h2 class="kpi__label">Transactions</h2>
+      <p class="kpi__value" data-hook="kpi-transaction-count">—</p>
+    </article>
+    <article class="kpi kpi--attention">
+      <h2 class="kpi__label">Needs review</h2>
+      <p class="kpi__value" data-hook="kpi-review-count">—</p>
+      <!-- Low-confidence captures waiting on a human; links to the Review Queue. -->
+      <a class="kpi__link" href="#/transactions">Open review queue</a>
+    </article>
+    <article class="kpi kpi--attention">
+      <h2 class="kpi__label">Low stock</h2>
+      <p class="kpi__value" data-hook="kpi-low-stock-count">—</p>
+      <a class="kpi__link" href="#/inventory">View inventory</a>
+    </article>
+  </section>
+
+  <section class="panel" aria-labelledby="live-feed-heading">
+    <h2 class="panel__title" id="live-feed-heading">Live feed</h2>
+    <!--
+      Transactions are prepended here as they are confirmed. Each row shows
+      type (sale / restock), product, quantity with unit, amount and status.
+    -->
+    <ul class="feed" data-hook="live-feed">
+      <!-- data-hook: empty state, hidden once the first event arrives -->
+      <li class="feed__empty" data-hook="live-feed-empty">
+        Waiting for the first transaction.
+      </li>
+    </ul>
+  </section>
+
+  <section class="panel" aria-labelledby="low-stock-heading">
+    <h2 class="panel__title" id="low-stock-heading">Low stock</h2>
+    <ul class="alert-list" data-hook="low-stock-list">
+      <li class="alert-list__empty" data-hook="low-stock-empty">
+        Nothing below its reorder level.
+      </li>
+    </ul>
+  </section>
+</section>
