@@ -1,68 +1,308 @@
-# ListenLedger: Ambient Sales Capture System
+# ListenLedger — Ambient Sales and Inventory Capture
 
-## Overview
-ListenLedger is an ambient, voice-driven sales and inventory system designed for small and local businesses[cite: 1]. It replaces manual POS data entry by using the natural sales conversation as the data-entry interface[cite: 1]. The system listens for structured transactional anchors, processes the speech locally, and updates a live business dashboard in near real-time[cite: 1].
+ListenLedger is a voice-driven sales and inventory system for small businesses. It is designed to turn structured shop conversations into sales records, stock movements, and a live owner dashboard. Uncertain captures go to a human review queue.
 
-**Core Principle:** Conversation becomes the data-entry interface[cite: 1].
+**Core principle: conversation becomes the data-entry interface.**
 
-## Core Transaction Protocol
-Sales staff are trained to include three anchors followed by a closing phrase[cite: 1]:
-1. **Product**[cite: 1]
-2. **Quantity**[cite: 1]
-3. **Amount**[cite: 1]
-4. **Boundary:** "Thank you" (Configurable)[cite: 1]
+> “Two Milo, four thousand naira. Thank you.”
 
-*Example:*
-> **Customer:** "I want Milo."[cite: 1]
-> **Seller:** "How many?"[cite: 1]
-> **Customer:** "Two."[cite: 1]
-> **Seller:** "Two Milo, four thousand naira. Thank you."[cite: 1]
+The intended result is one sale for two Milo at NGN 4,000, a stock reduction of two units, and an updated dashboard. These end-to-end capabilities are the MVP goal, not a claim that the current prototype already delivers them.
 
-## System Architecture
+## Current status
 
-The architecture separates heavy, real-time audio processing from concurrent business logic and fast UI rendering.
+Implementation reviewed on **13 October 2026**, against commit `461e971`.
 
-### 1. Edge Capture Engine (Rust)
-Runs locally on affordable hardware (Android, laptop, Raspberry Pi) to ensure fast, offline-capable processing without dropping audio frames[cite: 1].
-* **Audio Capture:** Real-time PCM audio streaming[cite: 1].
-* **Voice Activity Detection (VAD):** Filters out background noise, triggering processing only during speech[cite: 1].
-* **Speech-to-Text:** Utilizes optimized, quantized models (e.g., Whisper via `whisper-cpp-plus`) for rapid, localized transcription[cite: 1].
-* **Data Handoff:** Packages the extracted text payload and transmits it to the backend orchestrator.
+**Stage: early software prototype; not ready for real-shop operation.** The Go API, SQLite persistence, WebSocket transport, and three dashboard views exist. The Rust audio engine is a placeholder. Recorded transactions do not yet change stock, and real authentication is absent.
 
-### 2. Backend Orchestrator (Go)
-Handles high-throughput, concurrent request-response cycles, managing the state and database operations for multiple businesses.
-* **Validation Engine:** Matches transcribed text against the specific shop's product catalogue and alias database (e.g., mapping "Big Peak" to "Peak Milk 400g")[cite: 1].
-* **Confidence Scoring:** Flags low-confidence captures for manual review instead of blindly updating the database[cite: 1].
-* **Inventory Management:** Processes both **Stock Out** (ambient sales) and **Stock In** (reading supplier receipts aloud)[cite: 1].
-* **Live Push:** Uses WebSockets to broadcast successful database updates to the client.
+“Implemented” below means source code exists; it does not mean runtime acceptance tests have passed. The review environment did not contain Go or the TypeScript compiler, so compilation and execution were not verified.
 
-### 3. Frontend Dashboard (HTML, CSS, TypeScript)
-A lightweight, mobile-first Single Page Application (SPA) acting as the live command center[cite: 1].
-* **DOM Updates:** Listens for WebSocket events to instantly update "Sales Today," current inventory, and the transaction feed without page reloads[cite: 1].
-* **Review Queue:** A dedicated interface for merchants to quickly confirm or correct flagged, low-confidence transactions[cite: 1].
-* **Catalogue Management:** Interface for owners to map official SKUs to common local pronunciations and define packaging relationships (e.g., 1 carton = 12 packs)[cite: 1].
+| Component | Implemented foundation | Still required for MVP |
+|---|---|---|
+| Go HTTP server | Health endpoint, structured logging, timeouts, graceful shutdown | Authenticated identity, request tracing, operational hardening |
+| SQLite storage | Embedded migrations, products, transactions, shop-scoped queries | Atomic ledger/stock operations, idempotency, audit history, tested recovery |
+| Catalogue | Product creation API; aliases, units and packaging stored | Owner forms, editing, validation and operational unit conversion |
+| Transactions | Structured JSON ingestion, persistence, basic supplied-confidence classification | Recognition validation, trusted status decisions, stock effects, review actions |
+| Realtime | Shop-partitioned WebSocket hub, browser reconnect/backoff | Recovery in every view, consistent snapshots/events, duplicate protection |
+| Dashboard | Overview, ledger/review display, inventory search and low-stock display | Styling, working forms/actions, accurate aggregates, basic analytics/settings |
+| Rust edge engine | Responsibility documented in `edge/README.md` | Audio capture, VAD, local STT, extraction, device transport and offline queue |
+| Delivery quality | Dependency lockfiles and development seed endpoints | Automated tests, CI, deployment/runbook, backup/restore verification |
 
-## Dashboard Views (SPA Routing)
+### Confirmed gaps in the current code
 
-The web application utilizes a single-page architecture built around a core `layout.html` shell, navigating smoothly between the following views without full page reloads:
+- `auth.QueryShopResolver` trusts a supplied `shop_id`; callers are not authenticated as owners of that shop.
+- `POST /api/transactions` saves a record but never adjusts stock.
+- Explicit caller-supplied transaction status can bypass automatic confidence classification.
+- There is no `POST /api/captures`, confirm/reject API, or product editing API.
+- Confidence scores are supplied by the client; no catalogue recognition engine generates them.
+- The review queue displays records but has no completed decision workflow.
+- “Add product” is unwired; product action cells are placeholders.
+- No stylesheet exists; login, signup, analytics and settings views are absent.
+- Overview totals use at most the newest 500 records, not a complete daily aggregate.
+- Only the overview refetches on reconnect; inventory and transactions do not.
+- Overview new-transaction events are inserted without checking for an existing ID.
+- Snapshot replacement can race with incoming events; timestamp/version reconciliation is not implemented.
+- There are no committed automated tests or GitHub Actions workflows at this baseline.
 
-* **Authentication & Onboarding (`login.html` & `signup.html`):** The secure entry point. Handles initial configuration (currency, custom closing phrases) and pairs the edge capture device to the owner's workspace.
-* **The Overview / Command Center (`home.html`):** A live event feed showing transactions happening in real-time, daily KPIs (Sales Today, Number of Transactions), and high-priority alerts like low stock[cite: 1].
-* **Transactions & Review System (`transactions.html`):** The unified ledger for all incoming and outgoing stock[cite: 1]. Contains the critical "Review Queue" for low-confidence captures (e.g., a 55% match), allowing the owner to manually correct and confirm or reject records[cite: 1].
-* **Inventory & Catalogue Management (`inventory.html` / `search.html`):** The database interface to manage official product names, SKUs, pricing, and packaging logic[cite: 1]. Includes functionality to configure custom speech aliases so the system learns the shop's local jargon[cite: 1].
-* **Analytics (`analytics.html`):** Visualizations of historical sales data, product movement trends, and transaction volumes[cite: 1].
-* **Settings (`settings.html`):** Configuration controls for the NLP pipeline, confidence score thresholds, hardware management, and staff protocol settings[cite: 1].
+## MVP scope and success condition
 
-## The Processing Loop
-1. **HEAR:** Rust edge node captures and isolates speech[cite: 1].
-2. **UNDERSTAND:** Rust transcribes product, quantity, amount, and boundary[cite: 1].
-3. **VALIDATE:** Go backend maps text to SKUs, checks inventory limits, and assigns a confidence score[cite: 1].
-4. **RECORD:** Go writes the transaction to the database or routes to the Review Queue[cite: 1].
-5. **UPDATE:** Go pushes WebSocket events; TypeScript updates the live UI[cite: 1].
+Start with **one shop, one sales point, one primary salesperson, one microphone, 20–50 known products, and English first**. Use an existing laptop or other validated prototype device. Select and benchmark one supported hardware target before promising support across Android, laptops and Raspberry Pi.
 
-## Project Phases
-1. **Software Prototype:** Prove the NLP extraction and Rust/Go data flow using existing hardware[cite: 1].
-2. **Real-Shop Beta (1-2 Shops):** Measure end-to-end transaction accuracy, acoustic interference, and behavioral compliance[cite: 1].
-3. **Refinement:** Tune VAD, confidence thresholds, and catalog aliases based on pilot data[cite: 1].
-4. **Expansion (10-15 Shops):** Validate multi-tenant backend architecture and generate commercial viability metrics[cite: 1].
-5. **Hardware Integration:** Transition from prototype edge devices to dedicated ListenLedger rechargeable hardware[cite: 1].
+The first MVP must support **both sales and voice-based restocking**, including the supplier-receipt workflow. Run alongside existing shop records during initial trials.
+
+### Required end-to-end examples
+
+1. **Sale:** opening stock 20 Milo; capture “Two Milo, four thousand naira. Thank you”; save one confirmed NGN 4,000 sale; stock becomes 18; overview and ledger update.
+2. **Uncertain capture:** low-confidence product identification creates a review item and changes neither stock nor confirmed revenue. Correction and confirmation apply the effect once; rejection applies none.
+3. **Restock:** “Three cartons of Milo, forty-five thousand naira. Stock received”; with 12 packs per carton and pack-based stock, add 36 packs and record NGN 45,000 purchase cost, not sales revenue.
+4. **Multi-line receipt:** preserve each product, quantity, unit and purchase cost under one restock capture. Show the receipt total and make unresolved lines explicit.
+5. **Retry/restart:** resending the same capture after interruption does not duplicate the ledger entry or stock movement.
+6. **Isolation:** a different shop or an unpaired/revoked device cannot read or write this shop's data.
+
+All roadmap checkboxes below are **remaining work**, not completed features.
+
+## Architecture and repository
+
+| Layer | Responsibility | Location |
+|---|---|---|
+| Rust edge | Microphone → speech → extracted capture → authenticated delivery | `edge/` |
+| Go application | Identity, catalogue matching, business rules, reviews, stock and events | `backend/` |
+| SQLite | Durable catalogue, ledger and future capture/audit records | `backend/storage/` |
+| HTML/TypeScript | Owner dashboard and review/catalogue workflows | `frontend/` |
+
+Processing loop: **Hear → Understand → Validate → Record → Update**.
+
+- [Product blueprint](Ambient_Sales_Capture_Blueprint_v0.2.md): product rationale and long-term vision.
+- [Engineering TODO](TODO.md): lower-level notes from the scaffold.
+- [Edge status](edge/README.md): current edge placeholder.
+
+This README is the MVP delivery checklist. Some older TODO statements are stale: all-view reconnect recovery and universal transaction deduplication are not implemented. Reconcile those statements when the corresponding work lands. Repository code and verified tests take precedence over completion labels in documentation.
+
+## 1. Identity, onboarding and device access
+
+- [ ] Add owner signup, login, logout and a defined account-recovery process.
+- [ ] Store passwords securely if password-based authentication is selected; add session expiry/revocation, secure cookies, appropriate CSRF protection and login throttling.
+- [ ] Add persisted shop ownership and settings: name, currency, timezone, confidence threshold and sale/restock closing phrases.
+- [ ] Replace query-string identity with authenticated shop membership for both HTTP and WebSocket requests.
+- [ ] Pair edge devices to a shop using revocable credentials; support unpairing and credential rotation.
+- [ ] Derive device/shop identity server-side; reject attempts to submit records for another shop.
+- [ ] Provide a simple onboarding flow: create shop → load catalogue/opening stock → configure microphone/device → test capture.
+- [ ] Keep destructive development endpoints disabled outside explicit local development.
+
+**Acceptance:** two test owners cannot access each other's catalogue, ledger or live feed. Revoking a device prevents further submissions. Closing a session removes access.
+
+## 2. Catalogue and stock setup
+
+- [ ] Wire the Add Product form to the existing API.
+- [ ] Add product editing API and UI for names, SKU, selling price, aliases, reorder threshold and packaging.
+- [ ] Validate duplicate SKUs and ambiguous aliases with clear owner feedback.
+- [ ] Define one base unit per product and validate packaging paths, including chained conversions such as carton → pack → bottle.
+- [ ] Reject cycles, incompatible units and non-positive conversion factors; define supported quantity precision for MVP.
+- [ ] Prevent base-unit/packaging edits from silently reinterpreting historical movements.
+- [ ] Support explicit opening-stock entry and reasoned stock-count corrections with an audit trail.
+- [ ] Provide product movement history and safe product archiving without deleting historical transactions.
+- [ ] Hold unknown products for review; allow an owner to create or select a product before confirmation.
+
+**Acceptance:** an owner can set up the pilot's 20–50 products without developer commands. Restocking three cartons correctly changes stock in the configured base unit.
+
+## 3. Transaction and inventory correctness
+
+- [ ] Create a service operation that validates, records the ledger entry and changes stock in one database transaction.
+- [ ] Confirmed sales decrease stock; confirmed restocks increase it. Review-required and rejected captures have no stock effect.
+- [ ] Convert spoken packaging units into base units before adjusting stock.
+- [ ] Add an idempotency key based on shop/device/capture identity, enforced by a database uniqueness constraint.
+- [ ] Return the existing result for a matching retry; reject reuse of a capture ID with conflicting content.
+- [ ] Enforce legal status transitions and prevent repeated confirmation or concurrent requests from applying stock twice.
+- [ ] Define insufficient-stock handling: block or hold for review; never silently create negative stock.
+- [ ] Make confirmation a trusted server decision. Do not accept arbitrary client status overrides.
+- [ ] Validate product identity, positive quantity, monetary values, currency and confidence ranges.
+- [ ] Keep sales revenue separate from purchase/restock cost and enforce the shop currency for the initial MVP.
+- [ ] Add auditable corrections/reversals so an incorrect confirmed capture can be fixed without destroying history.
+- [ ] Publish events only after commit; ensure failed event delivery can be recovered from durable state.
+- [ ] Group multi-line receipts and explicitly define whether confirmation is receipt-wide or line-by-line; prevent silent partial recording.
+
+**Acceptance:** retry, simultaneous confirmation, server crash and insufficient-stock scenarios never produce partial or duplicate stock effects. Every adjustment is traceable.
+
+## 4. Validation and recognition decisions
+
+- [ ] Build catalogue matching: exact SKU/name → configured aliases → conservative fuzzy matching.
+- [ ] Resolve matches within the authenticated shop only.
+- [ ] Parse spoken quantity, amount, unit and product; distinguish total amount from unit price.
+- [ ] Track missing and uncertain anchors individually; do not treat an absent score as evidence of correctness.
+- [ ] Compute meaningful confidence/validation results rather than blindly trusting supplied scores.
+- [ ] Apply configurable shop thresholds; flag ambiguous products, unexpected units and implausible amounts.
+- [ ] Distinguish sales from restocking by explicit capture context and configured boundary phrases.
+- [ ] Handle corrections, repeated phrases, incomplete speech and unrelated conversation without silently creating sales.
+- [ ] Preserve the original transcript, extracted values, reason for review and eventual owner correction.
+- [ ] Build a representative set of English shop phrases and catalogue aliases for regression evaluation.
+
+**Acceptance:** ambiguous or incomplete phrases go to review. A low product score cannot be hidden by a high average, and a closing phrase alone does not create a transaction.
+
+## 5. Rust audio and edge capture
+
+- [ ] Initialise the Rust project and define a versioned capture contract with the backend.
+- [ ] Implement microphone selection, permission/error handling and an obvious listening/paused indicator.
+- [ ] Capture PCM audio and add voice activity detection to avoid processing silence continuously.
+- [ ] Integrate and benchmark a local speech-to-text model on the chosen prototype hardware.
+- [ ] Detect sale and restock closing phrases; implement bounded capture sessions and incomplete-capture timeouts.
+- [ ] Extract structured anchors and support multi-line spoken supplier receipts.
+- [ ] Send transcript, extracted lines, confidence data, capture ID, timestamp, device identity and boundary through an authenticated `POST /api/captures` contract.
+- [ ] Persist a bounded offline queue; retry with backoff, keep stable capture IDs, and remove queued captures only after acknowledgment.
+- [ ] Survive power/process restarts without losing acknowledged records or duplicating queued ones.
+- [ ] Expose microphone, model, backend and queue health with actionable errors.
+- [ ] Discard raw audio after processing by default; document any temporary buffering and cleanup.
+- [ ] Provide repeatable setup instructions for the supported hardware and model files.
+
+**Acceptance:** actual microphone speech reaches the ledger through the normal application path. Network loss is visible; pending captures synchronise once connectivity returns.
+
+## 6. Review and manual recovery
+
+- [ ] Add authenticated confirm, correct-and-confirm and reject operations.
+- [ ] Show original transcript, candidate product, quantity, amount, confidence and reason for review.
+- [ ] Allow product selection, quantity/unit correction and amount correction before confirmation.
+- [ ] Apply confirmation and stock movement atomically with duplicate/stale-action protection.
+- [ ] Record who made a decision, when, and which values changed.
+- [ ] Refresh the ledger, review count, inventory and totals after a decision.
+- [ ] Provide a minimal manual sale/restock fallback using the same validation and stock service.
+- [ ] Clearly display rejected, corrected and reversed records without counting them incorrectly.
+
+**Acceptance:** an owner can resolve uncertainty or record a missed capture without editing the database. Two clicks or two devices cannot confirm a record twice.
+
+## 7. Dashboard, reporting and settings
+
+- [ ] Add a responsive stylesheet and usable mobile navigation, tables/cards and forms.
+- [ ] Implement clear loading, empty, error, offline, saving and success states.
+- [ ] Make controls keyboard accessible with labels, visible focus and readable contrast.
+- [ ] Add server-side daily summaries for confirmed revenue, sales count and pending reviews; use shop timezone and currency.
+- [ ] Add paginated ledger history and server-side date/type/status/product filters.
+- [ ] Finish catalogue add/edit/archive and review controls.
+- [ ] Display sales, restocks, purchase costs and stock adjustments distinctly.
+- [ ] Add basic analytics: date-range sales totals, transaction counts and product movement.
+- [ ] Add basic CSV ledger export for pilot reconciliation, protecting spreadsheet consumers from formula injection.
+- [ ] Add settings for shop details, phrases, thresholds and paired devices.
+- [ ] Display capture/device health and pending synchronisation separately from dashboard socket health.
+
+**Acceptance:** the owner can operate the pilot on a phone. Totals remain correct beyond 500 transactions and at shop-local day boundaries.
+
+## 8. Realtime consistency and recovery
+
+- [ ] Refetch state after reconnect in every mounted view.
+- [ ] Apply all transaction events by ID, including overview new-record events.
+- [ ] Implement snapshot/event sequencing or versioning so an older response cannot overwrite a newer update.
+- [ ] Handle the initial-load connection gap as well as subsequent reconnects.
+- [ ] Recover dropped events without relying on an unrelated future reconnect; choose resync signalling, version checks or periodic reconciliation.
+- [ ] Cancel/ignore obsolete view requests and clean up listeners when navigating.
+- [ ] Bound retained client-side history and maintain deterministic ledger ordering.
+
+**Acceptance:** disconnect, reconnect, delayed responses, repeated events and navigation do not lose records, duplicate totals or leave stale inventory.
+
+## 9. Tests, CI and developer workflow
+
+- [ ] Add storage tests for fresh/repeated migrations, shop isolation, atomic stock changes, rollback, insufficient stock and idempotency.
+- [ ] Add API tests for authentication, cross-shop access, malformed input, status rules and duplicate submissions.
+- [ ] Add recognition tests for aliases, amounts, quantities, boundaries, unit conversions and ambiguous captures.
+- [ ] Add review/concurrency tests proving stock changes exactly once.
+- [ ] Add WebSocket tests for shop partitioning, reconnect recovery and slow clients.
+- [ ] Add frontend tests for totals, review actions, forms, duplicate events and stale snapshots.
+- [ ] Add a microphone/fixture-driven end-to-end test covering sale, review, restock and offline retry.
+- [ ] Configure GitHub Actions for Go formatting/vet/tests and frontend typecheck/build; add Rust formatting/clippy/tests when the crate exists.
+- [ ] Add a root task runner for build, test and local development.
+- [ ] Document dependencies, configuration, migrations and test fixtures; maintain README/TODO as changes land.
+- [ ] Configure required checks when CI exists, without claiming absent checks have passed.
+
+### Required contribution workflow
+
+1. Read the current README, relevant TODO entries and any repository agent instructions.
+2. Create a focused branch from current `main`; do not push implementation directly to `main`.
+3. Make the change, verify it, and update relevant documentation.
+4. Push to that branch and open a pull request describing behaviour and validation.
+5. Inspect CI/checks on the exact PR head. If checks exist, wait for them to pass and fix failures before merging.
+6. If no CI is configured, explicitly report that fact and the checks actually performed; do not call it a CI pass.
+7. Merge only after the applicable checks and review are complete. Verify the result on `main`.
+8. Report what changed, the PR/merge, validation and remaining limitations.
+
+User-approved workflow: **create branch → push branch → wait for configured CI to pass → merge**.
+
+## 10. Deployment, privacy and operation
+
+- [ ] Document a supported deployment topology and where audio processing, database and dashboard run.
+- [ ] Serve the frontend over HTTPS with only the intended built assets/templates.
+- [ ] Keep SQLite on persistent storage; document the single-writer deployment assumptions before scaling replicas.
+- [ ] Automate backups and verify restoration into a clean environment.
+- [ ] Document migration, deployment and rollback procedures.
+- [ ] Add request IDs, actionable error logs and readiness checks; monitor device health, failed captures, queue backlog and dropped events.
+- [ ] Add suitable request limits/rate limits to capture and authentication endpoints.
+- [ ] Manage secrets through deployment configuration and keep credentials/transcripts out of unnecessary logs.
+- [ ] Add an owner/staff notice explaining listening, pausing, captured data and raw-audio handling.
+- [ ] Define transcript/ledger retention, access, export and deletion procedures.
+- [ ] Document support and recovery for a disconnected microphone, full disk, failed model load and prolonged network outage.
+
+**Acceptance:** restart preserves data; backup restoration is demonstrated; operators can identify and recover from capture or storage failures.
+
+## 11. Pilot evidence and release gates
+
+- [ ] Train staff on product + quantity + amount + the closing phrase; include the distinct restock phrase.
+- [ ] Test in one controlled shop, then 1–2 shops alongside independent existing records.
+- [ ] Record missed transactions, false captures, product/quantity/amount accuracy and full-transaction accuracy.
+- [ ] Measure correction rate, latency, offline recovery and staff protocol compliance.
+- [ ] Record hardware, model/software version and test conditions with evaluation results.
+- [ ] Agree measurable accuracy/latency/correction targets before the trial; do not invent or claim achieved targets.
+- [ ] Reconcile stock and revenue with ground truth and investigate every unexplained difference.
+- [ ] Expand to roughly five shops, then 10–15 only after the preceding trial meets the agreed gates.
+
+### MVP completion checklist
+
+- [ ] A new owner can onboard a shop and its catalogue without developer assistance.
+- [ ] A paired microphone device records real spoken sales and multi-line restocks.
+- [ ] Confirmed movements change stock exactly once; uncertain captures remain harmless until resolved.
+- [ ] Owner review/correction, manual fallback and product management work end to end.
+- [ ] Totals, inventory and history stay correct through reconnects, retries and restarts.
+- [ ] Shop isolation, device revocation, automated checks and backup/restore are verified.
+- [ ] Pilot results meet predefined targets with documented evidence.
+
+## Recommended delivery sequence
+
+| Milestone | Deliverable | Exit condition |
+|---|---|---|
+| 1. Trusted ledger | Authentication, atomic stock service, idempotency, core tests/CI | Structured sale/restock requests are secure and inventory-correct |
+| 2. Usable owner workflow | Catalogue forms, review actions, styling, summaries and realtime fixes | Owner can operate and reconcile a controlled manual-input pilot |
+| 3. Voice loop | Rust capture, STT, extraction, validation, authenticated intake and offline queue | Actual speech passes the sale/restock/review acceptance examples |
+| 4. Operational MVP | Reporting/settings, privacy controls, deployment, backup and recovery | Restart/outage/security and release checks pass |
+| 5. Evidence | Staff training and controlled shop trials | Agreed accuracy and usability gates are met |
+
+Implement a small vertical slice at each milestone; avoid marking a component complete merely because its UI or endpoint exists.
+
+## Local development — current scaffold
+
+Prerequisites: Go 1.21 or a compatible newer toolchain, a C compiler for `mattn/go-sqlite3`, and Node.js/npm for TypeScript. Rust is needed when the edge crate is implemented.
+
+Build the dashboard:
+
+```sh
+cd frontend
+npm ci
+npm run typecheck
+npm run build
+```
+
+Run the backend from a separate terminal:
+
+```sh
+cd backend
+go run . -addr 127.0.0.1:8080
+```
+
+Open `http://127.0.0.1:8080/?shop_id=shop-1#/home`. This is a local development identity, not authentication.
+
+For disposable sample data only, start with `go run . -addr 127.0.0.1:8080 -dev`, then:
+
+```sh
+curl -X POST 'http://127.0.0.1:8080/api/dev/seed?shop_id=shop-1'
+```
+
+**The seed endpoint deletes the named shop's existing data before inserting examples.** Do not use it against valuable data or expose the development server publicly.
+
+These commands describe the scaffold setup; they were not executed successfully as part of the source review.
+
+## Beyond the first MVP
+
+Dedicated rechargeable hardware, receipt-photo OCR, additional languages, overlapping speakers/multiple counters, advanced profitability/cost accounting, expenses, credit/debt management, cross-shop analytics and commercial billing remain later work. Preserve the hardware-plus-software vision while proving accurate capture on existing hardware first.
