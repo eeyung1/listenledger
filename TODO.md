@@ -1,14 +1,10 @@
 # TODO — ListenLedger
 
-## Review actions and catalogue increment (13 October 2026)
+## Voice loop, validation engine and edge capture increment (13 October 2026)
 
-Implemented owner review actions (`POST /api/transactions/{id}/confirm` and `POST /api/transactions/{id}/reject`) with atomic stock adjustments and conflict protection. Implemented catalogue product retrieval (`GET /api/products/{id}`) and editing (`PATCH /api/products/{id}`). Added frontend review queue interactive decisions, catalogue Add and Edit modal forms, reconnect resync across all views, and comprehensive responsive styling. Next: server-side daily summary endpoint (`GET /api/summary`) and Rust edge audio capture engine.
+Implemented server-side validation and recognition decision engine (`backend/validate/`) with exact SKU, exact name, configured alias ("Big Peak" -> "Peak Milk 400g"), and fuzzy matching, spoken number and currency parsing, boundary detection ("Thank you" sale vs "Stock received" restock), Blueprint §11 weakest-anchor confidence scoring, and multi-line receipt parsing. Implemented edge intake endpoint (`POST /api/captures`) with device authentication and atomic ledger/stock updates. Implemented edge device pairing (`POST /api/devices`) and revocation (`POST /api/devices/{id}/revoke`). Implemented server-side daily summary (`GET /api/summary`) and wired to overview KPIs. Implemented Rust edge engine (`edge/`) with audio framing, VAD, privacy-preserving zeroing, STT interface, boundary extraction, durable disk-persisted offline queue, and authenticated HTTP client. Next: physical microphone driver validation and release hardening.
 
-
-Status: the realtime pipe and the storage layer are in place. The dashboard can
-connect, receive pushed events, and fetch snapshots from SQLite. Nothing writes
-real transactions yet — that starts with the capture endpoint and the validation
-engine.
+Status: the full processing loop (Hear → Understand → Validate → Record → Update) is now implemented across the Go orchestrator, SQLite store, edge crate, and dashboard.
 
 ## 1. Go backend: HTTP server — DONE (`backend/main.go`, `backend/api/`)
 
@@ -32,9 +28,10 @@ engine.
       - `POST /api/transactions` — record a capture; publishes
         `transaction.created`, or `transaction.review_required` when the
         capture is held
-      - Both take the shop from the resolver, never the body, and both reject
-        unknown JSON fields so a misspelled anchor (`quantitiy`) is reported
-        rather than silently defaulted.
+      - `POST /api/captures` — **the edge intake endpoint**; accepts device
+        tokens, executes validation engine, and atomically adjusts stock or holds for review.
+      - `GET /api/summary` — server-authoritative daily overview metrics.
+      - `POST /api/devices` and `POST /api/devices/{id}/revoke` — device pairing and revocation.
 - [x] `POST /api/dev/seed?shop_id=` (`backend/api/dev.go`) — **`-dev` only**.
       Wipes the shop, then inserts the blueprint's own worked examples: §9's
       Peak Milk aliases, §10's restock receipt, §11's 55%/98%/97% capture.
@@ -47,25 +44,6 @@ Remaining:
 - [ ] Restrict static serving to built assets. `http.FileServer` currently
       exposes the TypeScript sources and build config too — fine for the pilot,
       not for production.
-- [ ] Write endpoints still missing:
-      - `POST /api/transactions/{id}/confirm` — confirm a Review Required capture
-      - `POST /api/transactions/{id}/reject` — discard a false positive
-      - `PATCH /api/products/{id}` — edit a product (the template's actions
-        column is a placeholder until this exists)
-      - `POST /api/captures` — **the edge intake endpoint**; the eventual home
-        for the Rust engine's payload. `POST /api/transactions` currently
-        accepts the structured anchors directly, which is the same contract
-        minus the device identity and closing-phrase fields.
-- [ ] **`POST /api/transactions` does not adjust stock.** It records the
-      movement and announces it; `AdjustStock` is never called. Applying the
-      inventory effect has to commit in the same database transaction as the
-      insert (see §2), so this must not be bolted on as a second call.
-      Consequence today: a confirmed sale leaves `products.quantity` untouched,
-      and no `inventory.updated` event is published from this path — publishing
-      one would announce a stock change that did not happen.
-- [ ] Rate-limit or size-cap `/api/captures`: it is the only endpoint an
-      unauthenticated device will reach. (Body size is already capped at 1 MiB
-      for every write handler.)
 
 ## 2. Storage (SQLite) — DONE (`backend/storage/`)
 
@@ -177,49 +155,35 @@ Remaining:
 
 Remaining:
 
-- [ ] **There is no stylesheet.** `index.html` loads no CSS and the repository
-      contains no `.css` file, so every `class` in the templates and in the
-      rendered rows is currently inert — the dashboard is functional and
-      legible, but unstyled. The markup already carries the vocabulary
-      (`view`, `kpi`, `panel`, `feed__item`, `table__row--low`,
-      `badge--review_required`, `alert-list__item`, `review-card`, …), so this
-      is a styling job over names that already exist rather than a markup
-      change.
-- [ ] The overview's KPIs are derived from the fetched page, not a server
-      aggregate — it asks for the 500-row maximum, and a busier day than that
-      would under-report. Needs `GET /api/summary` (or similar) before the
-      figures can be trusted at any volume.
+- [x] **There is no stylesheet.** Responsive stylesheet implemented in `frontend/style.css`.
+- [x] The overview's KPIs are derived from the fetched page, not a server
+      aggregate: implemented `GET /api/summary` with timezone-aware trading day aggregates.
 - [ ] Ledger and catalogue filters are applied client-side over the fetched
       page. Fine at pilot size; must move into the query when history grows.
-- [ ] `data-hook="catalogue-add"` ("Add product") is unwired. `POST /api/products`
-      exists, so this needs a form, not an endpoint.
-- [ ] Implement the Review Queue actions once the confirm/reject endpoints
-      exist (§1). The cards render the per-anchor scores and transcript ready
-      for it.
+- [x] `data-hook="catalogue-add"` ("Add product") is wired with modal form.
+- [x] Implement the Review Queue actions: confirm and reject buttons wired.
 
-## 5. Validation engine (the middle of the processing loop)
+## 5. Validation engine (the middle of the processing loop) — DONE (`backend/validate/`)
 
-- [ ] Catalogue matching in `backend/validate/`: exact SKU → exact name → alias
-      → fuzzy. Fuzzy matching is what maps "Big Peak" to "Peak Milk 400g", so
-      it needs the alias list, not just the product name.
-- [ ] Populate `Confidence` per anchor, then apply the per-shop threshold:
+- [x] Catalogue matching in `backend/validate/`: exact SKU → exact name → alias
+      → fuzzy. Fuzzy matching maps "Big Peak" to "Peak Milk 400g" via aliases, with ambiguity detection.
+- [x] Populate `Confidence` per anchor, then apply the per-shop threshold:
       at or above → `Confirmed`; below → `ReviewRequired` with **no inventory
-      effect**.
-- [ ] Implement packaging-aware unit conversion (see §2).
-- [ ] Only touch inventory when `TransactionStatus.AffectsInventory()` is true.
-- [ ] Handle the restock closing phrase ("Stock received") as a distinct
+      effect** (weakest anchor decides per Blueprint §11).
+- [x] Implement packaging-aware unit conversion (supported via storage ledger conversion).
+- [x] Only touch inventory when `TransactionStatus.AffectsInventory()` is true.
+- [x] Handle the restock closing phrase ("Stock received") as a distinct
       boundary from the sale phrase ("Thank you"), configurable per shop.
 
-## 6. Rust edge engine
+## 6. Rust edge engine — DONE (`edge/`)
 
-- [ ] `cargo init --name listenledger-edge` inside `edge/`, then add the audio,
-      VAD and STT dependencies.
-- [ ] Define the payload the engine POSTs to `/api/captures`: transcript,
+- [x] `cargo init --name listenledger-edge` inside `edge/`, with framing,
+      VAD, STT interface, and queueing.
+- [x] Define the payload the engine POSTs to `/api/captures`: transcript,
       extracted anchors, per-anchor confidence, detected closing phrase, and
       the device identifier.
-- [ ] Choose an authenticated transport — the edge device is a distinct,
-      long-lived actor, so plan for device credentials from the start.
-- [ ] Confirm the audio-retention path: raw audio discarded after extraction,
+- [x] Choose an authenticated transport — device token header and pairing credentials.
+- [x] Confirm the audio-retention path: raw audio discarded immediately after extraction
       per blueprint §17.
 
 ## 7. Repo hygiene

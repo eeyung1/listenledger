@@ -94,6 +94,16 @@ export interface InventorySnapshot {
   readonly generated_at: string;
 }
 
+export interface DailySummary {
+  readonly shop_id: string;
+  readonly currency: string;
+  readonly today_sales_amount: Money;
+  readonly today_sales_count: number;
+  readonly pending_reviews: number;
+  readonly low_stock_count: number;
+  readonly generated_at: string;
+}
+
 /**
  * The largest page the server will return; `limit` is clamped to this.
  *
@@ -190,6 +200,11 @@ export function fetchTransactions(
 /** GET /api/inventory — the whole catalogue for a shop. */
 export function fetchInventory(shopId: string): Promise<InventorySnapshot> {
   return getJSON<InventorySnapshot>("/api/inventory", { shop_id: shopId });
+}
+
+/** GET /api/summary — authoritative daily aggregates for the shop. */
+export function fetchSummary(shopId: string): Promise<DailySummary> {
+  return getJSON<DailySummary>("/api/summary", { shop_id: shopId });
 }
 
 export interface ReviewCorrections {

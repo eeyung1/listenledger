@@ -15,7 +15,9 @@
 import {
   MAX_TRANSACTION_LIMIT,
   fetchInventory,
+  fetchSummary,
   fetchTransactions,
+  type DailySummary,
   type Product,
   type Transaction,
 } from "../api.js";
@@ -47,6 +49,7 @@ const CONNECTION_LABELS: Readonly<Record<ConnectionStatus, string>> = {
 interface HomeState {
   transactions: Transaction[];
   products: Product[];
+  summary?: DailySummary | undefined;
 }
 
 export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
@@ -59,6 +62,14 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const connectionLabel = hook(root, "connection-status");
 
   function renderKPIs(): void {
+    if (state.summary !== undefined) {
+      setText(hook(root, "kpi-sales-today"), formatMoney(state.summary.today_sales_amount));
+      setText(hook(root, "kpi-transaction-count"), String(state.summary.today_sales_count));
+      setText(hook(root, "kpi-review-count"), String(state.summary.pending_reviews));
+      setText(hook(root, "kpi-low-stock-count"), String(state.summary.low_stock_count));
+      return;
+    }
+
     const todaySales = state.transactions.filter(
       (transaction) =>
         transaction.type === "sale" &&
@@ -152,17 +163,19 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     renderLowStock();
   }
 
-  /** Fetches both snapshots and replaces the view's state wholesale. */
+  /** Fetches transactions, inventory and daily summary snapshots and replaces state wholesale. */
   async function refetch(): Promise<void> {
     try {
-      const [transactions, inventory] = await Promise.all([
+      const [transactions, inventory, summary] = await Promise.all([
         fetchTransactions(shopId, MAX_TRANSACTION_LIMIT),
         fetchInventory(shopId),
+        fetchSummary(shopId).catch(() => undefined),
       ]);
       if (disposed) return;
 
       state.transactions = [...transactions.transactions];
       state.products = [...inventory.products];
+      state.summary = summary;
       render();
     } catch (error) {
       if (disposed) return;
@@ -189,6 +202,17 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     // The KPIs depend on the set, so they are recomputed rather than adjusted
     // incrementally — a running total is one missed event away from drifting.
     render();
+
+    // Synchronize server-authoritative aggregates in the background
+    void fetchSummary(shopId)
+      .then((summary) => {
+        if (disposed) return;
+        state.summary = summary;
+        renderKPIs();
+      })
+      .catch(() => {
+        // Fall back to local calculation if summary fetch fails
+      });
   }
 
   function applyInventory(product: Product): void {

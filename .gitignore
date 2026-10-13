@@ -14,3 +14,5 @@ edge/target/
 # Local configuration and secrets
 .env
 .env.*
+*.jsonl
+

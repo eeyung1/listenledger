@@ -1,25 +1,27 @@
 # Edge Capture Engine (Rust)
 
-Runs on the counter hardware (Android, laptop, or Raspberry Pi) and owns
-everything between the microphone and a text payload.
+Runs on the sales counter hardware (Android, laptop, or Raspberry Pi) and owns
+everything between the microphone and an authenticated intake payload delivered
+to the ListenLedger backend.
 
-Per blueprint §7A, this crate is responsible for:
+Per blueprint §7A & §17, this crate implements:
 
-- Real-time PCM audio capture
-- Voice activity detection, so silence and background noise are not processed
-- Speech-to-text using a quantized local model (e.g. Whisper via `whisper-cpp-plus`)
-- Detecting the transaction boundary — the configurable closing phrase
-- Extracting the four anchors: product, quantity, amount, boundary
-- Packaging the extracted payload and handing it to the backend orchestrator
-- Discarding raw audio once a transaction has been extracted (blueprint §17)
+- **Audio Framing & VAD (`src/audio.rs`)**: Real-time PCM audio buffer management and energy-based Voice Activity Detection to ignore ambient silence.
+- **Privacy Assurance (`src/audio.rs`)**: In-memory audio buffers are zeroed and discarded immediately following transcription; no raw voice data is stored on disk (blueprint §17).
+- **Speech-to-Text (`src/stt.rs`)**: Interface for local quantized speech-to-text models (such as Whisper via quantized GGUF/C++ bindings) with benchmarking fixtures.
+- **Boundary & Anchor Extraction (`src/extractor.rs`)**: Detects the configured closing phrase ("Thank you" for sales, "Stock received" for restocks) and structures candidate product, quantity, and amount anchors.
+- **Durable Offline Queue (`src/queue.rs`)**: Disk-backed bounded queue surviving restarts and power interruptions; keeps stable capture IDs and removes items only upon backend acknowledgment.
+- **Authenticated Delivery (`src/client.rs`)**: Posts payloads to `POST /api/captures` with device bearer tokens and shop-scoped `Idempotency-Key` headers.
 
-## Status
+## Configuration & Environment
 
-Directory placeholder. The Cargo workspace has not been initialised yet — that
-is the next step for this component:
+- `LISTENLEDGER_BACKEND_URL`: URL of the orchestrator API (defaults to `http://127.0.0.1:8080`).
+- `LISTENLEDGER_DEVICE_TOKEN`: Secret token obtained from `POST /api/devices` during device pairing.
+- `LISTENLEDGER_QUEUE_FILE`: Path to persistent queue storage (defaults to `captures_queue.jsonl`).
+
+## Building & Testing
 
 ```sh
-cargo init --name listenledger-edge
+cargo test
+cargo run --release
 ```
-
-See `../TODO.md` for the full sequencing.

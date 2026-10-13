@@ -24,6 +24,7 @@ import (
 	"github.com/eeyung1/listenledger-backend/auth"
 	"github.com/eeyung1/listenledger-backend/models"
 	"github.com/eeyung1/listenledger-backend/storage"
+	"github.com/eeyung1/listenledger-backend/validate"
 	"github.com/eeyung1/listenledger-backend/ws"
 )
 
@@ -43,10 +44,11 @@ const maxBodyBytes = 1 << 20 // 1 MiB
 
 // Server holds the dependencies shared by the handlers.
 type Server struct {
-	store       *storage.Store
-	publisher   Publisher
-	resolveShop auth.ShopResolver
-	log         *slog.Logger
+	store          *storage.Store
+	publisher      Publisher
+	resolveShop    auth.ShopResolver
+	log            *slog.Logger
+	validateEngine *validate.Engine
 }
 
 // New builds the /api/ handler tree, to be mounted at the "/api/" prefix.
@@ -62,7 +64,13 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 		resolveShop = auth.QueryShopResolver
 	}
 
-	server := &Server{store: store, publisher: publisher, resolveShop: resolveShop, log: logger}
+	server := &Server{
+		store:          store,
+		publisher:      publisher,
+		resolveShop:    resolveShop,
+		log:            logger,
+		validateEngine: validate.NewEngine(),
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/transactions", server.handleTransactions)
@@ -70,6 +78,10 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	mux.HandleFunc("/api/inventory", server.handleInventory)
 	mux.HandleFunc("/api/products", server.handleProducts)
 	mux.HandleFunc("/api/products/", server.handleProductDetail)
+	mux.HandleFunc("/api/summary", server.handleSummary)
+	mux.HandleFunc("/api/captures", server.handleCaptures)
+	mux.HandleFunc("/api/devices", server.handleDevices)
+	mux.HandleFunc("/api/devices/", server.handleDeviceDetail)
 	// Catch-all, so an unknown path under /api/ answers in JSON like every
 	// other endpoint rather than the mux's plain-text 404.
 	mux.HandleFunc("/api/", server.handleNotFound)
