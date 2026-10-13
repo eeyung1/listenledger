@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -119,4 +120,34 @@ func (s *Store) AllowAuthAttempt(ctx context.Context, key string, limit int) (bo
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// Shop contains configuration and threshold settings for a merchant.
+type Shop struct {
+	ID                  string  `json:"id"`
+	OwnerID             string  `json:"owner_id"`
+	Name                string  `json:"name"`
+	Currency            string  `json:"currency"`
+	Timezone            string  `json:"timezone"`
+	ConfidenceThreshold float64 `json:"confidence_threshold"`
+	SalePhrase          string  `json:"sale_phrase"`
+	RestockPhrase       string  `json:"restock_phrase"`
+}
+
+// GetShop retrieves a shop by ID, including its thresholds and boundary phrases.
+func (s *Store) GetShop(ctx context.Context, shopID string) (Shop, error) {
+	query := `SELECT id, owner_id, name, currency, timezone, confidence_threshold, sale_phrase, restock_phrase
+		FROM shops WHERE id = ?`
+	var sh Shop
+	err := s.db.QueryRowContext(ctx, query, shopID).Scan(
+		&sh.ID, &sh.OwnerID, &sh.Name, &sh.Currency, &sh.Timezone,
+		&sh.ConfidenceThreshold, &sh.SalePhrase, &sh.RestockPhrase,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Shop{}, ErrNotFound
+		}
+		return Shop{}, fmt.Errorf("storage: get shop %s: %w", shopID, err)
+	}
+	return sh, nil
 }
