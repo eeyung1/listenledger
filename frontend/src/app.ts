@@ -1,3 +1,4 @@
+import { requireIdentity, addAccountControls } from "./auth.js";
 /**
  * ListenLedger owner dashboard — SPA shell and router.
  *
@@ -9,7 +10,7 @@
  * events update the mounted view in place; see TODO.md.
  */
 
-import { resolveShopId, startSocket } from "./ws.js";
+import { startSocket } from "./ws.js";
 import { startViews } from "./views/index.js";
 
 /** Views that currently have a template under src/components/. */
@@ -151,11 +152,15 @@ export function startRouter(): void {
 // first ll:view-mounted is dispatched. render() awaits a template fetch, so the
 // dispatch is always a later task than this call — but binding first means
 // correctness does not depend on that timing.
-startViews({ root: appRoot(), mountedEvent: VIEW_MOUNTED_EVENT, shopId: resolveShopId() });
-
-startRouter();
-
-// Started here rather than inside the router because the socket outlives any
-// individual view: routes come and go, the connection stays. Views subscribe to
-// its DOM events once they are mounted.
-startSocket();
+async function boot(): Promise<void> {
+  try {
+    const identity = await requireIdentity();
+    addAccountControls(identity);
+    startViews({ root: appRoot(), mountedEvent: VIEW_MOUNTED_EVENT, shopId: identity.shop_id });
+    startRouter();
+    startSocket(identity.shop_id);
+  } catch (error) {
+    appRoot().textContent = error instanceof Error ? error.message : "Could not start. Please reload.";
+  }
+}
+void boot();

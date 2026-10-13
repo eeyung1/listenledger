@@ -101,8 +101,10 @@ func serve(logger *slog.Logger, cfg config) error {
 	// Both surfaces resolve the shop through the same seam, so they cannot
 	// disagree about who a caller is. Swapping auth.QueryShopResolver for a
 	// session-backed resolver changes them together.
-	mux.Handle("/ws", ws.NewHandler(hub, auth.QueryShopResolver, cfg.allowedOrigins, logger))
-	mux.Handle("/api/", api.New(store, hub, auth.QueryShopResolver, logger))
+	identity := &auth.Service{Store: store, SecureCookies: !cfg.devMode}
+	mux.Handle("/api/auth/", identity.Handler())
+	mux.Handle("/ws", ws.NewHandler(hub, identity.ResolveShop, cfg.allowedOrigins, logger))
+	mux.Handle("/api/", auth.ProtectWrites(api.New(store, hub, identity.ResolveShop, logger)))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{

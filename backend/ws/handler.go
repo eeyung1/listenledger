@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -69,6 +70,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := h.hub.newClient(conn, shopID)
+	client.authorized = func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		current, err := h.resolveShop(r.Clone(ctx))
+		return err == nil && current == shopID
+	}
 	go client.WritePump()
 	go client.ReadPump()
 }
