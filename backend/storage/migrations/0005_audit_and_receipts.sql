@@ -23,3 +23,4 @@ CREATE TABLE IF NOT EXISTS review_decisions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_review_decisions_txn ON review_decisions(shop_id, transaction_id);
+

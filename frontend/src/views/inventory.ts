@@ -172,6 +172,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
             sku,
             aliases,
             price: { amount: priceKobo, currency: existing.price.currency },
+            base_unit: unitSelect.value as Unit,
             low_stock_threshold: lowStock,
           };
           const updated = await updateProduct(existing.id, updateData);

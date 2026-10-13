@@ -24,11 +24,11 @@ Source reviewed on **13 October 2026**, at implementation commit `322d1c7`. The 
 |---|---|---|
 | Go HTTP server | Request tracing (`X-Request-ID`), panic recovery middleware, timeouts, graceful shutdown; owner sessions, shop isolation, confirm/reject, product edit, daily summary, device pairing, edge capture, settings & CSV export endpoints | Production TLS certificate provisioning |
 | SQLite storage | Online backup (`VACUUM INTO`), integrity checks, migrations, shop-scoped queries, atomic individual movements/review resolution, summaries and settings | Receipt-wide atomicity, correction/reversal audit history, PostgreSQL migration and wider recovery tests |
-| Catalogue | Create/update API, Add/Edit forms, aliases, packaging and CSV/JSON import | Alias conflict feedback, safe unit edits, archiving and audited stock corrections |
+| Catalogue | Create/update API, Add/Edit forms, aliases, packaging, CSV/JSON import, alias/SKU collision validation, historical movement guards | Safe product archiving and audited stock corrections |
 | Transactions | Structured/text capture intake, catalogue validation, atomic individual movements and review resolution, query filters, CSV export | Receipt-wide atomicity, stronger capture replay handling, full voice acceptance trials |
 | Realtime | Shop-partitioned WebSocket hub, browser reconnect/backoff, reconnect recovery across all views | Snapshot/event version reconciliation, dropped-event recovery |
-| Dashboard | Overview with daily summaries, ledger with server-side filters & pagination, CSV export, inventory search and low-stock display, interactive review decisions, product add/edit modals, settings & device management, responsive styling | Additional analytics visualizations |
-| Rust edge engine | PCM/VAD helpers, STT interface with mock recognizer, boundary helper, model download script, JSON-lines queue and authenticated HTTP client | Actual microphone/STT integration, continuous capture/retry loop, crash-safe queue and hardware benchmarking |
+| Dashboard | Overview with daily summaries, ledger with server-side filters & pagination, CSV export, inventory search and low-stock display, interactive review decisions, product add/edit modals, settings & device management, guided onboarding checklist & counter test modal | Additional analytics visualizations |
+| Rust edge engine | PCM/VAD helpers, STT interface with mock recognizer, boundary helper, model downloader, crash-safe atomic queue, recovery from corrupted entries, retry/backoff HTTP client, health diagnostics | Actual microphone/STT driver integration and hardware benchmarking |
 | Delivery quality | Go/npm dependency lockfiles, backend tests, Go/frontend/Rust CI, Makefile, backup verification tooling, runbook and scripted backend benchmark | Browser tests, real audio evaluation, genuine shop trials, corrected operational documentation |
 
 ### Implemented features — checked against the code
@@ -160,7 +160,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Complete and verify an explicit device credential rotation workflow.
 - [x] Resolve capture shop access from authenticated sessions/device tokens.
 - [x] Enforce canonical device identity on every capture, including rejection or replacement of conflicting submitted device IDs.
-- [ ] Provide a simple onboarding flow: create shop → load catalogue/opening stock → configure microphone/device → test capture.
+- [x] Provide a simple onboarding flow: create shop → load catalogue/opening stock → configure microphone/device → test capture.
 - [x] Keep destructive development endpoints disabled outside explicit local development.
 
 **Acceptance:** two test owners cannot access each other's catalogue, ledger or live feed. Revoking a device prevents further submissions. Closing a session removes access.
@@ -169,10 +169,10 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 
 - [x] Wire the Add Product form to the existing API.
 - [x] Add product editing API and UI for names, SKU, selling price, aliases, reorder threshold and packaging.
-- [ ] Validate duplicate SKUs and ambiguous aliases with clear owner feedback.
+- [x] Validate duplicate SKUs and ambiguous aliases with clear owner feedback.
 - [x] Define one base unit per product and validate packaging paths, including chained conversions such as carton → pack → bottle.
 - [x] Reject cycles, ambiguous paths, unsupported units, non-positive factors and integer overflow. MVP quantities are positive whole units.
-- [ ] Prevent base-unit/packaging edits from silently reinterpreting historical movements.
+- [x] Prevent base-unit/packaging edits from silently reinterpreting historical movements.
 - [x] Support explicit opening-stock entry and reasoned stock-count corrections with an audit trail.
 - [x] Provide product movement history and safe product archiving without deleting historical transactions.
 - [x] Hold unknown products for review; allow an owner to create or select a product before confirmation.
@@ -226,9 +226,9 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Add an authenticated HTTP capture client and demonstration payload.
 - [ ] Verify the complete real capture contract, canonical device identity and request protections against the deployed application.
 - [x] Add a capacity-limited JSON-lines queue and acknowledgment-based removal.
-- [ ] Implement continuous retry/backoff, actionable queue errors and robust restart recovery.
-- [ ] Prove queue safety across power/process failures, interrupted writes, acknowledgment loss and retries.
-- [ ] Expose microphone, model, backend and queue health with actionable errors.
+- [x] Implement continuous retry/backoff, actionable queue errors and robust restart recovery.
+- [x] Prove queue safety across power/process failures, interrupted writes, acknowledgment loss and retries.
+- [x] Expose microphone, model, backend and queue health with actionable errors.
 - [x] Add a sample-buffer clearing helper.
 - [ ] Verify raw-audio retention and cleanup in the real capture/inference path.
 - [x] Provide draft edge setup instructions and model download tooling.

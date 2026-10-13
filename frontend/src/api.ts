@@ -616,5 +616,71 @@ export function rotateDeviceToken(deviceId: string): Promise<RotateDeviceResult>
   return postJSON<RotateDeviceResult>(`/api/devices/${encodeURIComponent(deviceId)}/rotate`);
 }
 
+export interface OnboardingStep {
+  readonly completed: boolean;
+  readonly title: string;
+  readonly description: string;
+  readonly count?: number;
+}
+
+export interface OnboardingSteps {
+  readonly profile: OnboardingStep;
+  readonly catalogue: OnboardingStep;
+  readonly devices: OnboardingStep;
+  readonly test_capture: OnboardingStep;
+}
+
+export interface OnboardingStatus {
+  readonly shop_id: string;
+  readonly steps: OnboardingSteps;
+  readonly completed_steps: number;
+  readonly total_steps: number;
+  readonly is_complete: boolean;
+}
+
+export interface TestCaptureRequest {
+  readonly transcript: string;
+  readonly type?: "sale" | "restock";
+}
+
+export interface TestCaptureLine {
+  readonly product_name: string;
+  readonly matched_by: string;
+  readonly quantity: number;
+  readonly unit: Unit;
+  readonly amount: Money;
+  readonly confidence: Confidence;
+  readonly status: TransactionStatus;
+  readonly review_reasons: readonly string[];
+}
+
+export interface TestCaptureResponse {
+  readonly status: string;
+  readonly recognized: boolean;
+  readonly type: TransactionType;
+  readonly closing_phrase: string;
+  readonly boundary_detected: boolean;
+  readonly lines: readonly TestCaptureLine[];
+  readonly summary: string;
+  readonly transaction_id?: string;
+}
+
+/** GET /api/onboarding/status — fetch shop setup checklist progress. */
+export async function fetchOnboardingStatus(): Promise<OnboardingStatus> {
+  const res = await fetch("/api/onboarding/status", {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new ApiError("/api/onboarding/status", res.status);
+  }
+  return res.json() as Promise<OnboardingStatus>;
+}
+
+/** POST /api/onboarding/test-capture — interactive test capture verification. */
+export async function runTestCapture(body: TestCaptureRequest): Promise<TestCaptureResponse> {
+  return postJSON<TestCaptureResponse>("/api/onboarding/test-capture", body);
+}
+
+
 
 

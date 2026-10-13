@@ -15,9 +15,12 @@
 import {
   MAX_TRANSACTION_LIMIT,
   fetchInventory,
+  fetchOnboardingStatus,
   fetchSummary,
   fetchTransactions,
+  runTestCapture,
   type DailySummary,
+  type OnboardingStatus,
   type Product,
   type Transaction,
 } from "../api.js";
@@ -55,6 +58,7 @@ interface HomeState {
   transactions: Transaction[];
   products: Product[];
   summary?: DailySummary | undefined;
+  onboarding?: OnboardingStatus | undefined;
 }
 
 export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
@@ -65,6 +69,137 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const feedEmpty = hook(root, "live-feed-empty");
   const lowStockList = hook(root, "low-stock-list");
   const connectionLabel = hook(root, "connection-status");
+  const onboardingContainer = hook(root, "onboarding-checklist-container");
+
+  function renderOnboarding(): void {
+    if (onboardingContainer === null || state.onboarding === undefined) return;
+    clear(onboardingContainer);
+
+    const ob = state.onboarding;
+    const card = el("section", `onboarding-card ${ob.is_complete ? "onboarding-card--complete" : ""}`);
+
+    // Header
+    const header = el("div", "onboarding-card__header");
+    const title = el(
+      "h2",
+      "onboarding-card__title",
+      ob.is_complete ? "✓ Shop Setup Complete (Ambient Capture Ready)" : "Getting Started: Shop Setup Checklist",
+    );
+    const progressBadge = el(
+      "span",
+      `badge ${ob.is_complete ? "badge--confirmed" : "badge--review"}`,
+      `${ob.completed_steps} of ${ob.total_steps} Milestones`,
+    );
+    header.append(title, progressBadge);
+
+    // Progress Bar
+    const progressBar = el("div", "onboarding-progress-bar");
+    const fill = el("div", "onboarding-progress-bar__fill");
+    fill.style.width = `${(ob.completed_steps / ob.total_steps) * 100}%`;
+    progressBar.append(fill);
+
+    // 4 Step Cards
+    const stepsGrid = el("div", "onboarding-steps");
+
+    // 1. Profile
+    const step1 = el("div", `onboarding-step ${ob.steps.profile.completed ? "onboarding-step--complete" : ""}`);
+    const h1 = el("div", "onboarding-step__header");
+    h1.append(
+      el("span", "onboarding-step__icon", ob.steps.profile.completed ? "✓" : "①"),
+      el("h3", "onboarding-step__title", ob.steps.profile.title),
+    );
+    step1.append(h1, el("p", "onboarding-step__desc", ob.steps.profile.description));
+    if (!ob.steps.profile.completed) {
+      const act = el("div", "onboarding-step__action");
+      act.innerHTML = `<a href="#/settings" class="button button--sm button--secondary">Configure</a>`;
+      step1.append(act);
+    }
+    stepsGrid.append(step1);
+
+    // 2. Catalogue
+    const step2 = el("div", `onboarding-step ${ob.steps.catalogue.completed ? "onboarding-step--complete" : ""}`);
+    const h2 = el("div", "onboarding-step__header");
+    h2.append(
+      el("span", "onboarding-step__icon", ob.steps.catalogue.completed ? "✓" : "②"),
+      el("h3", "onboarding-step__title", ob.steps.catalogue.title),
+    );
+    step2.append(
+      h2,
+      el(
+        "p",
+        "onboarding-step__desc",
+        ob.steps.catalogue.completed
+          ? `${ob.steps.catalogue.count} product(s) active in catalogue`
+          : ob.steps.catalogue.description,
+      ),
+    );
+    if (!ob.steps.catalogue.completed) {
+      const act = el("div", "onboarding-step__action");
+      act.innerHTML = `<a href="#/inventory" class="button button--sm button--secondary">Add Products</a>`;
+      step2.append(act);
+    }
+    stepsGrid.append(step2);
+
+    // 3. Devices
+    const step3 = el("div", `onboarding-step ${ob.steps.devices.completed ? "onboarding-step--complete" : ""}`);
+    const h3 = el("div", "onboarding-step__header");
+    h3.append(
+      el("span", "onboarding-step__icon", ob.steps.devices.completed ? "✓" : "③"),
+      el("h3", "onboarding-step__title", ob.steps.devices.title),
+    );
+    step3.append(
+      h3,
+      el(
+        "p",
+        "onboarding-step__desc",
+        ob.steps.devices.completed
+          ? `${ob.steps.devices.count} edge device(s) paired`
+          : ob.steps.devices.description,
+      ),
+    );
+    if (!ob.steps.devices.completed) {
+      const act = el("div", "onboarding-step__action");
+      act.innerHTML = `<a href="#/settings" class="button button--sm button--secondary">Pair Device</a>`;
+      step3.append(act);
+    }
+    stepsGrid.append(step3);
+
+    // 4. Test Capture
+    const step4 = el("div", `onboarding-step ${ob.steps.test_capture.completed ? "onboarding-step--complete" : ""}`);
+    const h4 = el("div", "onboarding-step__header");
+    h4.append(
+      el("span", "onboarding-step__icon", ob.steps.test_capture.completed ? "✓" : "④"),
+      el("h3", "onboarding-step__title", ob.steps.test_capture.title),
+    );
+    step4.append(
+      h4,
+      el(
+        "p",
+        "onboarding-step__desc",
+        ob.steps.test_capture.completed
+          ? `${ob.steps.test_capture.count} capture(s) recorded in ledger`
+          : ob.steps.test_capture.description,
+      ),
+    );
+    const testAct = el("div", "onboarding-step__action");
+    const testBtn = el(
+      "button",
+      "button button--sm button--primary",
+      ob.steps.test_capture.completed ? "Test Sound Again" : "Run Audio Test",
+    );
+    testBtn.type = "button";
+    testBtn.addEventListener("click", () => {
+      showTestCaptureModal(root, () => {
+        void refetch();
+      });
+    });
+    testAct.append(testBtn);
+    step4.append(testAct);
+    stepsGrid.append(step4);
+
+    card.append(header, progressBar, stepsGrid);
+    onboardingContainer.append(card);
+  }
 
   function renderKPIs(): void {
     if (state.summary !== undefined) {
@@ -164,6 +299,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
   function render(): void {
     renderKPIs();
+    renderOnboarding();
     renderFeed();
     renderLowStock();
   }
@@ -171,16 +307,18 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   /** Fetches transactions, inventory and daily summary snapshots and replaces state wholesale. */
   async function refetch(): Promise<void> {
     try {
-      const [transactions, inventory, summary] = await Promise.all([
+      const [transactions, inventory, summary, onboarding] = await Promise.all([
         fetchTransactions(shopId, MAX_TRANSACTION_LIMIT),
         fetchInventory(shopId),
         fetchSummary(shopId).catch(() => undefined),
+        fetchOnboardingStatus().catch(() => undefined),
       ]);
       if (disposed) return;
 
       state.transactions = [...transactions.transactions];
       state.products = [...inventory.products];
       state.summary = summary;
+      state.onboarding = onboarding;
       const maxSeq = Math.max(
         transactions.last_seq ?? 0,
         inventory.last_seq ?? 0,
@@ -292,3 +430,143 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   };
 }
+
+function showTestCaptureModal(root: HTMLElement, onDone: () => void): void {
+  const existing = document.querySelector(".modal-backdrop");
+  if (existing) existing.remove();
+
+  const backdrop = el("div", "modal-backdrop");
+  const modal = el("div", "modal modal--edit-confirm");
+
+  const header = el("div", "modal__header");
+  header.append(
+    el("h2", "modal__title", "Counter Sound & Recognition Test"),
+    el(
+      "p",
+      "modal__subtitle",
+      "Simulate spoken counter phrases to test catalogue matching, boundary detection, and confidence scoring.",
+    ),
+  );
+
+  const form = el("form", "modal__form");
+  form.setAttribute("novalidate", "");
+
+  const transcriptLabel = el("label", "field");
+  transcriptLabel.append(el("span", "field__label", "Spoken Counter Phrase"));
+  const transcriptInput = document.createElement("textarea");
+  transcriptInput.rows = 2;
+  transcriptInput.required = true;
+  transcriptInput.placeholder = "e.g. Two Peak Milk, seven thousand naira. Thank you.";
+  transcriptInput.value = "Two Peak Milk, seven thousand naira. Thank you.";
+  transcriptLabel.append(transcriptInput);
+
+  // Quick fill pills
+  const pills = el("div", "quick-pills");
+  const samples = [
+    { label: "Sale: 2 Peak Milk", text: "Two Peak Milk, seven thousand naira. Thank you.", type: "sale" },
+    { label: "Sale: 1 Milo", text: "One Milo 500g, four thousand naira. Thank you.", type: "sale" },
+    { label: "Restock: 3 Cartons", text: "Three cartons of Milo. Stock received.", type: "restock" },
+  ];
+  for (const s of samples) {
+    const btn = el("button", "pill-button", s.label);
+    btn.type = "button";
+    btn.addEventListener("click", () => {
+      transcriptInput.value = s.text;
+      typeSelect.value = s.type;
+    });
+    pills.append(btn);
+  }
+  transcriptLabel.append(pills);
+
+  const typeLabel = el("label", "field");
+  typeLabel.append(el("span", "field__label", "Expected Boundary Type"));
+  const typeSelect = document.createElement("select");
+  typeSelect.innerHTML = `<option value="sale">Sale ("Thank you")</option><option value="restock">Restock ("Stock received")</option>`;
+  typeLabel.append(typeSelect);
+
+  const resultContainer = el("div", "test-capture-result");
+  resultContainer.style.display = "none";
+
+  const actions = el("div", "modal__actions");
+  const cancelBtn = el("button", "button button--secondary", "Close");
+  cancelBtn.type = "button";
+  cancelBtn.addEventListener("click", () => {
+    backdrop.remove();
+    onDone();
+  });
+
+  const submitBtn = el("button", "button button--primary", "Verify Recognition");
+  submitBtn.type = "submit";
+
+  actions.append(cancelBtn, submitBtn);
+
+  form.append(transcriptLabel, typeLabel, resultContainer, actions);
+  modal.append(header, form);
+  backdrop.append(modal);
+  root.append(backdrop);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = transcriptInput.value.trim();
+    if (!text) return;
+
+    submitBtn.disabled = true;
+    setText(submitBtn, "Verifying…");
+    clear(resultContainer);
+    resultContainer.style.display = "block";
+    resultContainer.append(el("p", "hint", "Analyzing transcript through validation engine…"));
+
+    try {
+      const res = await runTestCapture({
+        transcript: text,
+        type: typeSelect.value as "sale" | "restock",
+      });
+
+      clear(resultContainer);
+      const resHeader = el("div", "test-capture-result__header");
+      resHeader.append(
+        el("strong", "", res.recognized ? "✓ Recognition Succeeded" : "⚠ Review Required"),
+        el(
+          "span",
+          `badge ${res.recognized ? "badge--confirmed" : "badge--review"}`,
+          res.closing_phrase ? `Boundary: "${res.closing_phrase}"` : "No boundary phrase",
+        ),
+      );
+      resultContainer.append(resHeader);
+
+      const summaryText = el("p", "panel__hint", res.summary);
+      resultContainer.append(summaryText);
+
+      if (res.lines.length > 0) {
+        const linesList = el("div", "review-diff");
+        for (const line of res.lines) {
+          const lineEl = el("div", "review-diff__row");
+          const confPct = Math.round(line.confidence.overall * 100);
+          lineEl.innerHTML = `
+            <div>
+              <strong>${line.product_name}</strong> · ${line.quantity} ${line.unit} · ${formatMoney(line.amount)}
+              <div class="confidence-bar" style="margin-top: 0.35rem;">
+                <span>Confidence: ${confPct}% (${line.matched_by})</span>
+                <div class="confidence-bar__track"><div class="confidence-bar__fill" style="width: ${confPct}%;"></div></div>
+              </div>
+              ${line.review_reasons.length > 0 ? `<div style="color: #ba7d00; font-size: 0.8rem; margin-top: 0.2rem;">Hold reasons: ${line.review_reasons.join(", ")}</div>` : ""}
+            </div>
+          `;
+          linesList.append(lineEl);
+        }
+        resultContainer.append(linesList);
+      }
+
+      setText(submitBtn, "Test Again");
+      submitBtn.disabled = false;
+      cancelBtn.textContent = "Done & Close";
+    } catch (err: unknown) {
+      clear(resultContainer);
+      const msg = err instanceof Error ? err.message : String(err);
+      resultContainer.append(el("p", "error", `Verification error: ${msg}`));
+      submitBtn.disabled = false;
+      setText(submitBtn, "Verify Recognition");
+    }
+  });
+}
+
