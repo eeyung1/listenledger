@@ -38,6 +38,9 @@ type Hub struct {
 	// shops is read and written only by the Run goroutine.
 	shops map[string]map[*Client]struct{}
 
+	seqs  map[string]*atomic.Int64
+	seqMu sync.RWMutex
+
 	clients  atomic.Int64
 	dropped  atomic.Int64
 	shutdown atomic.Bool
@@ -56,6 +59,7 @@ func NewHub(logger *slog.Logger) *Hub {
 		publish:    make(chan targeted, publishBuffer),
 		done:       make(chan struct{}),
 		shops:      make(map[string]map[*Client]struct{}),
+		seqs:       make(map[string]*atomic.Int64),
 		log:        logger,
 	}
 }
@@ -134,6 +138,29 @@ func (h *Hub) ClientCount() int64 { return h.clients.Load() }
 
 // DroppedCount reports how many events have been shed since start.
 func (h *Hub) DroppedCount() int64 { return h.dropped.Load() }
+
+// nextSeq generates the next monotonic sequence number for shopID.
+func (h *Hub) nextSeq(shopID string) int64 {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+	c, ok := h.seqs[shopID]
+	if !ok {
+		c = &atomic.Int64{}
+		h.seqs[shopID] = c
+	}
+	return c.Add(1)
+}
+
+// LastSeq reports the latest sequence number generated for shopID, or 0 if none.
+func (h *Hub) LastSeq(shopID string) int64 {
+	h.seqMu.RLock()
+	defer h.seqMu.RUnlock()
+	c, ok := h.seqs[shopID]
+	if !ok {
+		return 0
+	}
+	return c.Load()
+}
 
 // Shutdown stops the hub and disconnects every client. Safe to call more than
 // once, so it can be deferred alongside an explicit call on the shutdown path.

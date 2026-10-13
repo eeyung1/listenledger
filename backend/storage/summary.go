@@ -18,6 +18,7 @@ type DailySummary struct {
 	TodaySalesCount  int          `json:"today_sales_count"`
 	PendingReviews   int          `json:"pending_reviews"`
 	LowStockCount    int          `json:"low_stock_count"`
+	LastSeq          int64        `json:"last_seq"`
 	GeneratedAt      time.Time    `json:"generated_at"`
 }
 

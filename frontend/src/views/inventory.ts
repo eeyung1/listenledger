@@ -11,8 +11,10 @@
  */
 
 import {
+  adjustProductStock,
   createProduct,
   fetchInventory,
+  fetchProductMovements,
   importCatalogue,
   updateProduct,
   type CreateProductInput,
@@ -24,13 +26,15 @@ import {
   cell,
   clear,
   el,
+  formatDate,
   formatMoney,
+  formatTime,
   formatUnit,
   hook,
   isLowStock,
   setText,
 } from "../format.js";
-import { CONNECTION_STATUS_EVENT, type ConnectionStatusDetail } from "../ws.js";
+import { CONNECTION_STATUS_EVENT, getSocket, type ConnectionStatusDetail } from "../ws.js";
 import type { ViewCleanup } from "./index.js";
 
 export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
@@ -300,6 +304,197 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     });
   }
 
+  function showStockAuditModal(product: Product): void {
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal-dialog");
+
+    const header = el("div", "modal-header");
+    const title = el("h3", "modal-title", `Stock Audit: ${product.name}`);
+    const closeBtn = el("button", "button button--secondary button--sm", "✕");
+    closeBtn.type = "button";
+    header.append(title, closeBtn);
+
+    const form = el("form", "modal-form");
+    const help = el(
+      "p",
+      "modal-help",
+      "Correct stock count to match physical shelf count. A stock adjustment movement is appended to the audit ledger.",
+    );
+
+    const currentStockLabel = el("label", "form-field", "Current Recorded Stock");
+    const currentStockInput = el("input", "input") as HTMLInputElement;
+    currentStockInput.type = "text";
+    currentStockInput.disabled = true;
+    currentStockInput.value = `${product.quantity} ${formatUnit(product.base_unit, product.quantity)}`;
+    currentStockLabel.append(currentStockInput);
+
+    const newCountLabel = el("label", "form-field", "Physical Count (Base Units) *");
+    const newCountInput = el("input", "input") as HTMLInputElement;
+    newCountInput.type = "number";
+    newCountInput.min = "0";
+    newCountInput.required = true;
+    newCountInput.value = String(product.quantity);
+    newCountLabel.append(newCountInput);
+
+    const reasonLabel = el("label", "form-field", "Audit Reason *");
+    const reasonInput = el("input", "input") as HTMLInputElement;
+    reasonInput.type = "text";
+    reasonInput.required = true;
+    reasonInput.placeholder = "e.g. Physical inventory count / Damaged goods / Spoilage";
+    reasonInput.value = "Physical inventory count reconciliation";
+    reasonLabel.append(reasonInput);
+
+    const errorMsg = el("div", "form-error");
+    errorMsg.hidden = true;
+
+    const footer = el("div", "modal-footer");
+    const cancelBtn = el("button", "button button--secondary", "Cancel");
+    cancelBtn.type = "button";
+    const submitBtn = el("button", "button button--primary", "Save Adjustment");
+    submitBtn.type = "submit";
+    footer.append(cancelBtn, submitBtn);
+
+    form.append(help, currentStockLabel, newCountLabel, reasonLabel, errorMsg, footer);
+    modal.append(header, form);
+    overlay.append(modal);
+    document.body.append(overlay);
+
+    const closeModal = (): void => {
+      overlay.remove();
+    };
+
+    closeBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorMsg.hidden = true;
+      const newCount = parseInt(newCountInput.value, 10);
+      if (isNaN(newCount) || newCount < 0) {
+        errorMsg.hidden = false;
+        errorMsg.textContent = "Physical count must be a non-negative number";
+        return;
+      }
+      const reason = reasonInput.value.trim() || "Stock count adjustment";
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Saving…";
+
+      try {
+        const res = await adjustProductStock(product.id, newCount, reason);
+        applyProduct(res.product);
+        closeModal();
+      } catch (err: unknown) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Save Adjustment";
+        errorMsg.hidden = false;
+        errorMsg.textContent = err instanceof Error ? err.message : "Failed to adjust stock";
+      }
+    });
+  }
+
+  function showMovementHistoryModal(product: Product): void {
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal-dialog modal-dialog--wide");
+
+    const header = el("div", "modal-header");
+    const title = el("h3", "modal-title", `Movement Ledger: ${product.name}`);
+    const closeBtn = el("button", "button button--secondary button--sm", "✕");
+    closeBtn.type = "button";
+    header.append(title, closeBtn);
+
+    const content = el("div", "modal-form");
+    const info = el(
+      "p",
+      "modal-help",
+      `SKU: ${product.sku} · Current stock: ${product.quantity} ${formatUnit(product.base_unit, product.quantity)}`,
+    );
+
+    const statusMsg = el("div", "status-badge", "Loading movements…");
+
+    const table = el("table", "table");
+    const thead = el("thead");
+    const headerRow = el("tr");
+    headerRow.append(
+      el("th", "", "Time"),
+      el("th", "", "Type"),
+      el("th", "", "Change"),
+      el("th", "", "Quantity"),
+      el("th", "", "Note / Tx ID"),
+    );
+    thead.append(headerRow);
+
+    const tbody = el("tbody");
+    table.append(thead, tbody);
+    table.hidden = true;
+
+    const footer = el("div", "modal-footer");
+    const doneBtn = el("button", "button button--secondary", "Close");
+    doneBtn.type = "button";
+    footer.append(doneBtn);
+
+    content.append(info, statusMsg, table, footer);
+    modal.append(header, content);
+    overlay.append(modal);
+    document.body.append(overlay);
+
+    const closeModal = (): void => {
+      overlay.remove();
+    };
+
+    closeBtn.addEventListener("click", closeModal);
+    doneBtn.addEventListener("click", closeModal);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    void fetchProductMovements(product.id).then((res) => {
+      statusMsg.hidden = true;
+      table.hidden = false;
+      clear(tbody);
+
+      if (res.movements.length === 0) {
+        const emptyRow = el("tr", "table__empty");
+        const emptyCell = cell("", "No movements recorded for this product yet.");
+        emptyCell.colSpan = 5;
+        emptyRow.append(emptyCell);
+        tbody.append(emptyRow);
+        return;
+      }
+
+      for (const m of res.movements) {
+        const tr = el("tr", "table__row");
+        const timeCell = cell("table__cell", `${formatDate(m.created_at)} ${formatTime(m.created_at)}`);
+        const typeCell = cell("table__cell", `${m.type} · ${m.status}`);
+
+        const deltaText = m.delta > 0 ? `+${m.delta}` : String(m.delta);
+        const deltaCell = cell("table__cell table__cell--mono", deltaText);
+        if (m.delta > 0) {
+          deltaCell.style.color = "#16a34a";
+        } else if (m.delta < 0) {
+          deltaCell.style.color = "#dc2626";
+        }
+
+        const quantityCell = cell(
+          "table__cell table__cell--stock",
+          `${m.quantity} ${formatUnit(m.unit, m.quantity)}`,
+        );
+
+        const noteCell = cell("table__cell table__cell--mono", m.transcript || m.transaction_id || "—");
+        noteCell.style.fontSize = "0.8rem";
+
+        tr.append(timeCell, typeCell, deltaCell, quantityCell, noteCell);
+        tbody.append(tr);
+      }
+    }).catch((err: unknown) => {
+      statusMsg.className = "status-badge status-badge--error";
+      statusMsg.textContent = err instanceof Error ? err.message : "Failed to load movements";
+    });
+  }
+
   function packagingSummary(product: Product): string {
     const rules = product.packaging ?? [];
     if (rules.length === 0) return "—";
@@ -337,7 +532,18 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     const editBtn = el("button", "button button--secondary button--sm", "Edit");
     editBtn.type = "button";
     editBtn.addEventListener("click", () => showProductModal(product));
-    actions.append(editBtn);
+
+    const auditBtn = el("button", "button button--secondary button--sm", "Audit");
+    auditBtn.type = "button";
+    auditBtn.title = "Correct stock count to match physical shelf count";
+    auditBtn.addEventListener("click", () => showStockAuditModal(product));
+
+    const historyBtn = el("button", "button button--secondary button--sm", "History");
+    historyBtn.type = "button";
+    historyBtn.title = "View product movement history ledger";
+    historyBtn.addEventListener("click", () => showMovementHistoryModal(product));
+
+    actions.append(editBtn, auditBtn, historyBtn);
 
     row.append(name, sku, aliases, price, stock, packaging, actions);
     return row;
@@ -381,6 +587,9 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     try {
       const snapshot = await fetchInventory(shopId);
       if (disposed) return;
+      if (snapshot.last_seq !== undefined) {
+        getSocket()?.syncSequence(snapshot.last_seq);
+      }
       products = [...snapshot.products];
       render();
     } catch (error) {

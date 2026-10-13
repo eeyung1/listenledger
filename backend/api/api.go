@@ -75,6 +75,7 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/transactions", server.handleTransactions)
 	mux.HandleFunc("/api/transactions/export", server.handleExport)
+	mux.HandleFunc("/api/transactions/manual", server.handleTransactionsManual)
 	mux.HandleFunc("/api/transactions/", server.handleTransactionDetail)
 	mux.HandleFunc("/api/inventory", server.handleInventory)
 	mux.HandleFunc("/api/products", server.handleProducts)
@@ -94,6 +95,20 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	handler = Recoverer(logger)(handler)
 	handler = RequestIDMiddleware(handler)
 	return handler
+}
+
+// lastSeq reports the current monotonic event sequence for the shop, or 0.
+func (s *Server) lastSeq(shopID string) int64 {
+	if s.publisher == nil {
+		return 0
+	}
+	type sequencer interface {
+		LastSeq(string) int64
+	}
+	if seqer, ok := s.publisher.(sequencer); ok {
+		return seqer.LastSeq(shopID)
+	}
+	return 0
 }
 
 // publish broadcasts an event, logging rather than failing when it is dropped.
@@ -148,6 +163,7 @@ type transactionsResponse struct {
 	Total        int                  `json:"total"`
 	Limit        int                  `json:"limit"`
 	Offset       int                  `json:"offset"`
+	LastSeq      int64                `json:"last_seq"`
 	// GeneratedAt is the instant the snapshot was taken.
 	//
 	// A client resyncing after a stream gap uses it to discard events it
@@ -164,6 +180,7 @@ type inventoryResponse struct {
 	// LowStockCount is computed here rather than by the client so the
 	// reorder rule lives in exactly one place (models.Product.IsLowStock).
 	LowStockCount int       `json:"low_stock_count"`
+	LastSeq       int64     `json:"last_seq"`
 	GeneratedAt   time.Time `json:"generated_at"`
 }
 

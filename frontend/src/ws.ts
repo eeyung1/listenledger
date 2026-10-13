@@ -24,6 +24,7 @@ export type EventType =
 export interface ServerEvent<T = unknown> {
   readonly type: EventType;
   readonly v: number;
+  readonly seq?: number | undefined;
   readonly shop_id: string;
   readonly sent_at: string;
   readonly data: T;
@@ -86,6 +87,7 @@ export class ListenLedgerSocket {
   private hasConnected = false;
   private closedByCaller = false;
   private currentStatus: ConnectionStatus = "closed";
+  private lastSeenSeq: number | null = null;
 
   constructor(options: SocketOptions) {
     this.shopId = options.shopId;
@@ -96,6 +98,17 @@ export class ListenLedgerSocket {
 
   get status(): ConnectionStatus {
     return this.currentStatus;
+  }
+
+  get lastSequence(): number | null {
+    return this.lastSeenSeq;
+  }
+
+  /** Synchronises the sequence cursor with a server snapshot. */
+  syncSequence(seq?: number): void {
+    if (typeof seq === "number" && seq > 0) {
+      this.lastSeenSeq = Math.max(this.lastSeenSeq ?? 0, seq);
+    }
   }
 
   /** Opens the connection. Safe to call when already connecting or open. */
@@ -199,6 +212,16 @@ export class ListenLedgerSocket {
         `ListenLedger: dropping event for shop "${parsed.shop_id}", expected "${this.shopId}"`,
       );
       return;
+    }
+
+    if (typeof parsed.seq === "number" && parsed.seq > 0) {
+      if (this.lastSeenSeq !== null && parsed.seq > this.lastSeenSeq + 1) {
+        console.warn(
+          `ListenLedger: sequence gap detected (expected ${this.lastSeenSeq + 1}, received ${parsed.seq}); requesting snapshot resync`,
+        );
+        this.setStatus("open", true);
+      }
+      this.lastSeenSeq = Math.max(this.lastSeenSeq ?? 0, parsed.seq);
     }
 
     window.dispatchEvent(new CustomEvent(DOM_EVENT_NAMES[parsed.type], { detail: parsed }));

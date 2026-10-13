@@ -46,6 +46,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, "compute daily summary", err)
 		return
 	}
+	summary.LastSeq = s.lastSeq(shopID)
 
 	writeJSON(w, http.StatusOK, summary)
 }

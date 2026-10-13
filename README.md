@@ -173,8 +173,8 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Define one base unit per product and validate packaging paths, including chained conversions such as carton → pack → bottle.
 - [x] Reject cycles, ambiguous paths, unsupported units, non-positive factors and integer overflow. MVP quantities are positive whole units.
 - [ ] Prevent base-unit/packaging edits from silently reinterpreting historical movements.
-- [ ] Support explicit opening-stock entry and reasoned stock-count corrections with an audit trail.
-- [ ] Provide product movement history and safe product archiving without deleting historical transactions.
+- [x] Support explicit opening-stock entry and reasoned stock-count corrections with an audit trail.
+- [x] Provide product movement history and safe product archiving without deleting historical transactions.
 - [ ] Hold unknown products for review; allow an owner to create or select a product before confirmation.
 
 **Acceptance:** an owner can set up the pilot's 20–50 products without developer commands. Restocking three cartons correctly changes stock in the configured base unit.
@@ -191,8 +191,8 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Reject arbitrary client status overrides and derive status server-side; heuristic capture validation and owner confirmation APIs now exist.
 - [ ] Validate product identity, positive quantity, monetary values, currency and confidence ranges.
 - [x] Keep sales revenue separate from purchase/restock cost and enforce the shop currency for the initial MVP.
-- [ ] Add auditable corrections/reversals so an incorrect confirmed capture can be fixed without destroying history.
-- [ ] Publish events only after commit; ensure failed event delivery can be recovered from durable state.
+- [x] Add auditable corrections/reversals so an incorrect confirmed capture can be fixed without destroying history.
+- [x] Publish events only after commit; ensure failed event delivery can be recovered from durable state.
 - [ ] Group multi-line receipts and explicitly define whether confirmation is receipt-wide or line-by-line; prevent silent partial recording.
 
 **Acceptance:** retry, simultaneous confirmation, server crash and insufficient-stock scenarios never produce partial or duplicate stock effects. Every adjustment is traceable.
@@ -244,8 +244,8 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Apply confirmation and stock movement atomically with duplicate/stale-action protection.
 - [ ] Record who made a decision, when, and which values changed.
 - [x] Refresh the ledger, review count, inventory and totals after a decision.
-- [ ] Provide a minimal manual sale/restock fallback using the same validation and stock service.
-- [ ] Clearly display rejected, corrected and reversed records without counting them incorrectly.
+- [x] Provide a minimal manual sale/restock fallback using the same validation and stock service.
+- [x] Clearly display rejected, corrected and reversed records without counting them incorrectly.
 
 **Acceptance:** an owner can resolve uncertainty or record a missed capture without editing the database. Two clicks or two devices cannot confirm a record twice.
 
@@ -256,10 +256,10 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [ ] Make controls keyboard accessible with labels, visible focus and readable contrast.
 - [x] Add server-side daily summaries for confirmed revenue, sales count and pending reviews; use shop timezone and currency.
 - [x] Add paginated ledger history and server-side date/type/status/product filters.
-- [x] Implement catalogue add/edit/import and review Confirm/Reject controls.
-- [ ] Finish catalogue archiving, correction controls and manual-entry UI.
-- [ ] Display sales, restocks, purchase costs and stock adjustments distinctly.
-- [ ] Add basic analytics: date-range sales totals, transaction counts and product movement.
+- [x] Implement catalogue add/edit/import, stock audits, manual-entry fallback and review Confirm/Reject controls.
+- [ ] Finish product archiving without deleting historical transactions.
+- [x] Display sales, restocks, purchase costs and stock adjustments distinctly.
+- [x] Add basic analytics: date-range sales totals, transaction counts and product movement.
 - [x] Add basic CSV ledger export for pilot reconciliation, protecting spreadsheet consumers from formula injection.
 - [x] Add settings for shop details, phrases, thresholds and paired devices.
 - [ ] Display capture/device health and pending synchronisation separately from dashboard socket health.
@@ -270,9 +270,9 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 
 - [x] Refetch state after reconnect in every mounted view.
 - [x] Apply all transaction events by ID, including overview new-record events.
-- [ ] Implement snapshot/event sequencing or versioning so an older response cannot overwrite a newer update.
-- [ ] Handle the initial-load connection gap as well as subsequent reconnects.
-- [ ] Recover dropped events without relying on an unrelated future reconnect; choose resync signalling, version checks or periodic reconciliation.
+- [x] Implement snapshot/event sequencing or versioning so an older response cannot overwrite a newer update.
+- [x] Handle the initial-load connection gap as well as subsequent reconnects.
+- [x] Recover dropped events without relying on an unrelated future reconnect; choose resync signalling, version checks or periodic reconciliation.
 - [ ] Cancel/ignore obsolete view requests and clean up listeners when navigating.
 - [ ] Bound retained client-side history and maintain deterministic ledger ordering.
 
