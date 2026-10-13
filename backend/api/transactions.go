@@ -1,7 +1,11 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -100,10 +104,8 @@ type createTransactionRequest struct {
 //
 // Money is in minor units (kobo): NGN 4,000 is 400000.
 //
-// NOTE: this records the movement and announces it. It does not yet adjust the
-// product's stock level. Applying the inventory effect has to happen in the
-// same database transaction as the insert, or a crash between them either loses
-// a sale or double-counts one — see TODO.md.
+// Ledger and stock commit atomically. An Idempotency-Key is required so retries
+// return the first result instead of applying stock a second time.
 func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 	shopID, ok := s.shopID(w, r)
 	if !ok {
@@ -121,31 +123,32 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A product_id the shop does not own would otherwise fail on the composite
-	// foreign key, surfacing as a 500 that tells the caller nothing. Checking
-	// here turns it into the client error it actually is.
-	if transaction.ProductID != "" {
-		if _, err := s.store.GetProductByID(r.Context(), shopID, transaction.ProductID); err != nil {
-			if errors.Is(err, storage.ErrNotFound) {
-				writeError(w, http.StatusBadRequest, "product_id does not match a product in this shop")
-				return
-			}
-			s.fail(w, r, "look up product", err)
-			return
-		}
-	}
-
-	if err := s.store.InsertTransaction(r.Context(), transaction); err != nil {
-		s.fail(w, r, "insert transaction", err)
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 128 {
+		writeError(w, 400, "Idempotency-Key is required (maximum 128 bytes)")
 		return
 	}
-
-	// Read back rather than echo the request: the response is then exactly what
-	// was stored, with the timestamps the database holds.
-	stored, err := s.store.GetTransactionByID(r.Context(), shopID, transaction.ID)
+	canonical, _ := json.Marshal(body)
+	sum := sha256.Sum256(canonical)
+	result, err := s.store.RecordMovement(r.Context(), transaction, key, hex.EncodeToString(sum[:]))
 	if err != nil {
-		s.fail(w, r, "read back transaction", err)
+		switch {
+		case errors.Is(err, storage.ErrConflict), errors.Is(err, storage.ErrInsufficientStock):
+			writeError(w, 409, err.Error())
+		case errors.Is(err, storage.ErrNotFound), errors.Is(err, models.ErrPackaging), errors.Is(err, storage.ErrCurrency), errors.Is(err, storage.ErrInvalidMovement):
+			writeError(w, 400, err.Error())
+		default:
+			s.fail(w, r, "record stock movement", err)
+		}
 		return
+	}
+	stored := result.Transaction
+	if result.Replayed {
+		writeJSON(w, 200, stored)
+		return
+	}
+	if result.Product != nil {
+		s.publish(w, r, shopID, ws.EventInventoryUpdated, *result.Product)
 	}
 
 	// The event type follows the status: a held capture is announced as such so
@@ -189,12 +192,23 @@ func (b createTransactionRequest) transaction(shopID string) (models.Transaction
 		return models.Transaction{}, errors.New("amount.amount cannot be negative")
 	}
 
-	status := b.Status
-	if status == "" {
-		status = deriveStatus(b.Confidence)
-	} else if !status.Valid() {
-		return models.Transaction{}, errors.New("status is not a recognised state")
+	if b.Status != "" {
+		return models.Transaction{}, errors.New("status is decided by the server; use review actions to change it")
 	}
+	if b.Confidence != nil {
+		scores := []float64{b.Confidence.Overall}
+		for _, score := range []*float64{b.Confidence.Product, b.Confidence.Quantity, b.Confidence.Amount} {
+			if score != nil {
+				scores = append(scores, *score)
+			}
+		}
+		for _, score := range scores {
+			if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
+				return models.Transaction{}, errors.New("confidence must be between 0 and 1")
+			}
+		}
+	}
+	status := deriveStatus(b.Confidence)
 
 	occurredAt := time.Now().UTC()
 	if b.OccurredAt != nil {
@@ -243,20 +257,13 @@ func deriveStatus(confidence *models.Confidence) models.TransactionStatus {
 		return models.StatusReviewRequired
 	}
 
-	lowest := confidence.Overall
-	scored := confidence.Overall > 0
-	for _, score := range []*float64{confidence.Product, confidence.Quantity, confidence.Amount} {
-		if score == nil {
-			continue
-		}
-		if !scored || *score < lowest {
-			lowest = *score
-			scored = true
-		}
-	}
-
-	if !scored || lowest < reviewThreshold {
+	if confidence.Product == nil || confidence.Quantity == nil || confidence.Amount == nil {
 		return models.StatusReviewRequired
+	}
+	for _, score := range []float64{confidence.Overall, *confidence.Product, *confidence.Quantity, *confidence.Amount} {
+		if score < reviewThreshold {
+			return models.StatusReviewRequired
+		}
 	}
 	return models.StatusConfirmed
 }

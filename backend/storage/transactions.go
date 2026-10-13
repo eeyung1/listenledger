@@ -43,6 +43,14 @@ const transactionColumns = `id, shop_id, type, product_id, product_name, quantit
 // validation engine concluded, and the review flow later changes only the
 // status. Nothing is lost by holding a low-confidence capture.
 func (s *Store) InsertTransaction(ctx context.Context, transaction models.Transaction) error {
+	return insertTransaction(ctx, s.db, transaction)
+}
+
+type executor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func insertTransaction(ctx context.Context, db executor, transaction models.Transaction) error {
 	if transaction.ShopID == "" {
 		return errors.New("storage: InsertTransaction requires a shop_id")
 	}
@@ -78,7 +86,7 @@ func (s *Store) InsertTransaction(ctx context.Context, transaction models.Transa
 			status, occurred_at, created_at, transcript
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-	_, err := s.db.ExecContext(ctx, query,
+	_, err := db.ExecContext(ctx, query,
 		transaction.ID, transaction.ShopID, string(transaction.Type),
 		nullString(transaction.ProductID), transaction.ProductName,
 		transaction.Quantity, string(transaction.Unit),

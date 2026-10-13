@@ -100,6 +100,9 @@ func (b createProductRequest) product(shopID string) (models.Product, error) {
 		return models.Product{}, errors.New("low_stock_threshold cannot be negative")
 	}
 
+	if err := models.ValidatePackaging(b.BaseUnit, b.Packaging); err != nil {
+		return models.Product{}, err
+	}
 	for _, relation := range b.Packaging {
 		if !relation.From.Valid() || !relation.To.Valid() {
 			return models.Product{}, errors.New("packaging from/to must be recognised units")
