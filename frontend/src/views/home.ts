@@ -33,7 +33,12 @@ import {
   isToday,
   setText,
 } from "../format.js";
-import { CONNECTION_STATUS_EVENT, type ConnectionStatus, type ConnectionStatusDetail } from "../ws.js";
+import {
+  CONNECTION_STATUS_EVENT,
+  getSocket,
+  type ConnectionStatus,
+  type ConnectionStatusDetail,
+} from "../ws.js";
 import type { ViewCleanup } from "./index.js";
 
 /** How many movements the overview feed shows before it stops growing. */
@@ -176,6 +181,14 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       state.transactions = [...transactions.transactions];
       state.products = [...inventory.products];
       state.summary = summary;
+      const maxSeq = Math.max(
+        transactions.last_seq ?? 0,
+        inventory.last_seq ?? 0,
+        summary?.last_seq ?? 0,
+      );
+      if (maxSeq > 0) {
+        getSocket()?.syncSequence(maxSeq);
+      }
       render();
     } catch (error) {
       if (disposed) return;

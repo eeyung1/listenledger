@@ -40,6 +40,7 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 		Products:      products,
 		Count:         len(products),
 		LowStockCount: lowStock,
+		LastSeq:       s.lastSeq(shopID),
 		GeneratedAt:   time.Now().UTC(),
 	})
 }

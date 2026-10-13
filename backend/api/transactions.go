@@ -135,6 +135,7 @@ func (s *Server) listTransactions(w http.ResponseWriter, r *http.Request) {
 		Total:        total,
 		Limit:        filter.Limit,
 		Offset:       filter.Offset,
+		LastSeq:      s.lastSeq(shopID),
 		GeneratedAt:  time.Now().UTC(),
 	})
 }
@@ -363,6 +364,9 @@ func (s *Server) handleTransactionDetail(w http.ResponseWriter, r *http.Request)
 		case "reject":
 			s.rejectTransaction(w, r, id)
 			return
+		case "reverse":
+			s.reverseTransaction(w, r, id)
+			return
 		}
 	}
 	writeError(w, http.StatusNotFound, "not found")
@@ -459,4 +463,188 @@ func (s *Server) rejectTransaction(w http.ResponseWriter, r *http.Request, id st
 
 	s.publish(w, r, shopID, ws.EventTransactionUpdated, result.Transaction)
 	writeJSON(w, http.StatusOK, result.Transaction)
+}
+
+type reverseTransactionRequest struct {
+	Reason string `json:"reason"`
+}
+
+type reverseResponse struct {
+	Transaction models.Transaction `json:"transaction"`
+	Reversal    models.Transaction `json:"reversal"`
+	Product     *models.Product    `json:"product,omitempty"`
+}
+
+func (s *Server) reverseTransaction(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var req reverseTransactionRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		_ = decodeJSON(w, r, &req)
+	}
+
+	res, err := s.store.ReverseTransaction(r.Context(), shopID, id, req.Reason)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrNotFound):
+			writeError(w, http.StatusNotFound, "transaction not found")
+		case errors.Is(err, storage.ErrConflict):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, storage.ErrInsufficientStock):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, models.ErrPackaging):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			s.fail(w, r, "reverse transaction", err)
+		}
+		return
+	}
+
+	if res.Product != nil {
+		s.publish(w, r, shopID, ws.EventInventoryUpdated, *res.Product)
+	}
+	s.publish(w, r, shopID, ws.EventTransactionUpdated, res.Original)
+	s.publish(w, r, shopID, ws.EventTransactionCreated, res.Reversal)
+
+	writeJSON(w, http.StatusOK, reverseResponse{
+		Transaction: res.Original,
+		Reversal:    res.Reversal,
+		Product:     res.Product,
+	})
+}
+
+type manualTransactionRequest struct {
+	Type      models.TransactionType `json:"type"`
+	ProductID string                 `json:"product_id"`
+	Quantity  int                    `json:"quantity"`
+	Unit      models.Unit            `json:"unit"`
+	Amount    *models.Money          `json:"amount,omitempty"`
+	Notes     string                 `json:"notes,omitempty"`
+}
+
+type manualTransactionResponse struct {
+	Transaction models.Transaction `json:"transaction"`
+	Product     *models.Product    `json:"product,omitempty"`
+}
+
+func (s *Server) handleTransactionsManual(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var req manualTransactionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	if !req.Type.Valid() {
+		writeError(w, http.StatusBadRequest, "type must be 'sale' or 'restock'")
+		return
+	}
+	if req.Quantity <= 0 {
+		writeError(w, http.StatusBadRequest, "quantity must be greater than zero")
+		return
+	}
+	if !req.Unit.Valid() {
+		writeError(w, http.StatusBadRequest, "unit is not a recognized packaging unit")
+		return
+	}
+	req.ProductID = strings.TrimSpace(req.ProductID)
+	if req.ProductID == "" {
+		writeError(w, http.StatusBadRequest, "product_id is required for manual entries")
+		return
+	}
+
+	product, err := s.store.GetProductByID(r.Context(), shopID, req.ProductID)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "product not found")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, "fetch product for manual transaction", err)
+		return
+	}
+
+	// Calculate or validate amount
+	amount := models.Money{Amount: 0, Currency: product.Price.Currency}
+	if req.Amount != nil && req.Amount.Amount > 0 {
+		if req.Amount.Currency != "" && req.Amount.Currency != product.Price.Currency {
+			writeError(w, http.StatusBadRequest, "currency mismatch with product currency")
+			return
+		}
+		amount = *req.Amount
+		amount.Currency = product.Price.Currency
+	} else if req.Type == models.TypeSale && product.Price.Amount > 0 {
+		// Default sale amount to catalogue unit price
+		amount = models.Money{
+			Amount:   int64(req.Quantity) * product.Price.Amount,
+			Currency: product.Price.Currency,
+		}
+	}
+
+	id, err := newID("txn_man")
+	if err != nil {
+		s.fail(w, r, "generate transaction id", err)
+		return
+	}
+
+	notes := strings.TrimSpace(req.Notes)
+	transcript := "Manual counter entry"
+	if notes != "" {
+		transcript = fmt.Sprintf("Manual counter entry: %s", notes)
+	}
+
+	now := time.Now().UTC()
+	txn := models.Transaction{
+		ID:          id,
+		ShopID:      shopID,
+		Type:        req.Type,
+		ProductID:   product.ID,
+		ProductName: product.Name,
+		Quantity:    req.Quantity,
+		Unit:        req.Unit,
+		Amount:      amount,
+		Confidence:  models.Confidence{Overall: 1.0},
+		Status:      models.StatusConfirmed,
+		OccurredAt:  now,
+		CreatedAt:   now,
+		Transcript:  transcript,
+	}
+
+	idempotencyKey := fmt.Sprintf("man_%s_%d", id, now.UnixNano())
+	payloadBytes, _ := json.Marshal(txn)
+	sum := sha256.Sum256(payloadBytes)
+	hashStr := hex.EncodeToString(sum[:])
+
+	result, err := s.store.RecordMovement(r.Context(), txn, idempotencyKey, hashStr)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrInsufficientStock):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, storage.ErrCurrency), errors.Is(err, models.ErrPackaging), errors.Is(err, storage.ErrInvalidMovement):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			s.fail(w, r, "record manual transaction", err)
+		}
+		return
+	}
+
+	if result.Product != nil {
+		s.publish(w, r, shopID, ws.EventInventoryUpdated, *result.Product)
+	}
+	s.publish(w, r, shopID, ws.EventTransactionCreated, result.Transaction)
+
+	writeJSON(w, http.StatusCreated, manualTransactionResponse{
+		Transaction: result.Transaction,
+		Product:     result.Product,
+	})
 }

@@ -61,6 +61,7 @@
         </select>
       </label>
       <div class="filters__actions">
+        <button type="button" class="button button--primary button--sm" data-hook="manual-entry">Manual Entry</button>
         <a class="button button--secondary button--sm" data-hook="export-csv" href="#" download>Export CSV</a>
       </div>
     </form>
@@ -76,12 +77,13 @@
           <th scope="col">Amount</th>
           <th scope="col">Confidence</th>
           <th scope="col">Status</th>
+          <th scope="col">Actions</th>
         </tr>
       </thead>
       <!-- Rows are appended here by the update layer. -->
       <tbody data-hook="ledger-body">
         <tr class="table__empty" data-hook="ledger-empty">
-          <td colspan="7">No transactions recorded yet.</td>
+          <td colspan="8">No transactions recorded yet.</td>
         </tr>
       </tbody>
     </table>

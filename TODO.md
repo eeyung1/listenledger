@@ -1,10 +1,14 @@
 # TODO — ListenLedger
 
+## Event Sequencing, Reversals, Manual Entry Fallback & Product Movement History increment (13 October 2026) — MILESTONE 6 COMPLETE
+
+Implemented monotonic per-shop WebSocket event sequencing (`seq`), snapshot sequence cursors (`last_seq`), gap detection, and client resync. Implemented transaction voiding/reversal (`POST /api/transactions/{id}/reverse`) with atomic inverse stock movement creation and status transition guards. Built manual counter entry fallback (`POST /api/transactions/manual`) with packaging conversions and direct ledger recording when ambient shop noise prevents speech capture. Added product movement audit history (`GET /api/products/{id}/movements`) and stock count audit corrections (`POST /api/products/{id}/adjust`). Built full frontend integration including Manual Entry modal, transaction Void button, stock count Audit modal, and Movement Ledger modal. Added SQLite store unit test suites covering migrations from empty, migration idempotency, tenant shop isolation, negative stock refusal, and non-nil empty-slice JSON encoding.
+
+Next: Production pilot rollout in partner retail shops (Mama Tolu Provisions trial cohort) & multi-line receipt grouping.
+
 ## Evidence and Controlled Trial Readiness increment (13 October 2026) — MILESTONE 5 COMPLETE
 
 Implemented automated controlled shop trial benchmark suite (`backend/eval/`), verifying 100% full-transaction accuracy, 0 inventory discrepancies, 0 revenue leakage, and sub-10ms p95 processing latency across 20 realistic scenarios (`TRIAL_REPORT.md`). Added staff training and cashier boundary phrase protocols (`STAFF_TRAINING.md`). Added bulk catalogue onboarding with downloadable CSV template (`GET /api/products/template`) and batch import endpoint (`POST /api/products/import`) wired to the frontend inventory dashboard. Hardened production static asset serving (`restrictedStaticServer` in `backend/main.go`), implemented concurrent WebSocket Hub unit test suite (`backend/ws/hub_test.go`), and added `make eval` / `make trial` task targets.
-
-Next: Production pilot rollout in partner retail shops (Mama Tolu Provisions trial cohort).
 
 ## 1. Go backend: HTTP server — DONE (`backend/main.go`, `backend/api/`)
 
@@ -78,15 +82,11 @@ Remaining:
       must not be allowed near stock levels. The seed data deliberately contains
       such a transaction (`txn_seed_0005`, 3 cartons of Milo against a product
       stocked in packs) so the gap is visible rather than latent.
-- [ ] **Resolving a review must be atomic.** `UpdateTransactionStatus` changes
-      the status only. Confirming a held capture has to update the row *and*
-      apply its inventory effect in one transaction, or a crash between them
-      either loses a sale or double-counts one. Build this as a service method
-      wrapping both, and publish the WebSocket event only after it commits.
-      This is the same missing method that blocks §1's stock adjustment.
-- [ ] Store tests: migration from empty, migration idempotency, shop isolation
+- [x] **Resolving a review must be atomic.** `ConfirmReviewTransaction` changes
+      the status, updates quantity in one transaction, and publishes the event.
+- [x] Store tests: migration from empty, migration idempotency, shop isolation
       (a query for shop A must never return shop B's rows), `AdjustStock`
-      refusing a negative result, and empty-slice JSON encoding.
+      refusing a negative result, and empty-slice JSON encoding (`backend/storage/store_test.go`, `backend/storage/movements_test.go`).
 - [ ] Consider `sqlc` or hand-written query constants once the query count
       grows; the current `const query = ...` blocks are fine at this size.
 

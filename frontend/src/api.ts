@@ -90,6 +90,7 @@ export interface TransactionsSnapshot {
   readonly total?: number | undefined;
   readonly limit: number;
   readonly offset?: number | undefined;
+  readonly last_seq?: number | undefined;
   /**
    * The instant the snapshot was taken. A client resyncing after a stream gap
    * uses it to discard events older than this: they are already reflected in
@@ -103,6 +104,7 @@ export interface InventorySnapshot {
   readonly products: readonly Product[];
   readonly count: number;
   readonly low_stock_count: number;
+  readonly last_seq?: number | undefined;
   readonly generated_at: string;
 }
 
@@ -113,6 +115,7 @@ export interface DailySummary {
   readonly today_sales_count: number;
   readonly pending_reviews: number;
   readonly low_stock_count: number;
+  readonly last_seq?: number | undefined;
   readonly generated_at: string;
 }
 
@@ -385,6 +388,138 @@ export async function importCatalogue(
     throw new Error(msg);
   }
   return res.json() as Promise<ImportCatalogueResult>;
+}
+
+export interface ManualTransactionInput {
+  type: TransactionType;
+  product_id: string;
+  quantity: number;
+  unit: Unit;
+  amount?: Money | undefined;
+  notes?: string | undefined;
+}
+
+/** POST /api/transactions/manual — record a manual sale or restock fallback. */
+export async function createManualTransaction(
+  input: ManualTransactionInput,
+): Promise<{ transaction: Transaction; product?: Product }> {
+  const res = await fetch("/api/transactions/manual", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-ListenLedger-Request": "1",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed.error) msg = parsed.error;
+    } catch {
+      if (text) msg = text;
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<{ transaction: Transaction; product?: Product }>;
+}
+
+/** POST /api/transactions/{id}/reverse — void an errant confirmed transaction. */
+export async function reverseTransaction(
+  transactionId: string,
+  reason?: string,
+): Promise<{ transaction: Transaction; reversal: Transaction; product?: Product }> {
+  const res = await fetch(`/api/transactions/${encodeURIComponent(transactionId)}/reverse`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-ListenLedger-Request": "1",
+    },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed.error) msg = parsed.error;
+    } catch {
+      if (text) msg = text;
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<{ transaction: Transaction; reversal: Transaction; product?: Product }>;
+}
+
+export interface ProductMovement {
+  readonly transaction_id: string;
+  readonly shop_id: string;
+  readonly product_id: string;
+  readonly product_name: string;
+  readonly type: TransactionType;
+  readonly status: TransactionStatus;
+  readonly quantity: number;
+  readonly unit: Unit;
+  readonly delta: number;
+  readonly created_at: string;
+  readonly transcript?: string;
+}
+
+export interface ProductMovementsResult {
+  readonly shop_id: string;
+  readonly product_id: string;
+  readonly movements: readonly ProductMovement[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/** GET /api/products/{id}/movements — query stock movement history. */
+export async function fetchProductMovements(
+  productId: string,
+  limit = 50,
+  offset = 0,
+): Promise<ProductMovementsResult> {
+  const url = new URL(`/api/products/${encodeURIComponent(productId)}/movements`, window.location.origin);
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("offset", String(offset));
+
+  const res = await fetch(url.toString(), {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new ApiError(url.pathname, res.status);
+  }
+  return res.json() as Promise<ProductMovementsResult>;
+}
+
+/** POST /api/products/{id}/adjust — physical stock count correction with an audit trail. */
+export async function adjustProductStock(
+  productId: string,
+  quantity: number,
+  reason: string,
+): Promise<{ product: Product; transaction: Transaction }> {
+  const res = await fetch(`/api/products/${encodeURIComponent(productId)}/adjust`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-ListenLedger-Request": "1",
+    },
+    body: JSON.stringify({ quantity, reason }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed.error) msg = parsed.error;
+    } catch {
+      if (text) msg = text;
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<{ product: Product; transaction: Transaction }>;
 }
 
 

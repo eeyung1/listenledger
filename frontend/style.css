@@ -416,6 +416,12 @@ a {
   padding: 2rem;
 }
 
+.table__cell--actions {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
 /* Review Cards */
 .review-card {
   background: #fffdfa;
@@ -493,6 +499,10 @@ a {
   overflow-y: auto;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
   display: grid;
+}
+
+.modal-dialog--wide {
+  max-width: 680px;
 }
 
 .modal-header {

@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/eeyung1/listenledger-backend/models"
@@ -141,24 +142,47 @@ func (b createProductRequest) product(shopID string) (models.Product, error) {
 	}, nil
 }
 
-// handleProductDetail serves GET and PATCH/PUT on /api/products/{id}.
+// handleProductDetail serves GET and PATCH/PUT on /api/products/{id},
+// as well as /api/products/{id}/movements and /api/products/{id}/adjust.
 func (s *Server) handleProductDetail(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/products/")
-	id = strings.TrimSpace(id)
-	if id == "" {
-		writeError(w, http.StatusNotFound, "not found")
+	rel := strings.TrimPrefix(r.URL.Path, "/api/products/")
+	parts := strings.Split(rel, "/")
+	if len(parts) == 1 && parts[0] != "" {
+		id := parts[0]
+		switch r.Method {
+		case http.MethodGet:
+			s.getProduct(w, r, id)
+		case http.MethodPatch, http.MethodPut:
+			s.updateProduct(w, r, id)
+		default:
+			w.Header().Set("Allow", http.MethodGet+", "+http.MethodPatch+", "+http.MethodPut)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
 		return
 	}
-
-	switch r.Method {
-	case http.MethodGet:
-		s.getProduct(w, r, id)
-	case http.MethodPatch, http.MethodPut:
-		s.updateProduct(w, r, id)
-	default:
-		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPatch+", "+http.MethodPut)
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	if len(parts) == 2 && parts[0] != "" {
+		id := parts[0]
+		action := parts[1]
+		switch action {
+		case "movements":
+			if r.Method != http.MethodGet {
+				w.Header().Set("Allow", http.MethodGet)
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			s.getProductMovements(w, r, id)
+			return
+		case "adjust":
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", http.MethodPost)
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			s.adjustProductStock(w, r, id)
+			return
+		}
 	}
+	writeError(w, http.StatusNotFound, "not found")
 }
 
 func (s *Server) getProduct(w http.ResponseWriter, r *http.Request, id string) {
@@ -285,4 +309,95 @@ func (s *Server) updateProduct(w http.ResponseWriter, r *http.Request, id string
 
 	s.publish(w, r, shopID, ws.EventInventoryUpdated, updated)
 	writeJSON(w, http.StatusOK, updated)
+}
+
+type productMovementsResponse struct {
+	ShopID    string                    `json:"shop_id"`
+	ProductID string                    `json:"product_id"`
+	Movements []storage.ProductMovement `json:"movements"`
+	Total     int                       `json:"total"`
+	Limit     int                       `json:"limit"`
+	Offset    int                       `json:"offset"`
+}
+
+func (s *Server) getProductMovements(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	limit := 50
+	offset := 0
+	q := r.URL.Query()
+	if rawLimit := strings.TrimSpace(q.Get("limit")); rawLimit != "" {
+		if l, err := strconv.Atoi(rawLimit); err == nil && l > 0 {
+			limit = storage.ClampLimit(l)
+		}
+	}
+	if rawOffset := strings.TrimSpace(q.Get("offset")); rawOffset != "" {
+		if o, err := strconv.Atoi(rawOffset); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	movements, total, err := s.store.GetProductMovements(r.Context(), shopID, id, limit, offset)
+	if err != nil {
+		s.fail(w, r, "fetch product movements", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, productMovementsResponse{
+		ShopID:    shopID,
+		ProductID: id,
+		Movements: movements,
+		Total:     total,
+		Limit:     limit,
+		Offset:    offset,
+	})
+}
+
+type adjustStockRequest struct {
+	Quantity int    `json:"quantity"`
+	Reason   string `json:"reason"`
+}
+
+type adjustStockResponse struct {
+	Product     models.Product     `json:"product"`
+	Transaction models.Transaction `json:"transaction"`
+}
+
+func (s *Server) adjustProductStock(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var req adjustStockRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Quantity < 0 {
+		writeError(w, http.StatusBadRequest, "quantity cannot be negative")
+		return
+	}
+
+	product, txn, err := s.store.AdjustProductStock(r.Context(), shopID, id, req.Quantity, req.Reason)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "product not found")
+			return
+		}
+		s.fail(w, r, "adjust product stock", err)
+		return
+	}
+
+	s.publish(w, r, shopID, ws.EventInventoryUpdated, product)
+	if txn.ID != "" {
+		s.publish(w, r, shopID, ws.EventTransactionCreated, txn)
+	}
+
+	writeJSON(w, http.StatusOK, adjustStockResponse{
+		Product:     product,
+		Transaction: txn,
+	})
 }

@@ -48,6 +48,9 @@ type Event struct {
 	// Version is the protocol version, always ProtocolVersion for events
 	// produced here.
 	Version int `json:"v"`
+	// Seq is the monotonic per-shop event sequence number, allowing clients
+	// to detect gaps and determine event ordering relative to snapshot state.
+	Seq int64 `json:"seq,omitempty"`
 	// ShopID is the tenant this event belongs to. The hub routes on it, and
 	// re-checks it against the receiving client, so an event can never reach
 	// another business's dashboard.
@@ -59,11 +62,13 @@ type Event struct {
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
-// NewEvent builds an event, marshalling payload into Data.
-//
-// A nil payload yields an event with no data field, which is valid: some
-// events only signal that something changed.
+// NewEvent builds an event with no sequence number.
 func NewEvent(shopID string, eventType EventType, payload any) (Event, error) {
+	return NewEventWithSeq(shopID, eventType, 0, payload)
+}
+
+// NewEventWithSeq builds an event with an explicit monotonic sequence number.
+func NewEventWithSeq(shopID string, eventType EventType, seq int64, payload any) (Event, error) {
 	if shopID == "" {
 		return Event{}, fmt.Errorf("ws: event %s has no shop_id", eventType)
 	}
@@ -80,6 +85,7 @@ func NewEvent(shopID string, eventType EventType, payload any) (Event, error) {
 	return Event{
 		Type:    eventType,
 		Version: ProtocolVersion,
+		Seq:     seq,
 		ShopID:  shopID,
 		SentAt:  time.Now().UTC(),
 		Data:    data,
@@ -98,7 +104,8 @@ func NewEvent(shopID string, eventType EventType, payload any) (Event, error) {
 // may log it, but should not fail the request over it — dashboards resync
 // after a reconnect.
 func (h *Hub) Publish(shopID string, eventType EventType, payload any) bool {
-	event, err := NewEvent(shopID, eventType, payload)
+	seq := h.nextSeq(shopID)
+	event, err := NewEventWithSeq(shopID, eventType, seq, payload)
 	if err != nil {
 		h.log.Error("ws: build event", "type", eventType, "shop_id", shopID, "error", err)
 		return false
