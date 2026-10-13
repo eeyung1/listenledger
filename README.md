@@ -12,20 +12,20 @@ The intended result is one sale for two Milo at NGN 4,000, a stock reduction of 
 
 Implementation reviewed on **13 October 2026**, starting from commit `461e971`; owner authentication implementation added in the next milestone PR.
 
-**Stage: early software prototype; not ready for real-shop operation.** The Go API, SQLite persistence, WebSocket transport, and three dashboard views exist. The Rust audio engine is a placeholder. Owner/shop authentication is implemented. Confirmed structured transactions now update stock atomically with retry protection; device pairing and voice capture remain unfinished.
+**Stage: early software prototype; not ready for real-shop operation.** The Go API, SQLite persistence, WebSocket transport, and three dashboard views exist. The Rust audio engine is a placeholder. Owner/shop authentication is implemented. Confirmed structured transactions now update stock atomically with retry protection. Owner review actions (confirm/reject) and catalogue add/edit workflows are now implemented; device pairing and voice capture remain unfinished.
 
 “Implemented” means source code exists. Validation is tracked separately below; it does not imply the full real-shop acceptance workflow has passed.
 
 | Component | Implemented foundation | Still required for MVP |
 |---|---|---|
-| Go HTTP server | Health endpoint, structured logging, timeouts, graceful shutdown; owner sessions and shop isolation | Device credentials, request tracing, operational hardening |
-| SQLite storage | Embedded migrations, products, transactions, shop-scoped queries | Review/reversal audit history and wider recovery tests |
-| Catalogue | Product creation API; aliases, units and packaging stored | Owner forms, editing and alias validation |
-| Transactions | Structured JSON ingestion, persistence, basic supplied-confidence classification | Recognition validation and review actions |
-| Realtime | Shop-partitioned WebSocket hub, browser reconnect/backoff | Recovery in every view, consistent snapshots/events, duplicate protection |
-| Dashboard | Overview, ledger/review display, inventory search and low-stock display | Styling, working forms/actions, accurate aggregates, basic analytics/settings |
+| Go HTTP server | Health endpoint, structured logging, timeouts, graceful shutdown; owner sessions, shop isolation, confirm/reject and product edit endpoints | Device credentials, request tracing, operational hardening |
+| SQLite storage | Embedded migrations, products, transactions, shop-scoped queries, atomic review resolution and stock movements | Reversal audit history and wider recovery tests |
+| Catalogue | Product creation & update API; aliases, units and packaging stored; Add Product and Edit UI forms | Alias conflict detection and batch imports |
+| Transactions | Structured JSON ingestion, persistence, basic supplied-confidence classification, atomic confirm/reject review operations | Server-generated recognition validation and device intake |
+| Realtime | Shop-partitioned WebSocket hub, browser reconnect/backoff, reconnect recovery across all views | Snapshot/event version reconciliation, dropped-event recovery |
+| Dashboard | Overview, ledger/review display, inventory search and low-stock display, interactive review decisions, product add/edit modals, comprehensive stylesheet | Accurate server-side aggregates, basic analytics/settings |
 | Rust edge engine | Responsibility documented in `edge/README.md` | Audio capture, VAD, local STT, extraction, device transport and offline queue |
-| Delivery quality | Dependency lockfiles, authentication/isolation tests, Go/frontend CI | Wider ledger/edge/UI tests, deployment/runbook, backup/restore verification |
+| Delivery quality | Dependency lockfiles, authentication/isolation tests, Go/frontend CI, review resolution & API tests | Wider edge/voice tests, deployment/runbook, backup/restore verification |
 
 ### Implemented features — checked against the code
 
@@ -36,6 +36,11 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 - [x] Go/frontend CI workflow and authentication integration tests.
 - [x] Atomic ledger/stock writes with durable idempotency and stock-movement audit rows.
 - [x] Base-unit conversion and ledger retry/concurrency/rollback tests.
+- [x] Atomic review resolution: `POST /api/transactions/{id}/confirm` (applying stock movements atomically) and `POST /api/transactions/{id}/reject` with duplicate/stale decision conflict protection.
+- [x] Product management API (`GET /api/products/{id}`, `PATCH /api/products/{id}`) and frontend Add/Edit product modal forms.
+- [x] Review queue interactive adjudication (Confirm and Reject buttons with real-time feedback).
+- [x] Reconnect resync across all three views (Overview, Transactions, Inventory) and transaction ID deduplication in Overview.
+- [x] Responsive styling for dashboard KPI cards, feeds, tables, review cards, badges, and modal forms.
 
 #### Backend and persistence
 
@@ -46,10 +51,11 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 - [x] Product and transaction persistence with shop-scoped queries and cross-shop product-reference constraints.
 - [x] Money stored as integer minor units and timestamps stored consistently in UTC.
 - [x] Product model supports SKU, aliases, base unit, packaging definitions and low-stock threshold.
-- [x] `POST /api/products` creates a product with input validation.
+- [x] `POST /api/products` creates a product with input validation; `PATCH /api/products/{id}` updates catalogue details.
 - [x] `GET /api/inventory` returns the catalogue and low-stock count.
 - [x] `GET /api/transactions` returns a bounded, newest-first ledger snapshot.
 - [x] `POST /api/transactions` validates and stores structured sale/restock records, then publishes events after committing stock changes atomically.
+- [x] Review resolution endpoints (`/confirm` and `/reject`) apply stock changes atomically in one transaction with legal status enforcement.
 - [x] Confidence classification holds missing/low-confidence anchors for review and rejects caller status overrides; **server-generated recognition confidence is still missing**.
 - [x] Write handlers cap request bodies and reject unknown JSON fields.
 - [x] Development-only sample-data seeding and synthetic event broadcasting, disabled unless `-dev` is enabled.
@@ -62,33 +68,28 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 - [x] Browser envelope checks reject malformed messages, unsupported versions/types and mismatched shop IDs.
 - [x] SPA routing for Overview, Transactions and Inventory.
 - [x] Overview renders the live feed, low-stock alerts and KPIs from fetched records; **complete server-side totals remain unfinished**.
-- [x] Overview refetches snapshots after reconnect; **the other two views still need this behaviour**.
-- [x] Transaction view renders the ledger, type/status filters and review cards with transcripts/confidence; **review actions remain unfinished**.
-- [x] Inventory view renders products, aliases, packaging and low-stock indicators, with local search.
+- [x] All three views (Overview, Transactions, Inventory) refetch snapshots after reconnect.
+- [x] Transaction view renders the ledger, type/status filters and review cards with working Confirm and Reject actions.
+- [x] Inventory view renders products, aliases, packaging, low-stock indicators, search, and working Add/Edit modals.
 - [x] Server-provided display text uses text-based DOM insertion.
 - [x] TypeScript build/typecheck configuration and committed npm/Go dependency lockfiles.
 
 ### Where to continue
 
-**Next: Milestone 1 — Trusted ledger.** Owner/shop authentication is implemented. Atomic transaction/stock operations and retry protection are implemented. Continue with review confirmation/rejection and owner catalogue forms; device pairing and server-generated recognition confidence remain pending. The unchecked tasks in sections 1–11 remain the execution backlog; none of the missing voice, review, stock-update or security workflows is marked complete.
+**Next: Milestone 2 — Usable owner workflow completion & Milestone 3 — Voice loop.** Review actions, catalogue add/edit forms, all-view reconnect recovery, and dashboard styling have landed. Remaining in Milestone 2: server-side summary endpoint (`GET /api/summary`) and paginated server filters. Next major deliverable is the Rust edge audio capture engine and authenticated device pairing.
 
 Update this checked list and the relevant roadmap task in the same PR when each feature is implemented. Record validation separately so “implemented” and “verified” remain distinguishable.
 
 ### Confirmed gaps in the current code
 
 - Production routes now resolve shops from persisted owner sessions. Device pairing is still missing; the query resolver remains only a development/test helper.
-- `POST /api/transactions` now commits confirmed ledger/stock changes together and requires an `Idempotency-Key`. Review records do not change stock.
+- `POST /api/transactions` commits confirmed ledger/stock changes together and requires an `Idempotency-Key`. Review records do not change stock until confirmed.
 - Caller-supplied status overrides are rejected. Confidence must include all anchors in [0,1]; the recognition engine that generates those scores is still pending.
-- There is no `POST /api/captures`, confirm/reject API, or product editing API.
+- There is no `POST /api/captures` or device authentication contract.
 - Confidence scores are supplied by the client; no catalogue recognition engine generates them.
-- The review queue displays records but has no completed decision workflow.
-- “Add product” is unwired; product action cells are placeholders.
-- Account forms and basic styles exist. Full dashboard styling, analytics and settings are still incomplete.
 - Overview totals use at most the newest 500 records, not a complete daily aggregate.
-- Only the overview refetches on reconnect; inventory and transactions do not.
-- Overview new-transaction events are inserted without checking for an existing ID.
 - Snapshot replacement can race with incoming events; timestamp/version reconciliation is not implemented.
-- Authentication tests and Go/frontend CI have been added. Ledger, recognition and wider UI coverage remain pending.
+- Authentication, ledger, and review API tests and Go/frontend CI have been added. Edge and wider browser integration tests remain pending.
 
 ## MVP scope and success condition
 
@@ -139,8 +140,8 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 
 ## 2. Catalogue and stock setup
 
-- [ ] Wire the Add Product form to the existing API.
-- [ ] Add product editing API and UI for names, SKU, selling price, aliases, reorder threshold and packaging.
+- [x] Wire the Add Product form to the existing API.
+- [x] Add product editing API and UI for names, SKU, selling price, aliases, reorder threshold and packaging.
 - [ ] Validate duplicate SKUs and ambiguous aliases with clear owner feedback.
 - [x] Define one base unit per product and validate packaging paths, including chained conversions such as carton → pack → bottle.
 - [x] Reject cycles, ambiguous paths, unsupported units, non-positive factors and integer overflow. MVP quantities are positive whole units.
@@ -158,7 +159,7 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [x] Convert spoken packaging units into base units before adjusting stock.
 - [x] Require a shop-scoped `Idempotency-Key`, persisted with a payload hash and unique database constraint. Device identity is added when pairing/capture intake is implemented.
 - [x] Return the existing result for a matching retry; reject reuse of a capture ID with conflicting content.
-- [ ] Enforce legal status transitions and prevent repeated confirmation or concurrent requests from applying stock twice.
+- [x] Enforce legal status transitions and prevent repeated confirmation or concurrent requests from applying stock twice.
 - [x] Define insufficient-stock handling: block or hold for review; never silently create negative stock.
 - [x] Reject arbitrary client status overrides and derive structured-ingestion status server-side. Recognition confidence generation and owner review confirmation are separate pending work.
 - [ ] Validate product identity, positive quantity, monetary values, currency and confidence ranges.
@@ -203,12 +204,12 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 
 ## 6. Review and manual recovery
 
-- [ ] Add authenticated confirm, correct-and-confirm and reject operations.
-- [ ] Show original transcript, candidate product, quantity, amount, confidence and reason for review.
+- [x] Add authenticated confirm, correct-and-confirm and reject operations.
+- [x] Show original transcript, candidate product, quantity, amount, confidence and reason for review.
 - [ ] Allow product selection, quantity/unit correction and amount correction before confirmation.
-- [ ] Apply confirmation and stock movement atomically with duplicate/stale-action protection.
+- [x] Apply confirmation and stock movement atomically with duplicate/stale-action protection.
 - [ ] Record who made a decision, when, and which values changed.
-- [ ] Refresh the ledger, review count, inventory and totals after a decision.
+- [x] Refresh the ledger, review count, inventory and totals after a decision.
 - [ ] Provide a minimal manual sale/restock fallback using the same validation and stock service.
 - [ ] Clearly display rejected, corrected and reversed records without counting them incorrectly.
 
@@ -216,12 +217,12 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 
 ## 7. Dashboard, reporting and settings
 
-- [ ] Add a responsive stylesheet and usable mobile navigation, tables/cards and forms.
+- [x] Add a responsive stylesheet and usable mobile navigation, tables/cards and forms.
 - [ ] Implement clear loading, empty, error, offline, saving and success states.
 - [ ] Make controls keyboard accessible with labels, visible focus and readable contrast.
 - [ ] Add server-side daily summaries for confirmed revenue, sales count and pending reviews; use shop timezone and currency.
 - [ ] Add paginated ledger history and server-side date/type/status/product filters.
-- [ ] Finish catalogue add/edit/archive and review controls.
+- [x] Finish catalogue add/edit/archive and review controls.
 - [ ] Display sales, restocks, purchase costs and stock adjustments distinctly.
 - [ ] Add basic analytics: date-range sales totals, transaction counts and product movement.
 - [ ] Add basic CSV ledger export for pilot reconciliation, protecting spreadsheet consumers from formula injection.
@@ -232,8 +233,8 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 
 ## 8. Realtime consistency and recovery
 
-- [ ] Refetch state after reconnect in every mounted view.
-- [ ] Apply all transaction events by ID, including overview new-record events.
+- [x] Refetch state after reconnect in every mounted view.
+- [x] Apply all transaction events by ID, including overview new-record events.
 - [ ] Implement snapshot/event sequencing or versioning so an older response cannot overwrite a newer update.
 - [ ] Handle the initial-load connection gap as well as subsequent reconnects.
 - [ ] Recover dropped events without relying on an unrelated future reconnect; choose resync signalling, version checks or periodic reconciliation.

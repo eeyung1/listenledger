@@ -107,11 +107,13 @@ export const MAX_TRANSACTION_LIMIT = 500;
 /** Raised when the server answers with a non-2xx status. */
 export class ApiError extends Error {
   readonly status: number;
+  readonly serverMessage?: string | undefined;
 
-  constructor(path: string, status: number) {
-    super(`${path} answered HTTP ${status}`);
+  constructor(path: string, status: number, serverMessage?: string) {
+    super(serverMessage ? `${path} answered HTTP ${status}: ${serverMessage}` : `${path} answered HTTP ${status}`);
     this.name = "ApiError";
     this.status = status;
+    this.serverMessage = serverMessage;
   }
 }
 
@@ -124,6 +126,52 @@ async function getJSON<T>(path: string, params: Record<string, string>): Promise
   const response = await fetch(url, { headers: { Accept: "application/json" } });
   if (!response.ok) {
     throw new ApiError(path, response.status);
+  }
+  return (await response.json()) as T;
+}
+
+async function postJSON<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "X-ListenLedger-Request": "1",
+    },
+    body: body !== undefined ? JSON.stringify(body) : JSON.stringify({}),
+  });
+  if (!response.ok) {
+    let msg = "";
+    try {
+      const err = await response.json();
+      msg = err.error || err.message;
+    } catch {
+      // ignore non-json errors
+    }
+    throw new ApiError(path, response.status, msg || undefined);
+  }
+  return (await response.json()) as T;
+}
+
+async function patchJSON<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "X-ListenLedger-Request": "1",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    let msg = "";
+    try {
+      const err = await response.json();
+      msg = err.error || err.message;
+    } catch {
+      // ignore non-json errors
+    }
+    throw new ApiError(path, response.status, msg || undefined);
   }
   return (await response.json()) as T;
 }
@@ -142,4 +190,55 @@ export function fetchTransactions(
 /** GET /api/inventory — the whole catalogue for a shop. */
 export function fetchInventory(shopId: string): Promise<InventorySnapshot> {
   return getJSON<InventorySnapshot>("/api/inventory", { shop_id: shopId });
+}
+
+export interface ReviewCorrections {
+  product_id?: string;
+  quantity?: number;
+  unit?: Unit;
+  amount?: Money;
+}
+
+/** POST /api/transactions/{id}/confirm — confirm a held review transaction and apply stock. */
+export function confirmTransaction(
+  id: string,
+  corrections?: ReviewCorrections,
+): Promise<Transaction> {
+  return postJSON<Transaction>(`/api/transactions/${encodeURIComponent(id)}/confirm`, corrections);
+}
+
+/** POST /api/transactions/{id}/reject — discard a held review transaction. */
+export function rejectTransaction(id: string): Promise<Transaction> {
+  return postJSON<Transaction>(`/api/transactions/${encodeURIComponent(id)}/reject`);
+}
+
+export interface CreateProductInput {
+  name: string;
+  sku: string;
+  aliases: string[];
+  price: Money;
+  quantity: number;
+  base_unit: Unit;
+  packaging?: PackagingRelation[];
+  low_stock_threshold?: number;
+}
+
+/** POST /api/products — add a new product to the catalogue. */
+export function createProduct(input: CreateProductInput): Promise<Product> {
+  return postJSON<Product>("/api/products", input);
+}
+
+export interface UpdateProductInput {
+  name?: string;
+  sku?: string;
+  aliases?: string[];
+  price?: Money;
+  base_unit?: Unit;
+  packaging?: PackagingRelation[];
+  low_stock_threshold?: number;
+}
+
+/** PATCH /api/products/{id} — update an existing catalogue entry. */
+export function updateProduct(id: string, input: UpdateProductInput): Promise<Product> {
+  return patchJSON<Product>(`/api/products/${encodeURIComponent(id)}`, input);
 }

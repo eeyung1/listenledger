@@ -177,17 +177,13 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     }
   }
 
-  /** Inserts a transaction, keeping the feed newest-first. */
-  function applyTransaction(transaction: Transaction, isNew: boolean): void {
-    if (isNew) {
+  /** Inserts a transaction, keeping the feed newest-first and deduplicated by ID. */
+  function applyTransaction(transaction: Transaction, _isNew?: boolean): void {
+    const index = state.transactions.findIndex((existing) => existing.id === transaction.id);
+    if (index === -1) {
       state.transactions.unshift(transaction);
     } else {
-      const index = state.transactions.findIndex((existing) => existing.id === transaction.id);
-      if (index === -1) {
-        state.transactions.unshift(transaction);
-      } else {
-        state.transactions[index] = transaction;
-      }
+      state.transactions[index] = transaction;
     }
 
     // The KPIs depend on the set, so they are recomputed rather than adjusted
