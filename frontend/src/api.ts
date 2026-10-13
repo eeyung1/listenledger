@@ -58,6 +58,7 @@ export interface Transaction {
   readonly occurred_at: string;
   readonly created_at: string;
   readonly transcript?: string;
+  readonly receipt_id?: string | undefined;
 }
 
 export interface Product {
@@ -71,6 +72,7 @@ export interface Product {
   readonly base_unit: Unit;
   readonly packaging?: readonly PackagingRelation[];
   readonly low_stock_threshold?: number;
+  readonly archived_at?: string | undefined;
 }
 
 export interface TransactionQuery {
@@ -79,6 +81,7 @@ export interface TransactionQuery {
   readonly type?: string | undefined;
   readonly status?: string | undefined;
   readonly product_id?: string | undefined;
+  readonly receipt_id?: string | undefined;
   readonly from?: string | undefined;
   readonly to?: string | undefined;
 }
@@ -215,6 +218,7 @@ export function fetchTransactions(
   if (query?.type !== undefined && query.type !== "") params["type"] = query.type;
   if (query?.status !== undefined && query.status !== "") params["status"] = query.status;
   if (query?.product_id !== undefined && query.product_id !== "") params["product_id"] = query.product_id;
+  if (query?.receipt_id !== undefined && query.receipt_id !== "") params["receipt_id"] = query.receipt_id;
   if (query?.from !== undefined && query.from !== "") params["from"] = query.from;
   if (query?.to !== undefined && query.to !== "") params["to"] = query.to;
   return getJSON<TransactionsSnapshot>("/api/transactions", params);
@@ -226,6 +230,7 @@ export function getExportTransactionsUrl(shopId: string, query?: TransactionQuer
   if (query?.type !== undefined && query.type !== "") params.set("type", query.type);
   if (query?.status !== undefined && query.status !== "") params.set("status", query.status);
   if (query?.product_id !== undefined && query.product_id !== "") params.set("product_id", query.product_id);
+  if (query?.receipt_id !== undefined && query.receipt_id !== "") params.set("receipt_id", query.receipt_id);
   if (query?.from !== undefined && query.from !== "") params.set("from", query.from);
   if (query?.to !== undefined && query.to !== "") params.set("to", query.to);
   return `/api/transactions/export?${params.toString()}`;
@@ -242,10 +247,33 @@ export function fetchSummary(shopId: string): Promise<DailySummary> {
 }
 
 export interface ReviewCorrections {
-  product_id?: string;
-  quantity?: number;
-  unit?: Unit;
-  amount?: Money;
+  readonly product_id?: string | undefined;
+  readonly quantity?: number | undefined;
+  readonly unit?: Unit | undefined;
+  readonly amount?: Money | undefined;
+  readonly notes?: string | undefined;
+}
+
+export type ReviewDecisionType = "confirmed" | "corrected_and_confirmed" | "rejected";
+
+export interface ReviewValuesSnapshot {
+  readonly product_id?: string;
+  readonly product_name?: string;
+  readonly quantity?: number;
+  readonly unit?: Unit;
+  readonly amount?: Money;
+}
+
+export interface ReviewDecision {
+  readonly id: string;
+  readonly shop_id: string;
+  readonly transaction_id: string;
+  readonly decision: ReviewDecisionType;
+  readonly decided_by: string;
+  readonly decided_at: string;
+  readonly original_values: ReviewValuesSnapshot;
+  readonly corrected_values?: ReviewValuesSnapshot;
+  readonly notes?: string;
 }
 
 /** POST /api/transactions/{id}/confirm — confirm a held review transaction and apply stock. */
@@ -253,12 +281,55 @@ export function confirmTransaction(
   id: string,
   corrections?: ReviewCorrections,
 ): Promise<Transaction> {
-  return postJSON<Transaction>(`/api/transactions/${encodeURIComponent(id)}/confirm`, corrections);
+  return postJSON<Transaction>(`/api/transactions/${encodeURIComponent(id)}/confirm`, corrections || {});
 }
 
 /** POST /api/transactions/{id}/reject — discard a held review transaction. */
-export function rejectTransaction(id: string): Promise<Transaction> {
-  return postJSON<Transaction>(`/api/transactions/${encodeURIComponent(id)}/reject`);
+export function rejectTransaction(id: string, notes?: string): Promise<Transaction> {
+  return postJSON<Transaction>(`/api/transactions/${encodeURIComponent(id)}/reject`, { notes: notes || "" });
+}
+
+/** GET /api/transactions/{id}/decision — fetch review adjudication record. */
+export async function fetchTransactionDecision(id: string): Promise<ReviewDecision> {
+  const res = await fetch(`/api/transactions/${encodeURIComponent(id)}/decision`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new ApiError(`/api/transactions/${id}/decision`, res.status);
+  }
+  return res.json() as Promise<ReviewDecision>;
+}
+
+export interface ReceiptGroup {
+  readonly receipt_id: string;
+  readonly shop_id: string;
+  readonly transactions: readonly Transaction[];
+  readonly total_count: number;
+  readonly confirmed_count: number;
+  readonly review_count: number;
+  readonly rejected_count: number;
+  readonly total_amount: Money;
+}
+
+/** GET /api/receipts/{receipt_id} */
+export async function fetchReceipt(receiptId: string): Promise<ReceiptGroup> {
+  const res = await fetch(`/api/receipts/${encodeURIComponent(receiptId)}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new ApiError(`/api/receipts/${receiptId}`, res.status);
+  }
+  return res.json() as Promise<ReceiptGroup>;
+}
+
+/** POST /api/receipts/{receipt_id}/confirm */
+export function confirmReceipt(receiptId: string, notes?: string): Promise<ReceiptGroup> {
+  return postJSON<ReceiptGroup>(`/api/receipts/${encodeURIComponent(receiptId)}/confirm`, { notes: notes || "" });
+}
+
+/** POST /api/receipts/{receipt_id}/reject */
+export function rejectReceipt(receiptId: string, notes?: string): Promise<ReceiptGroup> {
+  return postJSON<ReceiptGroup>(`/api/receipts/${encodeURIComponent(receiptId)}/reject`, { notes: notes || "" });
 }
 
 export interface CreateProductInput {
@@ -521,5 +592,29 @@ export async function adjustProductStock(
   }
   return res.json() as Promise<{ product: Product; transaction: Transaction }>;
 }
+
+/** POST /api/products/{id}/archive — safely soft-archive product from active speech matching. */
+export function archiveProduct(id: string): Promise<Product> {
+  return postJSON<Product>(`/api/products/${encodeURIComponent(id)}/archive`);
+}
+
+/** POST /api/products/{id}/unarchive — restore product to active speech recognition. */
+export function unarchiveProduct(id: string): Promise<Product> {
+  return postJSON<Product>(`/api/products/${encodeURIComponent(id)}/unarchive`);
+}
+
+export interface RotateDeviceResult {
+  readonly id: string;
+  readonly shop_id: string;
+  readonly name: string;
+  readonly token: string;
+  readonly rotated_at: string;
+}
+
+/** POST /api/devices/{id}/rotate — rotate paired device credential. */
+export function rotateDeviceToken(deviceId: string): Promise<RotateDeviceResult> {
+  return postJSON<RotateDeviceResult>(`/api/devices/${encodeURIComponent(deviceId)}/rotate`);
+}
+
 
 

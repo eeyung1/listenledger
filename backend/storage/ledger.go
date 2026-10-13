@@ -3,7 +3,9 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -14,9 +16,38 @@ var ErrConflict = errors.New("idempotency key was already used for different con
 var ErrCurrency = errors.New("currency must match the shop and product currency")
 var ErrInvalidMovement = errors.New("invalid stock movement")
 
+type ReviewDecisionType string
+
+const (
+	DecisionConfirmed             ReviewDecisionType = "confirmed"
+	DecisionRejected              ReviewDecisionType = "rejected"
+	DecisionCorrectedAndConfirmed ReviewDecisionType = "corrected_and_confirmed"
+)
+
+type ReviewValuesSnapshot struct {
+	ProductID   string       `json:"product_id,omitempty"`
+	ProductName string       `json:"product_name"`
+	Quantity    int          `json:"quantity"`
+	Unit        models.Unit  `json:"unit"`
+	Amount      models.Money `json:"amount"`
+}
+
+type ReviewDecision struct {
+	ID              string               `json:"id"`
+	ShopID          string               `json:"shop_id"`
+	TransactionID   string               `json:"transaction_id"`
+	Decision        ReviewDecisionType   `json:"decision"`
+	DecidedBy       string               `json:"decided_by"`
+	DecidedAt       time.Time            `json:"decided_at"`
+	OriginalValues  ReviewValuesSnapshot `json:"original_values"`
+	CorrectedValues ReviewValuesSnapshot `json:"corrected_values,omitempty"`
+	Notes           string               `json:"notes,omitempty"`
+}
+
 type LedgerResult struct {
 	Transaction models.Transaction
 	Product     *models.Product
+	Decision    *ReviewDecision
 	Replayed    bool
 }
 
@@ -126,18 +157,24 @@ type ReviewCorrections struct {
 }
 
 // ResolveReview resolves a held capture (review_required) by either confirming it
-// with atomic stock adjustment or rejecting it, protected by immediate transaction locking.
+// with atomic stock adjustment or rejecting it, protected by immediate transaction locking
+// and recording an immutable decision audit log.
 func (s *Store) ResolveReview(
 	ctx context.Context,
 	shopID, transactionID string,
 	action ReviewAction,
 	corrections *ReviewCorrections,
+	decidedBy string,
+	notes string,
 ) (LedgerResult, error) {
 	if shopID == "" || transactionID == "" {
 		return LedgerResult{}, ErrInvalidMovement
 	}
 	if action != ReviewActionConfirm && action != ReviewActionReject {
 		return LedgerResult{}, ErrInvalidMovement
+	}
+	if decidedBy == "" {
+		decidedBy = "owner"
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -158,32 +195,66 @@ func (s *Store) ResolveReview(
 		return LedgerResult{}, ErrConflict
 	}
 
+	originalSnapshot := ReviewValuesSnapshot{
+		ProductID:   t.ProductID,
+		ProductName: t.ProductName,
+		Quantity:    t.Quantity,
+		Unit:        t.Unit,
+		Amount:      t.Amount,
+	}
+
 	if action == ReviewActionReject {
 		t.Status = models.StatusRejected
 		if _, err := tx.ExecContext(ctx, `UPDATE transactions SET status=? WHERE shop_id=? AND id=?`, string(models.StatusRejected), shopID, transactionID); err != nil {
 			return LedgerResult{}, err
 		}
+
+		now := time.Now().UTC()
+		decisionID := fmt.Sprintf("dec_%d", now.UnixNano())
+		decision := ReviewDecision{
+			ID:             decisionID,
+			ShopID:         shopID,
+			TransactionID:  transactionID,
+			Decision:       DecisionRejected,
+			DecidedBy:      decidedBy,
+			DecidedAt:      now,
+			OriginalValues: originalSnapshot,
+			Notes:          notes,
+		}
+		origJSON, _ := json.Marshal(decision.OriginalValues)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO review_decisions(id, shop_id, transaction_id, decision, decided_by, decided_at, original_values, corrected_values, notes) VALUES(?,?,?,?,?,?,?,?,?)`,
+			decision.ID, shopID, transactionID, string(decision.Decision), decision.DecidedBy, formatTime(now), string(origJSON), "{}", decision.Notes); err != nil {
+			return LedgerResult{}, err
+		}
+
 		if err := tx.Commit(); err != nil {
 			return LedgerResult{}, err
 		}
-		return LedgerResult{Transaction: t, Product: nil}, nil
+		return LedgerResult{Transaction: t, Product: nil, Decision: &decision}, nil
 	}
 
+	wasCorrected := false
 	if corrections != nil {
-		if corrections.ProductID != "" {
+		if corrections.ProductID != "" && corrections.ProductID != t.ProductID {
 			t.ProductID = corrections.ProductID
+			wasCorrected = true
 		}
-		if corrections.Quantity > 0 {
+		if corrections.Quantity > 0 && corrections.Quantity != t.Quantity {
 			t.Quantity = corrections.Quantity
+			wasCorrected = true
 		}
-		if corrections.Unit.Valid() {
+		if corrections.Unit.Valid() && corrections.Unit != t.Unit {
 			t.Unit = corrections.Unit
+			wasCorrected = true
 		}
 		if corrections.Amount != nil {
 			if corrections.Amount.Amount < 0 {
 				return LedgerResult{}, ErrInvalidMovement
 			}
-			t.Amount = *corrections.Amount
+			if *corrections.Amount != t.Amount {
+				t.Amount = *corrections.Amount
+				wasCorrected = true
+			}
 		}
 	}
 
@@ -238,9 +309,76 @@ func (s *Store) ResolveReview(
 		return LedgerResult{}, err
 	}
 
+	decisionType := DecisionConfirmed
+	if wasCorrected {
+		decisionType = DecisionCorrectedAndConfirmed
+	}
+	decidedNow := time.Now().UTC()
+	decision := ReviewDecision{
+		ID:             fmt.Sprintf("dec_%d", decidedNow.UnixNano()),
+		ShopID:         shopID,
+		TransactionID:  transactionID,
+		Decision:       decisionType,
+		DecidedBy:      decidedBy,
+		DecidedAt:      decidedNow,
+		OriginalValues: originalSnapshot,
+		CorrectedValues: ReviewValuesSnapshot{
+			ProductID:   t.ProductID,
+			ProductName: t.ProductName,
+			Quantity:    t.Quantity,
+			Unit:        t.Unit,
+			Amount:      t.Amount,
+		},
+		Notes: notes,
+	}
+	origJSON, _ := json.Marshal(decision.OriginalValues)
+	corrJSON, _ := json.Marshal(decision.CorrectedValues)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO review_decisions(id, shop_id, transaction_id, decision, decided_by, decided_at, original_values, corrected_values, notes) VALUES(?,?,?,?,?,?,?,?,?)`,
+		decision.ID, shopID, transactionID, string(decision.Decision), decision.DecidedBy, formatTime(decidedNow), string(origJSON), string(corrJSON), decision.Notes); err != nil {
+		return LedgerResult{}, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return LedgerResult{}, err
 	}
 
-	return LedgerResult{Transaction: t, Product: &p}, nil
+	return LedgerResult{Transaction: t, Product: &p, Decision: &decision}, nil
+}
+
+// GetReviewDecision returns the decision record for a transaction if it underwent review adjudication.
+func (s *Store) GetReviewDecision(ctx context.Context, shopID, transactionID string) (*ReviewDecision, error) {
+	if shopID == "" || transactionID == "" {
+		return nil, errors.New("storage: GetReviewDecision requires shop_id and transaction_id")
+	}
+
+	const query = `SELECT id, shop_id, transaction_id, decision, decided_by, decided_at, original_values, corrected_values, notes
+		FROM review_decisions
+		WHERE shop_id = ? AND transaction_id = ?
+		ORDER BY decided_at DESC LIMIT 1`
+
+	var (
+		dec                                    ReviewDecision
+		kind, decidedAtRaw, origJSON, corrJSON string
+	)
+	err := s.db.QueryRowContext(ctx, query, shopID, transactionID).Scan(
+		&dec.ID, &dec.ShopID, &dec.TransactionID, &kind, &dec.DecidedBy, &decidedAtRaw, &origJSON, &corrJSON, &dec.Notes,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("storage: get review decision: %w", err)
+	}
+
+	dec.Decision = ReviewDecisionType(kind)
+	if dec.DecidedAt, err = parseTime(decidedAtRaw); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(origJSON), &dec.OriginalValues); err != nil {
+		return nil, fmt.Errorf("storage: decode original values: %w", err)
+	}
+	if corrJSON != "" && corrJSON != "{}" {
+		_ = json.Unmarshal([]byte(corrJSON), &dec.CorrectedValues)
+	}
+	return &dec, nil
 }

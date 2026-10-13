@@ -34,7 +34,7 @@ func ClampLimit(limit int) int {
 const transactionColumns = `id, shop_id, type, product_id, product_name, quantity,
 	unit, amount_amount, amount_currency, confidence_overall, confidence_product,
 	confidence_quantity, confidence_amount, status, occurred_at, created_at,
-	transcript`
+	transcript, receipt_id`
 
 // InsertTransaction records a stock movement.
 //
@@ -83,8 +83,8 @@ func insertTransaction(ctx context.Context, db executor, transaction models.Tran
 			id, shop_id, type, product_id, product_name, quantity, unit,
 			amount_amount, amount_currency, confidence_overall,
 			confidence_product, confidence_quantity, confidence_amount,
-			status, occurred_at, created_at, transcript
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			status, occurred_at, created_at, transcript, receipt_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := db.ExecContext(ctx, query,
 		transaction.ID, transaction.ShopID, string(transaction.Type),
@@ -96,7 +96,7 @@ func insertTransaction(ctx context.Context, db executor, transaction models.Tran
 		nullFloat(transaction.Confidence.Quantity),
 		nullFloat(transaction.Confidence.Amount),
 		string(transaction.Status), formatTime(occurredAt), formatTime(createdAt),
-		transaction.Transcript,
+		transaction.Transcript, nullString(transaction.ReceiptID),
 	)
 	if err != nil {
 		return fmt.Errorf("storage: insert transaction %s: %w", transaction.ID, err)
@@ -109,6 +109,7 @@ type TransactionFilter struct {
 	Type      *models.TransactionType
 	Status    *models.TransactionStatus
 	ProductID string
+	ReceiptID string
 	From      *time.Time
 	To        *time.Time
 	Limit     int
@@ -135,6 +136,10 @@ func (s *Store) QueryTransactions(ctx context.Context, shopID string, filter Tra
 	if filter.ProductID != "" {
 		whereClause += " AND product_id = ?"
 		args = append(args, filter.ProductID)
+	}
+	if filter.ReceiptID != "" {
+		whereClause += " AND receipt_id = ?"
+		args = append(args, filter.ReceiptID)
 	}
 	if filter.From != nil {
 		whereClause += " AND occurred_at >= ?"
@@ -275,6 +280,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 		status             string
 		occurredAtRaw      string
 		createdAtRaw       string
+		receiptID          sql.NullString
 	)
 
 	err := row.Scan(
@@ -282,7 +288,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 		&transaction.ProductName, &transaction.Quantity, &unit,
 		&amountAmount, &amountCurrency, &transaction.Confidence.Overall,
 		&confidenceProduct, &confidenceQuantity, &confidenceAmount, &status,
-		&occurredAtRaw, &createdAtRaw, &transaction.Transcript,
+		&occurredAtRaw, &createdAtRaw, &transaction.Transcript, &receiptID,
 	)
 	if err != nil {
 		return models.Transaction{}, err
@@ -296,6 +302,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 	transaction.Confidence.Product = floatPointer(confidenceProduct)
 	transaction.Confidence.Quantity = floatPointer(confidenceQuantity)
 	transaction.Confidence.Amount = floatPointer(confidenceAmount)
+	transaction.ReceiptID = receiptID.String
 
 	if transaction.OccurredAt, err = parseTime(occurredAtRaw); err != nil {
 		return models.Transaction{}, err

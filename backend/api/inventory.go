@@ -30,7 +30,7 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 
 	lowStock := 0
 	for _, product := range products {
-		if product.IsLowStock() {
+		if !product.IsArchived() && product.IsLowStock() {
 			lowStock++
 		}
 	}

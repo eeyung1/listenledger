@@ -18,6 +18,7 @@ import (
 
 type captureResponse struct {
 	CaptureID      string                 `json:"capture_id"`
+	ReceiptID      string                 `json:"receipt_id,omitempty"`
 	ShopID         string                 `json:"shop_id"`
 	Type           models.TransactionType `json:"type"`
 	Transactions   []models.Transaction   `json:"transactions"`
@@ -50,8 +51,30 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 		}
 		req.CaptureID = cid
 	}
-	if deviceID != "" && req.DeviceID == "" {
+
+	// Canonical device identity enforcement:
+	// A device cannot masquerade as another device ID.
+	if deviceID != "" {
+		if req.DeviceID != "" && req.DeviceID != deviceID {
+			writeError(w, http.StatusBadRequest, "conflicting device identifier: does not match authenticated device token")
+			return
+		}
 		req.DeviceID = deviceID
+	} else if req.DeviceID != "" {
+		// If authenticated via user session, verify that the submitted device ID is paired and active
+		dev, err := s.store.GetDeviceByID(r.Context(), shopID, req.DeviceID)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				writeError(w, http.StatusBadRequest, "unknown or invalid device identifier")
+				return
+			}
+			s.fail(w, r, "lookup submitted device", err)
+			return
+		}
+		if dev.RevokedAt != nil {
+			writeError(w, http.StatusBadRequest, "submitted device identifier is revoked")
+			return
+		}
 	}
 
 	// 2. Fetch shop settings and catalogue
@@ -111,6 +134,8 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 	allReplayed := len(validationRes.Lines) > 0
 
 	for i, line := range validationRes.Lines {
+		line.Transaction.ReceiptID = req.CaptureID
+
 		key := fmt.Sprintf("%s_%d", idempotencyBase, i)
 		if len(key) > 128 {
 			key = key[:128]
@@ -160,6 +185,7 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, statusCode, captureResponse{
 		CaptureID:      req.CaptureID,
+		ReceiptID:      req.CaptureID,
 		ShopID:         shopID,
 		Type:           validationRes.Type,
 		Transactions:   storedTransactions,

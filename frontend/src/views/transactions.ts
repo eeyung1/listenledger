@@ -17,11 +17,14 @@ import {
   confirmTransaction,
   createManualTransaction,
   fetchInventory,
+  fetchTransactionDecision,
   fetchTransactions,
   getExportTransactionsUrl,
   rejectTransaction,
   reverseTransaction,
   type ManualTransactionInput,
+  type ReviewCorrections,
+  type ReviewDecision,
   type Transaction,
   type TransactionType,
   type Unit,
@@ -46,6 +49,7 @@ import type { ViewCleanup } from "./index.js";
 interface Filters {
   type: string;
   status: string;
+  receipt_id: string;
 }
 
 export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanup {
@@ -55,7 +59,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   const pageSize = 50;
   let totalCount = 0;
 
-  const filters: Filters = { type: "", status: "" };
+  const filters: Filters = { type: "", status: "", receipt_id: "" };
 
   const ledgerBody = hook(root, "ledger-body");
   const reviewQueue = hook(root, "review-queue");
@@ -80,6 +84,10 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         `${formatQuantity(transaction.quantity, transaction.unit)} · ${formatMoney(transaction.amount)}`,
       ),
     );
+    if (transaction.receipt_id) {
+      const rcpt = el("span", "badge badge--mono", `Receipt: ${transaction.receipt_id}`);
+      head.append(rcpt);
+    }
 
     // The transcript is what the owner adjudicates against, so it is shown
     // verbatim — it is the record of what was actually said.
@@ -96,12 +104,14 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
 
     const actions = el("div", "review-card__actions");
     const confirmBtn = el("button", "button button--primary button--sm", "Confirm");
+    const editBtn = el("button", "button button--secondary button--sm", "Edit & Confirm");
     const rejectBtn = el("button", "button button--secondary button--sm", "Reject");
     const errorMsg = el("span", "review-card__error");
     errorMsg.hidden = true;
 
     confirmBtn.addEventListener("click", async () => {
       confirmBtn.disabled = true;
+      editBtn.disabled = true;
       rejectBtn.disabled = true;
       confirmBtn.textContent = "Confirming…";
       errorMsg.hidden = true;
@@ -110,6 +120,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         applyTransaction(updated, false);
       } catch (err: unknown) {
         confirmBtn.disabled = false;
+        editBtn.disabled = false;
         rejectBtn.disabled = false;
         confirmBtn.textContent = "Confirm";
         errorMsg.hidden = false;
@@ -117,16 +128,26 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       }
     });
 
+    editBtn.addEventListener("click", () => {
+      showEditConfirmModal(transaction);
+    });
+
     rejectBtn.addEventListener("click", async () => {
+      const notes = window.prompt(
+        `Reject transaction ${transaction.id}?\nEnter optional audit notes (e.g. Unrecognized background chatter):`,
+      );
+      if (notes === null) return;
       confirmBtn.disabled = true;
+      editBtn.disabled = true;
       rejectBtn.disabled = true;
       rejectBtn.textContent = "Rejecting…";
       errorMsg.hidden = true;
       try {
-        const updated = await rejectTransaction(transaction.id);
+        const updated = await rejectTransaction(transaction.id, notes.trim() || undefined);
         applyTransaction(updated, false);
       } catch (err: unknown) {
         confirmBtn.disabled = false;
+        editBtn.disabled = false;
         rejectBtn.disabled = false;
         rejectBtn.textContent = "Reject";
         errorMsg.hidden = false;
@@ -134,7 +155,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       }
     });
 
-    actions.append(confirmBtn, rejectBtn, errorMsg);
+    actions.append(confirmBtn, editBtn, rejectBtn, errorMsg);
     card.append(head, transcript, scores, actions);
     return card;
   }
@@ -161,7 +182,21 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     time.title = new Date(transaction.occurred_at).toLocaleString();
 
     const direction = cell(`table__cell table__cell--${transaction.type}`, formatDirection(transaction.type));
-    const product = cell("table__cell", transaction.product_name);
+    const product = cell("table__cell");
+    product.append(document.createTextNode(transaction.product_name));
+    if (transaction.receipt_id) {
+      const rcptBadge = el("span", "badge badge--mono", "Receipt");
+      rcptBadge.title = `Receipt: ${transaction.receipt_id} (click to filter)`;
+      rcptBadge.style.cursor = "pointer";
+      rcptBadge.style.marginLeft = "0.5rem";
+      rcptBadge.addEventListener("click", () => {
+        filters.receipt_id = transaction.receipt_id || "";
+        pageOffset = 0;
+        void refetch();
+      });
+      product.append(rcptBadge);
+    }
+
     const quantity = cell("table__cell", formatQuantity(transaction.quantity, transaction.unit));
     const amount = cell("table__cell table__cell--amount", formatMoney(transaction.amount));
 
@@ -175,7 +210,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     const statusCell = cell("table__cell");
     statusCell.append(status);
 
-    const actionCell = cell("table__cell");
+    const actionCell = cell("table__cell table__cell--actions");
     if (transaction.status === "confirmed") {
       const voidBtn = el("button", "button button--secondary button--sm", "Void");
       voidBtn.type = "button";
@@ -185,6 +220,14 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       });
       actionCell.append(voidBtn);
     }
+
+    const auditBtn = el("button", "button button--secondary button--sm", "Audit");
+    auditBtn.type = "button";
+    auditBtn.title = "View review decision audit history";
+    auditBtn.addEventListener("click", () => {
+      showAuditModal(transaction.id);
+    });
+    actionCell.append(auditBtn);
 
     row.append(time, direction, product, quantity, amount, confidence, statusCell, actionCell);
 
@@ -199,6 +242,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       exportLink.href = getExportTransactionsUrl(shopId, {
         type: filters.type || undefined,
         status: filters.status || undefined,
+        receipt_id: filters.receipt_id || undefined,
       });
     }
   }
@@ -241,10 +285,26 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     if (ledgerBody === null) return;
     clear(ledgerBody);
 
+    if (filters.receipt_id) {
+      const bannerRow = el("tr", "table__row");
+      const bannerCell = cell("table__cell", `Filtered by Receipt: ${filters.receipt_id} `);
+      bannerCell.colSpan = 8;
+      const clearBtn = el("button", "button button--secondary button--sm", "Clear Filter");
+      clearBtn.style.marginLeft = "0.75rem";
+      clearBtn.addEventListener("click", () => {
+        filters.receipt_id = "";
+        pageOffset = 0;
+        void refetch();
+      });
+      bannerCell.append(clearBtn);
+      bannerRow.append(bannerCell);
+      ledgerBody.append(bannerRow);
+    }
+
     if (transactions.length === 0) {
       const row = el("tr", "table__empty");
       const cellElement = cell("", "No transactions match these filters.");
-      cellElement.colSpan = 7;
+      cellElement.colSpan = 8;
       row.append(cellElement);
       ledgerBody.append(row);
       return;
@@ -267,6 +327,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         offset: pageOffset,
         type: filters.type || undefined,
         status: filters.status || undefined,
+        receipt_id: filters.receipt_id || undefined,
       });
       if (disposed) return;
       transactions = [...snapshot.transactions];
@@ -287,6 +348,258 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         ledgerBody.append(row);
       }
     }
+  }
+
+  function showEditConfirmModal(transaction: Transaction): void {
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal-dialog");
+
+    const header = el("div", "modal-header");
+    const title = el("h3", "modal-title", `Edit & Confirm: ${transaction.id}`);
+    const closeBtn = el("button", "button button--secondary button--sm", "✕");
+    closeBtn.type = "button";
+    header.append(title, closeBtn);
+
+    const form = el("form", "modal-form");
+    const help = el(
+      "p",
+      "modal-help",
+      "Select the matched catalogue item, verify quantity and packaging unit, and record human audit notes before applying inventory movement.",
+    );
+
+    const transcriptInfo = el(
+      "div",
+      "review-card__transcript",
+      transaction.transcript ? `Spoken: “${transaction.transcript}”` : "No transcript recorded.",
+    );
+
+    const productLabel = el("label", "form-field", "Catalogue Product *");
+    const productSelect = el("select", "input") as HTMLSelectElement;
+    productSelect.append(new Option("Loading products…", ""));
+    productLabel.append(productSelect);
+
+    const qtyLabel = el("label", "form-field", "Quantity *");
+    const qtyInput = el("input", "input") as HTMLInputElement;
+    qtyInput.type = "number";
+    qtyInput.min = "1";
+    qtyInput.value = String(transaction.quantity > 0 ? transaction.quantity : 1);
+    qtyLabel.append(qtyInput);
+
+    const unitLabel = el("label", "form-field", "Unit *");
+    const unitSelect = el("select", "input") as HTMLSelectElement;
+    for (const u of ["piece", "pack", "carton", "bottle", "crate"] as const) {
+      const opt = new Option(u, u);
+      if (transaction.unit === u) opt.selected = true;
+      unitSelect.append(opt);
+    }
+    unitLabel.append(unitSelect);
+
+    const amountLabel = el("label", "form-field", `Total Amount in kobo (${transaction.amount.currency}) *`);
+    const amountInput = el("input", "input") as HTMLInputElement;
+    amountInput.type = "number";
+    amountInput.min = "0";
+    amountInput.value = String(transaction.amount.amount);
+    amountLabel.append(amountInput);
+
+    const notesLabel = el("label", "form-field", "Audit Notes");
+    const notesInput = el("input", "input") as HTMLInputElement;
+    notesInput.type = "text";
+    notesInput.placeholder = "e.g. Verified with storekeeper; corrected pack to carton";
+    notesLabel.append(notesInput);
+
+    const errorMsg = el("div", "form-error");
+    errorMsg.hidden = true;
+
+    const footer = el("div", "modal-footer");
+    const cancelBtn = el("button", "button button--secondary", "Cancel");
+    cancelBtn.type = "button";
+    const submitBtn = el("button", "button button--primary", "Confirm with Corrections");
+    submitBtn.type = "submit";
+    footer.append(cancelBtn, submitBtn);
+
+    form.append(help, transcriptInfo, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, errorMsg, footer);
+    modal.append(header, form);
+    overlay.append(modal);
+    document.body.append(overlay);
+
+    const closeModal = (): void => {
+      overlay.remove();
+    };
+
+    closeBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    void fetchInventory(shopId).then((snapshot) => {
+      clear(productSelect);
+      let foundExisting = false;
+      for (const p of snapshot.products) {
+        if (!p.archived_at || p.id === transaction.product_id) {
+          const opt = new Option(`${p.name} (${p.sku})`, p.id);
+          if (p.id === transaction.product_id) {
+            opt.selected = true;
+            foundExisting = true;
+          }
+          productSelect.append(opt);
+        }
+      }
+      if (!foundExisting && transaction.product_name) {
+        const rawOpt = new Option(`[Unmatched] ${transaction.product_name}`, "");
+        rawOpt.selected = true;
+        productSelect.prepend(rawOpt);
+      }
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorMsg.hidden = true;
+      const selectedProductId = productSelect.value;
+      if (!selectedProductId) {
+        errorMsg.hidden = false;
+        errorMsg.textContent = "Please select a catalogue product to confirm";
+        return;
+      }
+      const qty = parseInt(qtyInput.value, 10);
+      if (isNaN(qty) || qty <= 0) {
+        errorMsg.hidden = false;
+        errorMsg.textContent = "Quantity must be greater than zero";
+        return;
+      }
+      const amt = parseInt(amountInput.value, 10);
+      if (isNaN(amt) || amt < 0) {
+        errorMsg.hidden = false;
+        errorMsg.textContent = "Amount must be a non-negative integer";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Confirming…";
+
+      try {
+        const corrections: ReviewCorrections = {
+          product_id: selectedProductId,
+          quantity: qty,
+          unit: unitSelect.value as Unit,
+          amount: {
+            amount: amt,
+            currency: transaction.amount.currency,
+          },
+          notes: notesInput.value.trim() || undefined,
+        };
+        const updated = await confirmTransaction(transaction.id, corrections);
+        applyTransaction(updated, false);
+        closeModal();
+        void refetch();
+      } catch (err: unknown) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Confirm with Corrections";
+        errorMsg.hidden = false;
+        errorMsg.textContent = err instanceof Error ? err.message : "Confirmation failed";
+      }
+    });
+  }
+
+  function showAuditModal(transactionId: string): void {
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal-dialog");
+
+    const header = el("div", "modal-header");
+    const title = el("h3", "modal-title", `Decision Audit: ${transactionId}`);
+    const closeBtn = el("button", "button button--secondary button--sm", "✕");
+    closeBtn.type = "button";
+    header.append(title, closeBtn);
+
+    const content = el("div", "modal-body");
+    content.append(el("p", "modal-help", "Fetching review adjudication audit log…"));
+
+    const footer = el("div", "modal-footer");
+    const dismissBtn = el("button", "button button--secondary", "Close");
+    dismissBtn.type = "button";
+    footer.append(dismissBtn);
+
+    modal.append(header, content, footer);
+    overlay.append(modal);
+    document.body.append(overlay);
+
+    const closeModal = (): void => {
+      overlay.remove();
+    };
+
+    closeBtn.addEventListener("click", closeModal);
+    dismissBtn.addEventListener("click", closeModal);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    void fetchTransactionDecision(transactionId)
+      .then((dec: ReviewDecision) => {
+        clear(content);
+        const list = el("div", "audit-details");
+        const dDecision = el("p", "", "Decision: ");
+        dDecision.append(el("strong", "", dec.decision));
+        const dBy = el(
+          "p",
+          "",
+          `Decided by: ${dec.decided_by} at ${formatDate(dec.decided_at)} ${formatTime(dec.decided_at)}`,
+        );
+        const dNotes = el("p", "", `Notes: ${dec.notes || "None"}`);
+        list.append(dDecision, dBy, dNotes);
+
+        if (dec.decision === "corrected_and_confirmed" && dec.corrected_values) {
+          const table = el("table", "table table--compact");
+          const thead = el("thead");
+          const trh = el("tr");
+          trh.append(
+            el("th", "", "Field"),
+            el("th", "", "Original (Extracted)"),
+            el("th", "", "Corrected (Owner)"),
+          );
+          thead.append(trh);
+
+          const tbody = el("tbody");
+          const orig = dec.original_values;
+          const corr = dec.corrected_values;
+
+          const addRow = (field: string, before: string, after: string): void => {
+            const tr = el("tr");
+            tr.append(
+              el("td", "table__cell--mono", field),
+              el("td", "", before),
+              el("td", "table__cell--highlight", after),
+            );
+            tbody.append(tr);
+          };
+
+          addRow(
+            "Product",
+            orig.product_name || orig.product_id || "—",
+            corr.product_name || corr.product_id || "—",
+          );
+          addRow("Quantity", String(orig.quantity ?? "—"), String(corr.quantity ?? "—"));
+          addRow("Unit", String(orig.unit ?? "—"), String(corr.unit ?? "—"));
+          if (orig.amount && corr.amount) {
+            addRow("Amount", formatMoney(orig.amount), formatMoney(corr.amount));
+          }
+
+          table.append(thead, tbody);
+          list.append(el("h4", "", "Value Adjustments"), table);
+        }
+        content.append(list);
+      })
+      .catch((err: unknown) => {
+        clear(content);
+        content.append(
+          el(
+            "p",
+            "form-error",
+            err instanceof Error
+              ? err.message
+              : "No decision audit log found for this transaction.",
+          ),
+        );
+      });
   }
 
   function showManualEntryModal(): void {

@@ -14,7 +14,7 @@ import (
 // productColumns is the column list every product read uses, in the order
 // scanProduct expects.
 const productColumns = `id, shop_id, name, sku, aliases, price_amount,
-	price_currency, quantity, base_unit, packaging, low_stock_threshold`
+	price_currency, quantity, base_unit, packaging, low_stock_threshold, archived_at`
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface {
@@ -69,19 +69,24 @@ func (s *Store) InsertProduct(ctx context.Context, product models.Product) error
 		return err
 	}
 
+	var archivedAtVal any = nil
+	if product.ArchivedAt != nil {
+		archivedAtVal = formatTime(*product.ArchivedAt)
+	}
+
 	now := formatTime(time.Now())
 	const query = `
 		INSERT INTO products (
 			id, shop_id, name, sku, aliases, price_amount, price_currency,
 			quantity, base_unit, packaging, low_stock_threshold,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			created_at, updated_at, archived_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err = s.db.ExecContext(ctx, query,
 		product.ID, product.ShopID, product.Name, product.SKU,
 		aliases, product.Price.Amount, product.Price.Currency,
 		product.Quantity, string(product.BaseUnit), packaging,
-		product.LowStockThreshold, now, now,
+		product.LowStockThreshold, now, now, archivedAtVal,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: insert product %s: %w", product.ID, err)
@@ -244,12 +249,13 @@ func scanProduct(row scanner) (models.Product, error) {
 		aliases, packaging      string
 		priceAmount             int64
 		priceCurrency, baseUnit string
+		archivedAtRaw           sql.NullString
 	)
 
 	err := row.Scan(
 		&product.ID, &product.ShopID, &product.Name, &product.SKU,
 		&aliases, &priceAmount, &priceCurrency, &product.Quantity,
-		&baseUnit, &packaging, &product.LowStockThreshold,
+		&baseUnit, &packaging, &product.LowStockThreshold, &archivedAtRaw,
 	)
 	if err != nil {
 		return models.Product{}, err
@@ -257,6 +263,11 @@ func scanProduct(row scanner) (models.Product, error) {
 
 	product.Price = models.Money{Amount: priceAmount, Currency: priceCurrency}
 	product.BaseUnit = models.Unit(baseUnit)
+	if archivedAtRaw.Valid && archivedAtRaw.String != "" {
+		if t, err := parseTime(archivedAtRaw.String); err == nil {
+			product.ArchivedAt = &t
+		}
+	}
 
 	if err := json.Unmarshal([]byte(aliases), &product.Aliases); err != nil {
 		return models.Product{}, fmt.Errorf("storage: decode aliases for %s: %w", product.ID, err)
@@ -265,6 +276,50 @@ func scanProduct(row scanner) (models.Product, error) {
 		return models.Product{}, fmt.Errorf("storage: decode packaging for %s: %w", product.ID, err)
 	}
 	return product, nil
+}
+
+// ArchiveProduct soft-deactivates an existing product without deleting historical records.
+func (s *Store) ArchiveProduct(ctx context.Context, shopID, productID string) (models.Product, error) {
+	if shopID == "" || productID == "" {
+		return models.Product{}, errors.New("storage: ArchiveProduct requires shop_id and product_id")
+	}
+
+	now := formatTime(time.Now().UTC())
+	const query = `UPDATE products SET archived_at = ?, updated_at = ? WHERE shop_id = ? AND id = ? AND archived_at IS NULL`
+	res, err := s.db.ExecContext(ctx, query, now, now, shopID, productID)
+	if err != nil {
+		return models.Product{}, fmt.Errorf("storage: archive product %s: %w", productID, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return models.Product{}, fmt.Errorf("storage: archive product %s: %w", productID, err)
+	}
+	if affected == 0 {
+		return models.Product{}, ErrNotFound
+	}
+	return s.GetProductByID(ctx, shopID, productID)
+}
+
+// UnarchiveProduct restores an archived product back to the active catalogue.
+func (s *Store) UnarchiveProduct(ctx context.Context, shopID, productID string) (models.Product, error) {
+	if shopID == "" || productID == "" {
+		return models.Product{}, errors.New("storage: UnarchiveProduct requires shop_id and product_id")
+	}
+
+	now := formatTime(time.Now().UTC())
+	const query = `UPDATE products SET archived_at = NULL, updated_at = ? WHERE shop_id = ? AND id = ? AND archived_at IS NOT NULL`
+	res, err := s.db.ExecContext(ctx, query, now, shopID, productID)
+	if err != nil {
+		return models.Product{}, fmt.Errorf("storage: unarchive product %s: %w", productID, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return models.Product{}, fmt.Errorf("storage: unarchive product %s: %w", productID, err)
+	}
+	if affected == 0 {
+		return models.Product{}, ErrNotFound
+	}
+	return s.GetProductByID(ctx, shopID, productID)
 }
 
 // encodeJSONList marshals a slice column, normalising nil to an empty array so

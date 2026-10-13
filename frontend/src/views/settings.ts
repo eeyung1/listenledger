@@ -10,6 +10,7 @@ import {
   fetchSettings,
   pairDevice,
   revokeDevice,
+  rotateDeviceToken,
   updateSettings,
   type Device,
   type ShopSettings,
@@ -73,6 +74,25 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
       actions.append(statusBadge);
 
       if (!isRevoked) {
+        const rotateBtn = el("button", "button button--secondary button--sm", "Rotate Token");
+        rotateBtn.addEventListener("click", async () => {
+          if (!confirm(`Rotate credentials for device "${dev.name}"? The existing token will immediately become invalid.`)) {
+            return;
+          }
+          rotateBtn.disabled = true;
+          try {
+            const res = await rotateDeviceToken(dev.id);
+            if (tokenCard && tokenVal) {
+              setText(tokenVal, res.token);
+              tokenCard.hidden = false;
+            }
+            await loadSettings();
+          } catch (err: unknown) {
+            rotateBtn.disabled = false;
+            alert(err instanceof Error ? err.message : "Failed to rotate device token");
+          }
+        });
+
         const revokeBtn = el("button", "button button--danger button--sm", "Revoke");
         revokeBtn.addEventListener("click", async () => {
           if (!confirm(`Revoke access for device "${dev.name}"? It will no longer be able to record captures.`)) {
@@ -87,7 +107,7 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
             alert(err instanceof Error ? err.message : "Failed to revoke device");
           }
         });
-        actions.append(revokeBtn);
+        actions.append(rotateBtn, revokeBtn);
       }
 
       item.append(info, actions);

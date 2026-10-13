@@ -157,9 +157,9 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Add persisted shop ownership and settings: name, currency, timezone, confidence threshold and sale/restock closing phrases.
 - [x] Replace query-string identity with authenticated shop membership for both HTTP and WebSocket requests.
 - [x] Pair, list and revoke edge device credentials.
-- [ ] Complete and verify an explicit device credential rotation workflow.
+- [x] Complete and verify an explicit device credential rotation workflow.
 - [x] Resolve capture shop access from authenticated sessions/device tokens.
-- [ ] Enforce canonical device identity on every capture, including rejection or replacement of conflicting submitted device IDs.
+- [x] Enforce canonical device identity on every capture, including rejection or replacement of conflicting submitted device IDs.
 - [ ] Provide a simple onboarding flow: create shop → load catalogue/opening stock → configure microphone/device → test capture.
 - [x] Keep destructive development endpoints disabled outside explicit local development.
 
@@ -175,7 +175,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [ ] Prevent base-unit/packaging edits from silently reinterpreting historical movements.
 - [x] Support explicit opening-stock entry and reasoned stock-count corrections with an audit trail.
 - [x] Provide product movement history and safe product archiving without deleting historical transactions.
-- [ ] Hold unknown products for review; allow an owner to create or select a product before confirmation.
+- [x] Hold unknown products for review; allow an owner to create or select a product before confirmation.
 
 **Acceptance:** an owner can set up the pilot's 20–50 products without developer commands. Restocking three cartons correctly changes stock in the configured base unit.
 
@@ -193,7 +193,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Keep sales revenue separate from purchase/restock cost and enforce the shop currency for the initial MVP.
 - [x] Add auditable corrections/reversals so an incorrect confirmed capture can be fixed without destroying history.
 - [x] Publish events only after commit; ensure failed event delivery can be recovered from durable state.
-- [ ] Group multi-line receipts and explicitly define whether confirmation is receipt-wide or line-by-line; prevent silent partial recording.
+- [x] Group multi-line receipts and explicitly define whether confirmation is receipt-wide or line-by-line; prevent silent partial recording.
 
 **Acceptance:** retry, simultaneous confirmation, server crash and insufficient-stock scenarios never produce partial or duplicate stock effects. Every adjustment is traceable.
 
@@ -208,7 +208,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Distinguish sales from restocking by explicit capture context and configured boundary phrases.
 - [ ] Verify spoken corrections, repeated phrases, incomplete speech and unrelated conversation using adversarial text and real-audio fixtures.
 - [x] Store transaction transcripts and append validation reasons for held captures.
-- [ ] Preserve original extracted values, separate review reasons and immutable owner correction/decision history.
+- [x] Preserve original extracted values, separate review reasons and immutable owner correction/decision history.
 - [x] Build a representative set of English shop phrases and catalogue aliases for regression evaluation.
 
 **Acceptance:** ambiguous or incomplete phrases go to review. A low product score cannot be hidden by a high average, and a closing phrase alone does not create a transaction.
@@ -240,9 +240,9 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 
 - [x] Add authenticated confirm, correct-and-confirm and reject operations.
 - [x] Show stored transcript, candidate product, quantity, amount and confidence in review cards; reasons are currently embedded in transcript text.
-- [ ] Allow product selection, quantity/unit correction and amount correction before confirmation.
+- [x] Allow product selection, quantity/unit correction and amount correction before confirmation.
 - [x] Apply confirmation and stock movement atomically with duplicate/stale-action protection.
-- [ ] Record who made a decision, when, and which values changed.
+- [x] Record who made a decision, when, and which values changed.
 - [x] Refresh the ledger, review count, inventory and totals after a decision.
 - [x] Provide a minimal manual sale/restock fallback using the same validation and stock service.
 - [x] Clearly display rejected, corrected and reversed records without counting them incorrectly.

@@ -7,6 +7,8 @@
 // JSON tags are part of the contract with the frontend SPA.
 package models
 
+import "time"
+
 // Currency codes are ISO 4217. NGN (Nigerian naira) is the V1 default per the
 // pilot scope, but the field is carried explicitly so multi-currency does not
 // require a schema change later.
@@ -100,6 +102,9 @@ type Product struct {
 	// LowStockThreshold is the level at or below which the dashboard raises a
 	// low-stock alert. Zero means "not configured".
 	LowStockThreshold int `json:"low_stock_threshold,omitempty"`
+	// ArchivedAt records when this product was soft-archived/discontinued.
+	// Nil for active catalogue items.
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 }
 
 // IsLowStock reports whether the product has reached its configured reorder
@@ -107,4 +112,9 @@ type Product struct {
 // never reports as low.
 func (p Product) IsLowStock() bool {
 	return p.LowStockThreshold > 0 && p.Quantity <= p.LowStockThreshold
+}
+
+// IsArchived reports whether the product has been archived.
+func (p Product) IsArchived() bool {
+	return p.ArchivedAt != nil
 }
