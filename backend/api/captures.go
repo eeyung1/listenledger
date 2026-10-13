@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/eeyung1/listenledger-backend/models"
 	"github.com/eeyung1/listenledger-backend/storage"
@@ -107,6 +108,7 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var storedTransactions []models.Transaction
+	allReplayed := len(validationRes.Lines) > 0
 
 	for i, line := range validationRes.Lines {
 		key := fmt.Sprintf("%s_%d", idempotencyBase, i)
@@ -114,7 +116,10 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 			key = key[:128]
 		}
 
-		canonical, _ := json.Marshal(line.Transaction)
+		hashTxn := line.Transaction
+		hashTxn.ID = ""
+		hashTxn.CreatedAt = time.Time{}
+		canonical, _ := json.Marshal(hashTxn)
 		sum := sha256.Sum256(canonical)
 		hashStr := hex.EncodeToString(sum[:])
 
@@ -135,9 +140,11 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 		storedTransactions = append(storedTransactions, stored)
 
 		if !result.Replayed {
+			allReplayed = false
 			if result.Product != nil {
 				s.publish(w, r, shopID, ws.EventInventoryUpdated, *result.Product)
 			}
+
 			eventType := ws.EventTransactionCreated
 			if stored.Status == models.StatusReviewRequired {
 				eventType = ws.EventTransactionReviewRequired
@@ -146,7 +153,12 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusCreated, captureResponse{
+	statusCode := http.StatusCreated
+	if allReplayed {
+		statusCode = http.StatusOK
+	}
+
+	writeJSON(w, statusCode, captureResponse{
 		CaptureID:      req.CaptureID,
 		ShopID:         shopID,
 		Type:           validationRes.Type,

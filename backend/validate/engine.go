@@ -194,8 +194,17 @@ func (e *Engine) Validate(
 
 		amountConf := 0.95
 		if amountVal <= 0 {
-			amountConf = 0.0
-			reviewReasons = append(reviewReasons, "missing_or_invalid_amount")
+			if txnType == models.TypeRestock {
+				// Spoken restock receipts may omit wholesale pricing
+				amountConf = 0.95
+			} else if match.Product != nil && match.Product.Price.Amount > 0 {
+				// Blueprint §10: default to catalogue unit price when spoken price is omitted
+				amountVal = int64(qty) * match.Product.Price.Amount
+				amountConf = 0.95
+			} else {
+				amountConf = 0.0
+				reviewReasons = append(reviewReasons, "missing_or_invalid_amount")
+			}
 		} else if match.Product != nil && txnType == models.TypeSale && match.Product.Price.Amount > 0 {
 			expected := int64(qty) * match.Product.Price.Amount
 			diffRatio := math.Abs(float64(amountVal-expected)) / float64(expected)

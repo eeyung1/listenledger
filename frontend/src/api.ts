@@ -347,3 +347,44 @@ export function revokeDevice(id: string): Promise<{ success: boolean }> {
   return postJSON<{ success: boolean }>(`/api/devices/${encodeURIComponent(id)}/revoke`);
 }
 
+export interface ImportCatalogueResult {
+  readonly total: number;
+  readonly imported: number;
+  readonly updated: number;
+  readonly failed: number;
+  readonly errors: readonly string[];
+}
+
+/** URL for downloading CSV catalogue template. */
+export function getCatalogueTemplateUrl(): string {
+  return "/api/products/template";
+}
+
+/** POST /api/products/import — upload CSV or JSON catalogue. */
+export async function importCatalogue(
+  content: string,
+  contentType: "text/csv" | "application/json" = "text/csv"
+): Promise<ImportCatalogueResult> {
+  const res = await fetch("/api/products/import", {
+    method: "POST",
+    headers: {
+      "Content-Type": contentType,
+      "X-ListenLedger-Request": "1",
+    },
+    body: content,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed.error) msg = parsed.error;
+    } catch {
+      if (text) msg = text;
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<ImportCatalogueResult>;
+}
+
+

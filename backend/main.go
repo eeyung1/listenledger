@@ -125,10 +125,9 @@ func serve(logger *slog.Logger, cfg config) error {
 	// The SPA is served from the same origin as /ws, which is what lets the
 	// default same-origin WebSocket policy apply without configuration.
 	//
-	// NOTE: http.FileServer serves everything under frontendDir, including
-	// TypeScript sources and build configuration. That is a development
-	// convenience; a production deployment should serve only built assets.
-	mux.Handle("/", noStoreCache(http.FileServer(http.Dir(frontendDir))))
+	// In production, static serving is restricted to built assets (HTML, CSS, JS, etc.)
+	// and raw TypeScript sources or build configurations are blocked.
+	mux.Handle("/", noStoreCache(restrictedStaticServer(frontendDir, cfg.devMode)))
 
 	rootHandler := api.Recoverer(logger)(api.RequestIDMiddleware(mux))
 
@@ -260,4 +259,35 @@ func splitList(raw string) []string {
 		}
 	}
 	return out
+}
+
+// restrictedStaticServer serves static assets from frontendDir while blocking access
+// to uncompiled TypeScript source files and build configurations in production.
+func restrictedStaticServer(frontendDir string, devMode bool) http.Handler {
+	fs := http.FileServer(http.Dir(frontendDir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clean := filepath.Clean(r.URL.Path)
+
+		// Never serve hidden files (.git, .env, etc.)
+		for _, part := range strings.Split(clean, string(filepath.Separator)) {
+			if strings.HasPrefix(part, ".") && part != "." && part != ".." {
+				http.NotFound(w, r)
+				return
+			}
+		}
+
+		if !devMode {
+			ext := strings.ToLower(filepath.Ext(clean))
+			base := strings.ToLower(filepath.Base(clean))
+			// Block source files, lockfiles, and configuration files in production mode
+			if ext == ".ts" || ext == ".tsx" || ext == ".go" ||
+				base == "package.json" || base == "package-lock.json" ||
+				base == "tsconfig.json" || strings.Contains(clean, "node_modules") {
+				http.NotFound(w, r)
+				return
+			}
+		}
+
+		fs.ServeHTTP(w, r)
+	})
 }
