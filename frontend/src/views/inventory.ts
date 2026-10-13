@@ -10,7 +10,15 @@
  * cheaper than a round trip per keystroke.
  */
 
-import { fetchInventory, type Product } from "../api.js";
+import {
+  createProduct,
+  fetchInventory,
+  updateProduct,
+  type CreateProductInput,
+  type Product,
+  type Unit,
+  type UpdateProductInput,
+} from "../api.js";
 import {
   cell,
   clear,
@@ -21,6 +29,7 @@ import {
   isLowStock,
   setText,
 } from "../format.js";
+import { CONNECTION_STATUS_EVENT, type ConnectionStatusDetail } from "../ws.js";
 import type { ViewCleanup } from "./index.js";
 
 export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
@@ -31,6 +40,158 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   const body = hook(root, "catalogue-body");
   const countLabel = hook(root, "inventory-count");
   const searchInput = hook<HTMLInputElement>(root, "catalogue-query");
+  const addButton = hook<HTMLButtonElement>(root, "catalogue-add");
+
+  function showProductModal(existing?: Product): void {
+    const isEdit = existing !== undefined;
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal-dialog");
+
+    const header = el("div", "modal-header");
+    const title = el("h3", "modal-title", isEdit ? `Edit ${existing.name}` : "Add Product");
+    const closeBtn = el("button", "button button--secondary button--sm", "✕");
+    closeBtn.type = "button";
+    header.append(title, closeBtn);
+
+    const form = el("form", "modal-form");
+
+    const nameLabel = el("label", "form-field", "Product Name *");
+    const nameInput = el("input", "input") as HTMLInputElement;
+    nameInput.type = "text";
+    nameInput.required = true;
+    nameInput.value = existing?.name ?? "";
+    nameLabel.append(nameInput);
+
+    const skuLabel = el("label", "form-field", "SKU *");
+    const skuInput = el("input", "input") as HTMLInputElement;
+    skuInput.type = "text";
+    skuInput.required = true;
+    skuInput.value = existing?.sku ?? "";
+    skuLabel.append(skuInput);
+
+    const priceLabel = el("label", "form-field", "Price (NGN) *");
+    const priceInput = el("input", "input") as HTMLInputElement;
+    priceInput.type = "number";
+    priceInput.step = "0.01";
+    priceInput.min = "0";
+    priceInput.required = true;
+    priceInput.value = existing ? String(existing.price.amount / 100) : "";
+    priceLabel.append(priceInput);
+
+    const unitLabel = el("label", "form-field", "Base Unit *");
+    const unitSelect = el("select", "select") as HTMLSelectElement;
+    const units: Unit[] = ["piece", "pack", "carton", "bottle", "crate"];
+    for (const u of units) {
+      const opt = el("option", "", u) as HTMLOptionElement;
+      opt.value = u;
+      if (existing && existing.base_unit === u) opt.selected = true;
+      unitSelect.append(opt);
+    }
+    unitLabel.append(unitSelect);
+
+    const qtyLabel = el("label", "form-field", isEdit ? "Stock (movements adjust stock)" : "Opening Stock *");
+    const qtyInput = el("input", "input") as HTMLInputElement;
+    qtyInput.type = "number";
+    qtyInput.min = "0";
+    qtyInput.value = existing ? String(existing.quantity) : "0";
+    if (isEdit) {
+      qtyInput.disabled = true;
+    }
+    qtyLabel.append(qtyInput);
+
+    const aliasesLabel = el("label", "form-field", "Aliases (comma-separated)");
+    const aliasesInput = el("input", "input") as HTMLInputElement;
+    aliasesInput.type = "text";
+    aliasesInput.placeholder = "e.g. Big Milo, Peak 400g";
+    aliasesInput.value = existing ? existing.aliases.join(", ") : "";
+    aliasesLabel.append(aliasesInput);
+
+    const lowStockLabel = el("label", "form-field", "Reorder Threshold");
+    const lowStockInput = el("input", "input") as HTMLInputElement;
+    lowStockInput.type = "number";
+    lowStockInput.min = "0";
+    lowStockInput.value = existing && existing.low_stock_threshold !== undefined ? String(existing.low_stock_threshold) : "5";
+    lowStockLabel.append(lowStockInput);
+
+    const errorMsg = el("div", "form-error");
+    errorMsg.hidden = true;
+
+    const footer = el("div", "modal-footer");
+    const cancelBtn = el("button", "button button--secondary", "Cancel");
+    cancelBtn.type = "button";
+    const submitBtn = el("button", "button button--primary", isEdit ? "Save Changes" : "Create Product");
+    submitBtn.type = "submit";
+    footer.append(cancelBtn, submitBtn);
+
+    form.append(nameLabel, skuLabel, priceLabel, unitLabel, qtyLabel, aliasesLabel, lowStockLabel, errorMsg, footer);
+    modal.append(header, form);
+    overlay.append(modal);
+    root.append(overlay);
+
+    const closeModal = (): void => {
+      overlay.remove();
+    };
+
+    closeBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorMsg.hidden = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Saving…";
+
+      try {
+        const name = nameInput.value.trim();
+        const sku = skuInput.value.trim();
+        const priceNaira = parseFloat(priceInput.value);
+        if (isNaN(priceNaira) || priceNaira < 0) {
+          throw new Error("Price must be a positive number");
+        }
+        const priceKobo = Math.round(priceNaira * 100);
+        const aliases = aliasesInput.value
+          .split(",")
+          .map((a) => a.trim())
+          .filter((a) => a.length > 0);
+        const lowStock = parseInt(lowStockInput.value, 10) || 0;
+
+        if (isEdit) {
+          const updateData: UpdateProductInput = {
+            name,
+            sku,
+            aliases,
+            price: { amount: priceKobo, currency: existing.price.currency },
+            low_stock_threshold: lowStock,
+          };
+          const updated = await updateProduct(existing.id, updateData);
+          applyProduct(updated);
+        } else {
+          const qty = parseInt(qtyInput.value, 10) || 0;
+          const baseUnit = unitSelect.value as Unit;
+          const createData: CreateProductInput = {
+            name,
+            sku,
+            aliases,
+            price: { amount: priceKobo, currency: "NGN" },
+            quantity: qty,
+            base_unit: baseUnit,
+            low_stock_threshold: lowStock,
+          };
+          const created = await createProduct(createData);
+          applyProduct(created);
+        }
+        closeModal();
+      } catch (err: unknown) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = isEdit ? "Save Changes" : "Create Product";
+        errorMsg.hidden = false;
+        errorMsg.textContent = err instanceof Error ? err.message : "Failed to save product";
+      }
+    });
+  }
 
   function packagingSummary(product: Product): string {
     const rules = product.packaging ?? [];
@@ -65,10 +226,11 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
 
     const packaging = cell("table__cell", packagingSummary(product));
 
-    // The actions column is in the template's header but has no behaviour yet:
-    // editing a product needs PATCH /api/products/{id}, which does not exist.
     const actions = cell("table__cell table__cell--actions");
-    actions.append(el("span", "table__placeholder", "—"));
+    const editBtn = el("button", "button button--secondary button--sm", "Edit");
+    editBtn.type = "button";
+    editBtn.addEventListener("click", () => showProductModal(product));
+    actions.append(editBtn);
 
     row.append(name, sku, aliases, price, stock, packaging, actions);
     return row;
@@ -160,9 +322,22 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     render();
   };
 
+  const onAddClick = (): void => {
+    showProductModal();
+  };
+
+  const onConnectionStatus = (event: Event): void => {
+    const detail = (event as CustomEvent<ConnectionStatusDetail>).detail;
+    if (detail.resyncRequired) {
+      void refetch();
+    }
+  };
+
   window.addEventListener("ll:inventory-updated", onInventoryUpdated);
   window.addEventListener("ll:product-created", onProductCreated);
+  window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   searchInput?.addEventListener("input", onSearch);
+  addButton?.addEventListener("click", onAddClick);
 
   void refetch();
 
@@ -170,6 +345,8 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     disposed = true;
     window.removeEventListener("ll:inventory-updated", onInventoryUpdated);
     window.removeEventListener("ll:product-created", onProductCreated);
+    window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     searchInput?.removeEventListener("input", onSearch);
+    addButton?.removeEventListener("click", onAddClick);
   };
 }

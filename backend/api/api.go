@@ -66,8 +66,10 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/transactions", server.handleTransactions)
+	mux.HandleFunc("/api/transactions/", server.handleTransactionDetail)
 	mux.HandleFunc("/api/inventory", server.handleInventory)
 	mux.HandleFunc("/api/products", server.handleProducts)
+	mux.HandleFunc("/api/products/", server.handleProductDetail)
 	// Catch-all, so an unknown path under /api/ answers in JSON like every
 	// other endpoint rather than the mux's plain-text 404.
 	mux.HandleFunc("/api/", server.handleNotFound)

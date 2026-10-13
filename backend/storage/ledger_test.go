@@ -140,3 +140,103 @@ func TestConcurrentRetriesApplyOnce(t *testing.T) {
 		t.Fatal(count, e)
 	}
 }
+
+func TestResolveReview(t *testing.T) {
+	s, _ := ledgerFixture(t)
+	ctx := context.Background()
+
+	// 1. Insert a review_required sale
+	heldSale := movement("held_sale")
+	heldSale.Status = models.StatusReviewRequired
+	if _, err := s.RecordMovement(ctx, heldSale, "req_held_sale", "hash_held_sale"); err != nil {
+		t.Fatal(err)
+	}
+	stock(t, s, 20) // unaffected
+
+	// 2. Cross-shop check: shop "b" cannot confirm shop "a"'s review transaction
+	if _, err := s.ResolveReview(ctx, "b", "held_sale", ReviewActionConfirm, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-shop confirm, got %v", err)
+	}
+	stock(t, s, 20)
+
+	// 3. Confirm the held sale
+	res, err := s.ResolveReview(ctx, "a", "held_sale", ReviewActionConfirm, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Transaction.Status != models.StatusConfirmed {
+		t.Fatalf("expected status confirmed, got %s", res.Transaction.Status)
+	}
+	stock(t, s, 18) // decreased by 2
+
+	// Verify stock_movement row exists
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM stock_movements WHERE transaction_id = 'held_sale' AND delta = -2`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("expected 1 stock movement row, got %d (err: %v)", count, err)
+	}
+
+	// 4. Repeated confirmation should fail with ErrConflict (cannot double-confirm)
+	if _, err := s.ResolveReview(ctx, "a", "held_sale", ReviewActionConfirm, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected ErrConflict on duplicate confirm, got %v", err)
+	}
+	stock(t, s, 18) // unchanged
+
+	// 5. Test rejecting a review_required transaction
+	heldReject := movement("held_reject")
+	heldReject.Status = models.StatusReviewRequired
+	if _, err := s.RecordMovement(ctx, heldReject, "req_held_reject", "hash_held_reject"); err != nil {
+		t.Fatal(err)
+	}
+	stock(t, s, 18) // unaffected
+
+	rejRes, err := s.ResolveReview(ctx, "a", "held_reject", ReviewActionReject, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejRes.Transaction.Status != models.StatusRejected {
+		t.Fatalf("expected status rejected, got %s", rejRes.Transaction.Status)
+	}
+	stock(t, s, 18) // still unaffected
+
+	// Cannot reject or confirm again
+	if _, err := s.ResolveReview(ctx, "a", "held_reject", ReviewActionConfirm, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected ErrConflict on confirming rejected transaction, got %v", err)
+	}
+
+	// 6. Test restock with packaging conversion and corrections
+	heldRestock := movement("held_restock")
+	heldRestock.Type = models.TypeRestock
+	heldRestock.Status = models.StatusReviewRequired
+	heldRestock.Quantity = 1
+	heldRestock.Unit = models.UnitPack
+	if _, err := s.RecordMovement(ctx, heldRestock, "req_held_restock", "hash_held_restock"); err != nil {
+		t.Fatal(err)
+	}
+	stock(t, s, 18)
+
+	// Confirm with correction: 2 cartons (1 carton = 12 packs => +24 packs)
+	correctCartons := &ReviewCorrections{
+		Quantity: 2,
+		Unit:     models.UnitCarton,
+	}
+	restockRes, err := s.ResolveReview(ctx, "a", "held_restock", ReviewActionConfirm, correctCartons)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restockRes.Transaction.Quantity != 2 || restockRes.Transaction.Unit != models.UnitCarton {
+		t.Fatalf("corrections not applied: %+v", restockRes.Transaction)
+	}
+	stock(t, s, 42) // 18 + 24 = 42
+
+	// 7. Insufficient stock on confirm should roll back
+	heldHugeSale := movement("held_huge")
+	heldHugeSale.Status = models.StatusReviewRequired
+	heldHugeSale.Quantity = 100
+	if _, err := s.RecordMovement(ctx, heldHugeSale, "req_huge", "hash_huge"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResolveReview(ctx, "a", "held_huge", ReviewActionConfirm, nil); !errors.Is(err, ErrInsufficientStock) {
+		t.Fatalf("expected ErrInsufficientStock, got %v", err)
+	}
+	stock(t, s, 42) // unchanged!
+}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/eeyung1/listenledger-backend/models"
+	"github.com/eeyung1/listenledger-backend/storage"
 	"github.com/eeyung1/listenledger-backend/ws"
 )
 
@@ -138,4 +139,150 @@ func (b createProductRequest) product(shopID string) (models.Product, error) {
 		Packaging:         b.Packaging,
 		LowStockThreshold: b.LowStockThreshold,
 	}, nil
+}
+
+// handleProductDetail serves GET and PATCH/PUT on /api/products/{id}.
+func (s *Server) handleProductDetail(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/products/")
+	id = strings.TrimSpace(id)
+	if id == "" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		s.getProduct(w, r, id)
+	case http.MethodPatch, http.MethodPut:
+		s.updateProduct(w, r, id)
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPatch+", "+http.MethodPut)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) getProduct(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+	p, err := s.store.GetProductByID(r.Context(), shopID, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "product not found")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, "get product", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+type updateProductRequest struct {
+	Name              *string                     `json:"name"`
+	SKU               *string                     `json:"sku"`
+	Aliases           *[]string                   `json:"aliases"`
+	Price             *models.Money               `json:"price"`
+	BaseUnit          *models.Unit                `json:"base_unit"`
+	Packaging         *[]models.PackagingRelation `json:"packaging"`
+	LowStockThreshold *int                        `json:"low_stock_threshold"`
+}
+
+func (s *Server) updateProduct(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	existing, err := s.store.GetProductByID(r.Context(), shopID, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "product not found")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, "get product", err)
+		return
+	}
+
+	var req updateProductRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "name cannot be empty")
+			return
+		}
+		existing.Name = name
+	}
+	if req.SKU != nil {
+		sku := strings.TrimSpace(*req.SKU)
+		if sku == "" {
+			writeError(w, http.StatusBadRequest, "sku cannot be empty")
+			return
+		}
+		existing.SKU = sku
+	}
+	if req.Aliases != nil {
+		aliases := make([]string, 0, len(*req.Aliases))
+		for _, alias := range *req.Aliases {
+			if trimmed := strings.TrimSpace(alias); trimmed != "" {
+				aliases = append(aliases, trimmed)
+			}
+		}
+		existing.Aliases = aliases
+	}
+	if req.Price != nil {
+		if req.Price.Amount < 0 {
+			writeError(w, http.StatusBadRequest, "price cannot be negative")
+			return
+		}
+		if req.Price.Currency != "" && req.Price.Currency != existing.Price.Currency {
+			writeError(w, http.StatusBadRequest, "currency cannot be changed")
+			return
+		}
+		existing.Price = *req.Price
+	}
+	if req.BaseUnit != nil {
+		if !req.BaseUnit.Valid() {
+			writeError(w, http.StatusBadRequest, "base_unit is not a recognised unit")
+			return
+		}
+		existing.BaseUnit = *req.BaseUnit
+	}
+	if req.Packaging != nil {
+		if err := models.ValidatePackaging(existing.BaseUnit, *req.Packaging); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		for _, relation := range *req.Packaging {
+			if !relation.From.Valid() || !relation.To.Valid() {
+				writeError(w, http.StatusBadRequest, "packaging from/to must be recognised units")
+				return
+			}
+			if relation.Factor <= 0 {
+				writeError(w, http.StatusBadRequest, "packaging factor must be positive")
+				return
+			}
+		}
+		existing.Packaging = *req.Packaging
+	}
+	if req.LowStockThreshold != nil {
+		if *req.LowStockThreshold < 0 {
+			writeError(w, http.StatusBadRequest, "low_stock_threshold cannot be negative")
+			return
+		}
+		existing.LowStockThreshold = *req.LowStockThreshold
+	}
+
+	updated, err := s.store.UpdateProduct(r.Context(), existing)
+	if err != nil {
+		s.fail(w, r, "update product", err)
+		return
+	}
+
+	s.publish(w, r, shopID, ws.EventInventoryUpdated, updated)
+	writeJSON(w, http.StatusOK, updated)
 }

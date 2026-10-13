@@ -267,3 +267,129 @@ func deriveStatus(confidence *models.Confidence) models.TransactionStatus {
 	}
 	return models.StatusConfirmed
 }
+
+// handleTransactionDetail routes requests to /api/transactions/{id} and /api/transactions/{id}/{action}.
+func (s *Server) handleTransactionDetail(w http.ResponseWriter, r *http.Request) {
+	rel := strings.TrimPrefix(r.URL.Path, "/api/transactions/")
+	parts := strings.Split(rel, "/")
+	if len(parts) == 1 && parts[0] != "" {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.getTransaction(w, r, parts[0])
+		return
+	}
+	if len(parts) == 2 && parts[0] != "" {
+		id := parts[0]
+		action := parts[1]
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		switch action {
+		case "confirm":
+			s.confirmTransaction(w, r, id)
+			return
+		case "reject":
+			s.rejectTransaction(w, r, id)
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "not found")
+}
+
+func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+	t, err := s.store.GetTransactionByID(r.Context(), shopID, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "transaction not found")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, "get transaction", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+type confirmTransactionRequest struct {
+	ProductID string        `json:"product_id"`
+	Quantity  int           `json:"quantity"`
+	Unit      models.Unit   `json:"unit"`
+	Amount    *models.Money `json:"amount"`
+}
+
+func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var corrections *storage.ReviewCorrections
+	if r.Body != nil && r.ContentLength > 0 {
+		var req confirmTransactionRequest
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		corrections = &storage.ReviewCorrections{
+			ProductID: strings.TrimSpace(req.ProductID),
+			Quantity:  req.Quantity,
+			Unit:      req.Unit,
+			Amount:    req.Amount,
+		}
+	}
+
+	result, err := s.store.ResolveReview(r.Context(), shopID, id, storage.ReviewActionConfirm, corrections)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrNotFound):
+			writeError(w, http.StatusNotFound, "transaction not found")
+		case errors.Is(err, storage.ErrConflict):
+			writeError(w, http.StatusConflict, "transaction is not awaiting review")
+		case errors.Is(err, storage.ErrInsufficientStock):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, storage.ErrCurrency), errors.Is(err, models.ErrPackaging), errors.Is(err, storage.ErrInvalidMovement):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			s.fail(w, r, "confirm transaction", err)
+		}
+		return
+	}
+
+	if result.Product != nil {
+		s.publish(w, r, shopID, ws.EventInventoryUpdated, *result.Product)
+	}
+	s.publish(w, r, shopID, ws.EventTransactionUpdated, result.Transaction)
+	writeJSON(w, http.StatusOK, result.Transaction)
+}
+
+func (s *Server) rejectTransaction(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := s.store.ResolveReview(r.Context(), shopID, id, storage.ReviewActionReject, nil)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrNotFound):
+			writeError(w, http.StatusNotFound, "transaction not found")
+		case errors.Is(err, storage.ErrConflict):
+			writeError(w, http.StatusConflict, "transaction is not awaiting review")
+		case errors.Is(err, storage.ErrInvalidMovement):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			s.fail(w, r, "reject transaction", err)
+		}
+		return
+	}
+
+	s.publish(w, r, shopID, ws.EventTransactionUpdated, result.Transaction)
+	writeJSON(w, http.StatusOK, result.Transaction)
+}

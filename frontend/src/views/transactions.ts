@@ -13,7 +13,13 @@
  * query, which is noted in TODO.md.
  */
 
-import { MAX_TRANSACTION_LIMIT, fetchTransactions, type Transaction } from "../api.js";
+import {
+  MAX_TRANSACTION_LIMIT,
+  confirmTransaction,
+  fetchTransactions,
+  rejectTransaction,
+  type Transaction,
+} from "../api.js";
 import {
   cell,
   clear,
@@ -28,6 +34,7 @@ import {
   hook,
   setText,
 } from "../format.js";
+import { CONNECTION_STATUS_EVENT, type ConnectionStatusDetail } from "../ws.js";
 import type { ViewCleanup } from "./index.js";
 
 interface Filters {
@@ -73,7 +80,48 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     const scores = el("p", "review-card__scores", formatConfidenceBreakdown(transaction));
     scores.title = "Recognition confidence per anchor; the weakest one held this capture";
 
-    card.append(head, transcript, scores);
+    const actions = el("div", "review-card__actions");
+    const confirmBtn = el("button", "button button--primary button--sm", "Confirm");
+    const rejectBtn = el("button", "button button--secondary button--sm", "Reject");
+    const errorMsg = el("span", "review-card__error");
+    errorMsg.hidden = true;
+
+    confirmBtn.addEventListener("click", async () => {
+      confirmBtn.disabled = true;
+      rejectBtn.disabled = true;
+      confirmBtn.textContent = "Confirming…";
+      errorMsg.hidden = true;
+      try {
+        const updated = await confirmTransaction(transaction.id);
+        applyTransaction(updated, false);
+      } catch (err: unknown) {
+        confirmBtn.disabled = false;
+        rejectBtn.disabled = false;
+        confirmBtn.textContent = "Confirm";
+        errorMsg.hidden = false;
+        errorMsg.textContent = err instanceof Error ? err.message : "Confirmation failed";
+      }
+    });
+
+    rejectBtn.addEventListener("click", async () => {
+      confirmBtn.disabled = true;
+      rejectBtn.disabled = true;
+      rejectBtn.textContent = "Rejecting…";
+      errorMsg.hidden = true;
+      try {
+        const updated = await rejectTransaction(transaction.id);
+        applyTransaction(updated, false);
+      } catch (err: unknown) {
+        confirmBtn.disabled = false;
+        rejectBtn.disabled = false;
+        rejectBtn.textContent = "Reject";
+        errorMsg.hidden = false;
+        errorMsg.textContent = err instanceof Error ? err.message : "Rejection failed";
+      }
+    });
+
+    actions.append(confirmBtn, rejectBtn, errorMsg);
+    card.append(head, transcript, scores, actions);
     return card;
   }
 
@@ -208,9 +256,17 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     renderLedger();
   };
 
+  const onConnectionStatus = (event: Event): void => {
+    const detail = (event as CustomEvent<ConnectionStatusDetail>).detail;
+    if (detail.resyncRequired) {
+      void refetch();
+    }
+  };
+
   window.addEventListener("ll:transaction-received", onTransaction);
   window.addEventListener("ll:transaction-review-required", onTransaction);
   window.addEventListener("ll:transaction-updated", onTransactionUpdated);
+  window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   typeFilter?.addEventListener("change", onTypeFilter);
   statusFilter?.addEventListener("change", onStatusFilter);
 
@@ -221,6 +277,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     window.removeEventListener("ll:transaction-received", onTransaction);
     window.removeEventListener("ll:transaction-review-required", onTransaction);
     window.removeEventListener("ll:transaction-updated", onTransactionUpdated);
+    window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     typeFilter?.removeEventListener("change", onTypeFilter);
     statusFilter?.removeEventListener("change", onStatusFilter);
   };

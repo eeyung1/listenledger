@@ -1,8 +1,8 @@
 # TODO — ListenLedger
 
-## Authentication increment (13 October 2026)
+## Review actions and catalogue increment (13 October 2026)
 
-Implemented owner signup/login/logout, one-time recovery codes, persisted hashed sessions, shop isolation, write CSRF guards, persisted throttling and WebSocket session revalidation. Go/frontend CI and auth integration tests added. The README tracks current progress; older scaffold notes below remain historical where contradicted. Atomic ledger/stock operations and idempotency now implemented with packaging conversion and race-tested rollback/retry coverage. Next: owner review actions and catalogue forms. Device credentials remain pending.
+Implemented owner review actions (`POST /api/transactions/{id}/confirm` and `POST /api/transactions/{id}/reject`) with atomic stock adjustments and conflict protection. Implemented catalogue product retrieval (`GET /api/products/{id}`) and editing (`PATCH /api/products/{id}`). Added frontend review queue interactive decisions, catalogue Add and Edit modal forms, reconnect resync across all views, and comprehensive responsive styling. Next: server-side daily summary endpoint (`GET /api/summary`) and Rust edge audio capture engine.
 
 
 Status: the realtime pipe and the storage layer are in place. The dashboard can
