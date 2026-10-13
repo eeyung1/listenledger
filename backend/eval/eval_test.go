@@ -56,4 +56,3 @@ func TestPilotTrialEvaluation(t *testing.T) {
 		t.Logf("TRIAL_REPORT.md written successfully.")
 	}
 }
-

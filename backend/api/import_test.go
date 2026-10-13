@@ -152,4 +152,3 @@ func TestProductsImportJSON(t *testing.T) {
 		t.Fatalf("bread not found in store: %+v, err: %v", bread, err)
 	}
 }
-

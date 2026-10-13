@@ -279,4 +279,3 @@ func parseCSVImport(reader io.Reader) ([]createProductRequest, error) {
 
 	return items, nil
 }
-

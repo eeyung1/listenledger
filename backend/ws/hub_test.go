@@ -205,4 +205,3 @@ func TestHub_Shutdown(t *testing.T) {
 		t.Fatal("timed out waiting for client.send to close after shutdown")
 	}
 }
-
