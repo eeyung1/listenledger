@@ -133,6 +133,14 @@ func (s *Server) handleProductsImport(w http.ResponseWriter, r *http.Request) {
 			s.publish(w, r, shopID, ws.EventProductCreated, prod)
 		} else {
 			// Update existing product
+			if existing.BaseUnit != prod.BaseUnit {
+				_, totalMovements, err := s.store.GetProductMovements(r.Context(), shopID, existing.ID, 1, 0)
+				if err == nil && totalMovements > 0 {
+					res.Failed++
+					res.Errors = append(res.Errors, fmt.Sprintf("row %d (%s): cannot change base_unit from %s to %s for product with %d historical movements", idx+1, prod.SKU, existing.BaseUnit, prod.BaseUnit, totalMovements))
+					continue
+				}
+			}
 			existing.Name = prod.Name
 			existing.Aliases = prod.Aliases
 			existing.Price = prod.Price

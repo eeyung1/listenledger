@@ -27,27 +27,50 @@ pub struct DurableQueue {
 
 impl DurableQueue {
     /// Opens or creates the queue backing file and recovers any pending items.
+    /// Gracefully recovers valid lines even if interrupted writes left corrupted trailing lines.
     pub fn open<P: AsRef<Path>>(path: P, capacity: usize) -> Result<Self, QueueError> {
         let file_path = path.as_ref().to_path_buf();
         let mut in_memory = VecDeque::new();
+        let mut had_corrupted_lines = false;
 
         if file_path.exists() {
             let file = File::open(&file_path)?;
             let reader = BufReader::new(file);
             for line in reader.lines() {
-                let line_str = line?;
-                if !line_str.trim().is_empty() {
-                    let item: CapturePayload = serde_json::from_str(&line_str)?;
-                    in_memory.push_back(item);
+                let line_str = match line {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::warn!("Queue recovery encountered read error: {}", e);
+                        had_corrupted_lines = true;
+                        continue;
+                    }
+                };
+                let trimmed = line_str.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<CapturePayload>(trimmed) {
+                    Ok(item) => in_memory.push_back(item),
+                    Err(err) => {
+                        tracing::warn!("Discarding corrupt queue entry (incomplete write): {}", err);
+                        had_corrupted_lines = true;
+                    }
                 }
             }
         }
 
-        Ok(Self {
+        let queue = Self {
             file_path,
             in_memory,
             capacity,
-        })
+        };
+
+        if had_corrupted_lines {
+            // Rewrite the clean set to disk
+            queue.persist_all()?;
+        }
+
+        Ok(queue)
     }
 
     /// Appends a new capture to disk and memory.
@@ -74,7 +97,7 @@ impl DurableQueue {
         self.in_memory.front()
     }
 
-    /// Removes acknowledged capture and rewrites durable queue file.
+    /// Removes acknowledged capture and atomically rewrites durable queue file.
     pub fn pop(&mut self) -> Result<Option<CapturePayload>, QueueError> {
         let popped = self.in_memory.pop_front();
         if popped.is_some() {
@@ -91,19 +114,29 @@ impl DurableQueue {
         self.in_memory.is_empty()
     }
 
-    fn persist_all(&self) -> Result<(), QueueError> {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&self.file_path)?;
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
 
-        for item in &self.in_memory {
-            let serialized = serde_json::to_string(item)?;
-            writeln!(file, "{}", serialized)?;
+    /// Atomically writes in-memory items to a temporary file and renames it over the target,
+    /// preventing truncated or corrupt files if a power cut occurs during compaction.
+    fn persist_all(&self) -> Result<(), QueueError> {
+        let tmp_path = self.file_path.with_extension("tmp");
+        {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&tmp_path)?;
+
+            for item in &self.in_memory {
+                let serialized = serde_json::to_string(item)?;
+                writeln!(file, "{}", serialized)?;
+            }
+            file.sync_data()?;
         }
-        file.sync_data()?;
+
+        std::fs::rename(&tmp_path, &self.file_path)?;
         Ok(())
     }
 }
-

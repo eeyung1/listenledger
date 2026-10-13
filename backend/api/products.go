@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -60,6 +61,17 @@ func (s *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		// Every message here describes the caller's own input, so it is safe
 		// to return verbatim; none of them name a table, row or file.
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Validate duplicate SKUs and ambiguous aliases against existing catalogue
+	existingProducts, err := s.store.ListProducts(r.Context(), shopID)
+	if err != nil {
+		s.fail(w, r, "list catalogue for conflict validation", err)
+		return
+	}
+	if err := validateCatalogueConflicts(existingProducts, product.Name, product.SKU, product.Aliases, ""); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 
@@ -140,6 +152,74 @@ func (b createProductRequest) product(shopID string) (models.Product, error) {
 		Packaging:         b.Packaging,
 		LowStockThreshold: b.LowStockThreshold,
 	}, nil
+}
+
+// validateCatalogueConflicts checks for duplicate SKU, duplicate product name, or ambiguous aliases.
+func validateCatalogueConflicts(products []models.Product, name, sku string, aliases []string, excludeID string) error {
+	trimmedName := strings.TrimSpace(name)
+	trimmedSKU := strings.TrimSpace(sku)
+
+	seenAliases := make(map[string]struct{})
+	for _, alias := range aliases {
+		a := strings.ToLower(strings.TrimSpace(alias))
+		if a == "" {
+			continue
+		}
+		if a == strings.ToLower(trimmedName) {
+			return fmt.Errorf("alias '%s' cannot be identical to product name", alias)
+		}
+		if a == strings.ToLower(trimmedSKU) {
+			return fmt.Errorf("alias '%s' cannot be identical to product SKU", alias)
+		}
+		if _, seen := seenAliases[a]; seen {
+			return fmt.Errorf("duplicate alias '%s' within product definition", alias)
+		}
+		seenAliases[a] = struct{}{}
+	}
+
+	for _, p := range products {
+		if p.ID == excludeID {
+			continue
+		}
+		if trimmedSKU != "" && strings.EqualFold(p.SKU, trimmedSKU) {
+			return fmt.Errorf("SKU '%s' is already used by product '%s'", sku, p.Name)
+		}
+		if trimmedName != "" && strings.EqualFold(p.Name, trimmedName) {
+			return fmt.Errorf("product name '%s' already exists in catalogue (SKU: %s)", name, p.SKU)
+		}
+		for _, alias := range aliases {
+			trimmedAlias := strings.TrimSpace(alias)
+			if trimmedAlias == "" {
+				continue
+			}
+			if strings.EqualFold(p.Name, trimmedAlias) {
+				return fmt.Errorf("alias '%s' conflicts with existing product name '%s'", alias, p.Name)
+			}
+			if strings.EqualFold(p.SKU, trimmedAlias) {
+				return fmt.Errorf("alias '%s' conflicts with existing product SKU '%s'", alias, p.SKU)
+			}
+			for _, otherAlias := range p.Aliases {
+				if strings.EqualFold(otherAlias, trimmedAlias) {
+					return fmt.Errorf("alias '%s' is already assigned to product '%s'", alias, p.Name)
+				}
+			}
+		}
+		if trimmedName != "" {
+			for _, otherAlias := range p.Aliases {
+				if strings.EqualFold(otherAlias, trimmedName) {
+					return fmt.Errorf("product name '%s' conflicts with alias already assigned to product '%s'", name, p.Name)
+				}
+			}
+		}
+		if trimmedSKU != "" {
+			for _, otherAlias := range p.Aliases {
+				if strings.EqualFold(otherAlias, trimmedSKU) {
+					return fmt.Errorf("product SKU '%s' conflicts with alias already assigned to product '%s'", sku, p.Name)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // handleProductDetail serves GET and PATCH/PUT on /api/products/{id},
@@ -290,6 +370,17 @@ func (s *Server) updateProduct(w http.ResponseWriter, r *http.Request, id string
 			writeError(w, http.StatusBadRequest, "base_unit is not a recognised unit")
 			return
 		}
+		if *req.BaseUnit != existing.BaseUnit {
+			_, totalMovements, err := s.store.GetProductMovements(r.Context(), shopID, existing.ID, 1, 0)
+			if err != nil {
+				s.fail(w, r, "check product movements", err)
+				return
+			}
+			if totalMovements > 0 {
+				writeError(w, http.StatusConflict, fmt.Sprintf("cannot change base_unit for '%s': product has %d historical stock movements; changing base unit would silently reinterpret past records", existing.Name, totalMovements))
+				return
+			}
+		}
 		existing.BaseUnit = *req.BaseUnit
 	}
 	if req.Packaging != nil {
@@ -315,6 +406,18 @@ func (s *Server) updateProduct(w http.ResponseWriter, r *http.Request, id string
 			return
 		}
 		existing.LowStockThreshold = *req.LowStockThreshold
+	}
+
+	if req.Name != nil || req.SKU != nil || req.Aliases != nil {
+		existingProducts, err := s.store.ListProducts(r.Context(), shopID)
+		if err != nil {
+			s.fail(w, r, "list catalogue for conflict validation", err)
+			return
+		}
+		if err := validateCatalogueConflicts(existingProducts, existing.Name, existing.SKU, existing.Aliases, existing.ID); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 	}
 
 	updated, err := s.store.UpdateProduct(r.Context(), existing)
