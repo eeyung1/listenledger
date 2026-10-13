@@ -49,6 +49,7 @@ type Server struct {
 	resolveShop    auth.ShopResolver
 	log            *slog.Logger
 	validateEngine *validate.Engine
+	captureLimiter *RateLimiter
 }
 
 // New builds the /api/ handler tree, to be mounted at the "/api/" prefix.
@@ -70,6 +71,7 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 		resolveShop:    resolveShop,
 		log:            logger,
 		validateEngine: validate.NewEngine(),
+		captureLimiter: NewRateLimiter(60, time.Minute),
 	}
 
 	mux := http.NewServeMux()
@@ -84,12 +86,12 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	mux.HandleFunc("/api/products/", server.handleProductDetail)
 	mux.HandleFunc("/api/summary", server.handleSummary)
 	mux.HandleFunc("/api/settings", server.handleSettings)
-	mux.HandleFunc("/api/captures", server.handleCaptures)
+	mux.HandleFunc("/api/captures", server.captureLimiter.LimitMiddleware(server.handleCaptures))
 	mux.HandleFunc("/api/receipts/", server.handleReceiptDetail)
 	mux.HandleFunc("/api/devices", server.handleDevices)
 	mux.HandleFunc("/api/devices/", server.handleDeviceDetail)
 	mux.HandleFunc("/api/onboarding/status", server.handleOnboardingStatus)
-	mux.HandleFunc("/api/onboarding/test-capture", server.handleOnboardingTestCapture)
+	mux.HandleFunc("/api/onboarding/test-capture", server.captureLimiter.LimitMiddleware(server.handleOnboardingTestCapture))
 	// Catch-all, so an unknown path under /api/ answers in JSON like every
 	// other endpoint rather than the mux's plain-text 404.
 	mux.HandleFunc("/api/", server.handleNotFound)

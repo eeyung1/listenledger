@@ -39,16 +39,39 @@ import {
 import { CONNECTION_STATUS_EVENT, getSocket, type ConnectionStatusDetail } from "../ws.js";
 import type { ViewCleanup } from "./index.js";
 
+type CatalogueTab = "active" | "archived" | "all";
+
 export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   let products: Product[] = [];
   let query = "";
+  let currentTab: CatalogueTab = "active";
   let disposed = false;
+  const abortController = new AbortController();
+  const signal = abortController.signal;
 
   const body = hook(root, "catalogue-body");
   const countLabel = hook(root, "inventory-count");
   const searchInput = hook<HTMLInputElement>(root, "catalogue-query");
   const addButton = hook<HTMLButtonElement>(root, "catalogue-add");
   const importButton = hook<HTMLButtonElement>(root, "catalogue-import");
+  const tabButtons = root.querySelectorAll<HTMLButtonElement>("[data-hook='catalogue-tabs'] .tab");
+
+  function onTabClick(event: MouseEvent): void {
+    const target = event.currentTarget as HTMLButtonElement | null;
+    const tabName = target?.getAttribute("data-tab") as CatalogueTab | null;
+    if (!tabName) return;
+    currentTab = tabName;
+    tabButtons.forEach((btn) => {
+      const isActive = btn.getAttribute("data-tab") === currentTab;
+      btn.classList.toggle("is-active", isActive);
+      btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+    render();
+  }
+
+  tabButtons.forEach((btn) => {
+    btn.addEventListener("click", onTabClick as EventListener);
+  });
 
   function showProductModal(existing?: Product): void {
     const isEdit = existing !== undefined;
@@ -454,7 +477,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
       if (e.target === overlay) closeModal();
     });
 
-    void fetchProductMovements(product.id).then((res) => {
+    void fetchProductMovements(product.id, 50, 0, signal).then((res) => {
       statusMsg.hidden = true;
       table.hidden = false;
       clear(tbody);
@@ -597,25 +620,45 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     clear(body);
 
     const needle = query.trim().toLowerCase();
+
+    // Filter by tab
+    const tabProducts = products.filter((product) => {
+      if (currentTab === "active") return !product.archived_at;
+      if (currentTab === "archived") return Boolean(product.archived_at);
+      return true; // "all"
+    });
+
+    // Filter by search needle
     const matches = needle === ""
-      ? products
-      : products.filter(
+      ? tabProducts
+      : tabProducts.filter(
           (product) =>
             product.name.toLowerCase().includes(needle) ||
             product.sku.toLowerCase().includes(needle) ||
             product.aliases.some((alias) => alias.toLowerCase().includes(needle)),
         );
 
-    setText(countLabel, String(products.length));
+    const activeCount = products.filter((p) => !p.archived_at).length;
+    const archivedCount = products.length - activeCount;
+    if (currentTab === "active") {
+      setText(countLabel, `${activeCount}`);
+    } else if (currentTab === "archived") {
+      setText(countLabel, `${archivedCount} archived`);
+    } else {
+      setText(countLabel, `${products.length} total (${activeCount} active, ${archivedCount} archived)`);
+    }
 
     if (matches.length === 0) {
       const row = el("tr", "table__empty");
-      const cellElement = cell(
-        "",
-        products.length === 0
-          ? "No products yet. Add the first one to get started."
-          : "No products match this search.",
-      );
+      let message = "No products yet. Add the first one to get started.";
+      if (needle !== "") {
+        message = "No products match this search.";
+      } else if (currentTab === "archived") {
+        message = "No archived products in catalogue.";
+      } else if (currentTab === "active" && products.length > 0) {
+        message = "All products are currently archived.";
+      }
+      const cellElement = cell("", message);
       cellElement.colSpan = 7;
       row.append(cellElement);
       body.append(row);
@@ -628,20 +671,21 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
 
   async function refetch(): Promise<void> {
     try {
-      const snapshot = await fetchInventory(shopId);
-      if (disposed) return;
+      const snapshot = await fetchInventory(shopId, signal);
+      if (disposed || signal.aborted) return;
       if (snapshot.last_seq !== undefined) {
         getSocket()?.syncSequence(snapshot.last_seq);
       }
       products = [...snapshot.products];
       render();
     } catch (error) {
-      if (disposed) return;
+      if (disposed || signal.aborted) return;
       console.error("ListenLedger: could not load the catalogue", error);
       if (body !== null) {
         clear(body);
         const row = el("tr", "table__empty");
         const cellElement = cell("", "Could not reach the server. Retrying on reconnect.");
+        cellElement.className = "table__error";
         cellElement.colSpan = 7;
         row.append(cellElement);
         body.append(row);
@@ -707,11 +751,15 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
 
   return () => {
     disposed = true;
+    abortController.abort();
     window.removeEventListener("ll:inventory-updated", onInventoryUpdated);
     window.removeEventListener("ll:product-created", onProductCreated);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     searchInput?.removeEventListener("input", onSearch);
     addButton?.removeEventListener("click", onAddClick);
     importButton?.removeEventListener("click", onImportClick);
+    tabButtons.forEach((btn) => {
+      btn.removeEventListener("click", onTabClick as EventListener);
+    });
   };
 }

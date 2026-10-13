@@ -145,15 +145,24 @@ export class ApiError extends Error {
   }
 }
 
-async function getJSON<T>(path: string, params: Record<string, string>): Promise<T> {
+async function getJSON<T>(path: string, params: Record<string, string>, signal?: AbortSignal): Promise<T> {
   const url = new URL(path, window.location.origin);
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
 
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  const reqInit: RequestInit = { headers: { Accept: "application/json" } };
+  if (signal !== undefined) reqInit.signal = signal;
+  const response = await fetch(url, reqInit);
   if (!response.ok) {
-    throw new ApiError(path, response.status);
+    let msg = "";
+    try {
+      const err = await response.json();
+      msg = err.error || err.message;
+    } catch {
+      // ignore non-json errors
+    }
+    throw new ApiError(path, response.status, msg || undefined);
   }
   return (await response.json()) as T;
 }
@@ -209,6 +218,7 @@ export function fetchTransactions(
   shopId: string,
   limit: number = MAX_TRANSACTION_LIMIT,
   query?: TransactionQuery,
+  signal?: AbortSignal,
 ): Promise<TransactionsSnapshot> {
   const params: Record<string, string> = {
     shop_id: shopId,
@@ -221,7 +231,7 @@ export function fetchTransactions(
   if (query?.receipt_id !== undefined && query.receipt_id !== "") params["receipt_id"] = query.receipt_id;
   if (query?.from !== undefined && query.from !== "") params["from"] = query.from;
   if (query?.to !== undefined && query.to !== "") params["to"] = query.to;
-  return getJSON<TransactionsSnapshot>("/api/transactions", params);
+  return getJSON<TransactionsSnapshot>("/api/transactions", params, signal);
 }
 
 /** Constructs the URL for downloading a CSV ledger export with current filters. */
@@ -237,13 +247,13 @@ export function getExportTransactionsUrl(shopId: string, query?: TransactionQuer
 }
 
 /** GET /api/inventory — the whole catalogue for a shop. */
-export function fetchInventory(shopId: string): Promise<InventorySnapshot> {
-  return getJSON<InventorySnapshot>("/api/inventory", { shop_id: shopId });
+export function fetchInventory(shopId: string, signal?: AbortSignal): Promise<InventorySnapshot> {
+  return getJSON<InventorySnapshot>("/api/inventory", { shop_id: shopId }, signal);
 }
 
 /** GET /api/summary — authoritative daily aggregates for the shop. */
-export function fetchSummary(shopId: string): Promise<DailySummary> {
-  return getJSON<DailySummary>("/api/summary", { shop_id: shopId });
+export function fetchSummary(shopId: string, signal?: AbortSignal): Promise<DailySummary> {
+  return getJSON<DailySummary>("/api/summary", { shop_id: shopId }, signal);
 }
 
 export interface ReviewCorrections {
@@ -397,8 +407,8 @@ export interface UpdateSettingsInput {
 }
 
 /** GET /api/settings — shop configuration and paired devices. */
-export function fetchSettings(shopId: string): Promise<SettingsResponse> {
-  return getJSON<SettingsResponse>("/api/settings", { shop_id: shopId });
+export function fetchSettings(shopId: string, signal?: AbortSignal): Promise<SettingsResponse> {
+  return getJSON<SettingsResponse>("/api/settings", { shop_id: shopId }, signal);
 }
 
 /** PATCH /api/settings — update shop configuration and thresholds. */
@@ -551,14 +561,15 @@ export async function fetchProductMovements(
   productId: string,
   limit = 50,
   offset = 0,
+  signal?: AbortSignal,
 ): Promise<ProductMovementsResult> {
   const url = new URL(`/api/products/${encodeURIComponent(productId)}/movements`, window.location.origin);
   url.searchParams.set("limit", String(limit));
   url.searchParams.set("offset", String(offset));
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-  });
+  const reqInit: RequestInit = { headers: { Accept: "application/json" } };
+  if (signal !== undefined) reqInit.signal = signal;
+  const res = await fetch(url.toString(), reqInit);
   if (!res.ok) {
     throw new ApiError(url.pathname, res.status);
   }
@@ -666,14 +677,25 @@ export interface TestCaptureResponse {
 }
 
 /** GET /api/onboarding/status — fetch shop setup checklist progress. */
-export async function fetchOnboardingStatus(): Promise<OnboardingStatus> {
-  const res = await fetch("/api/onboarding/status", {
-    headers: { Accept: "application/json" },
-  });
+export async function fetchOnboardingStatus(signal?: AbortSignal): Promise<OnboardingStatus> {
+  const reqInit: RequestInit = { headers: { Accept: "application/json" } };
+  if (signal !== undefined) reqInit.signal = signal;
+  const res = await fetch("/api/onboarding/status", reqInit);
   if (!res.ok) {
     throw new ApiError("/api/onboarding/status", res.status);
   }
   return res.json() as Promise<OnboardingStatus>;
+}
+
+/** GET /api/devices — query paired edge capture devices. */
+export async function fetchDevices(signal?: AbortSignal): Promise<{ devices: readonly Device[] }> {
+  const reqInit: RequestInit = { headers: { Accept: "application/json" } };
+  if (signal !== undefined) reqInit.signal = signal;
+  const res = await fetch("/api/devices", reqInit);
+  if (!res.ok) {
+    throw new ApiError("/api/devices", res.status);
+  }
+  return res.json() as Promise<{ devices: readonly Device[] }>;
 }
 
 /** POST /api/onboarding/test-capture — interactive test capture verification. */

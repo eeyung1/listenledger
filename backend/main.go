@@ -114,6 +114,25 @@ func serve(logger *slog.Logger, cfg config) error {
 		})
 	})
 
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if err := store.Ping(ctx); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"status":   "unavailable",
+				"database": "unreachable",
+				"error":    err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":            "ready",
+			"database":          "connected",
+			"ws_clients":        hub.ClientCount(),
+			"ws_events_dropped": hub.DroppedCount(),
+		})
+	})
+
 	if cfg.devMode {
 		logger.Warn("development endpoints enabled; do not run this way in production")
 		mux.Handle("/api/dev/broadcast", devBroadcast(hub, logger))

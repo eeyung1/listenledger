@@ -168,7 +168,18 @@ a {
 
 /* View Headings & Panels */
 .view__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
   margin-bottom: 1.5rem;
+}
+
+.view__header-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .view__title {
@@ -360,6 +371,57 @@ a {
   margin-left: 0.5rem;
 }
 
+.badge--device-online {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.badge--device-offline {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.badge--device-checking {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+}
+
+/* Filter Tabs */
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 2px solid #e5eded;
+  margin-bottom: 1.25rem;
+}
+
+.tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #5d7a7e;
+  border-radius: 0;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab:hover {
+  color: #135b59;
+  background: transparent;
+}
+
+.tab.is-active {
+  color: #135b59;
+  border-bottom-color: #135b59;
+  background: transparent;
+}
+
 /* Filters */
 .filters {
   display: flex;
@@ -414,6 +476,21 @@ a {
   text-align: center;
   color: #637f83;
   padding: 2rem;
+}
+
+.table__loading {
+  text-align: center;
+  color: #5d7a7e;
+  padding: 2rem;
+  font-style: italic;
+}
+
+.table__error {
+  text-align: center;
+  color: #b91c1c;
+  background-color: #fef2f2;
+  padding: 1.5rem;
+  font-weight: 500;
 }
 
 .table__cell--actions {

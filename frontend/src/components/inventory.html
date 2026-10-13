@@ -19,6 +19,13 @@
   <section class="panel" aria-labelledby="catalogue-heading">
     <h2 class="panel__title" id="catalogue-heading">Catalogue</h2>
 
+    <!-- Catalogue filter tabs: Active, Archived, All -->
+    <div class="tabs" role="tablist" aria-label="Catalogue filter tabs" data-hook="catalogue-tabs">
+      <button type="button" class="tab is-active" role="tab" aria-selected="true" data-tab="active">Active</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="archived">Archived</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="all">All</button>
+    </div>
+
     <!-- data-hook: catalogue search by name, SKU or alias -->
     <form class="filters" data-hook="catalogue-search" role="search">
       <label class="filters__field">
@@ -59,8 +66,8 @@
       </thead>
       <!-- Rows are appended here by the data layer. -->
       <tbody data-hook="catalogue-body">
-        <tr class="table__empty" data-hook="catalogue-empty">
-          <td colspan="7">No products yet. Add the first one to get started.</td>
+        <tr class="table__loading" data-hook="catalogue-loading">
+          <td colspan="7">Loading catalogue…</td>
         </tr>
       </tbody>
     </table>

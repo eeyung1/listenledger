@@ -113,6 +113,9 @@ func (e *Engine) Validate(
 		splitSegments := SplitTranscriptLines(req.Transcript, closingPhrase)
 		for _, seg := range splitSegments {
 			anchors := ParseSpokenSegment(seg, currency)
+			if anchors.ProductMention == "" && anchors.Quantity == 0 && anchors.AmountMinor == 0 {
+				continue
+			}
 			linesToProcess = append(linesToProcess, CaptureLineInput{
 				ProductName: anchors.ProductMention,
 				Quantity:    anchors.Quantity,
