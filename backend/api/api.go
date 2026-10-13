@@ -74,18 +74,24 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/transactions", server.handleTransactions)
+	mux.HandleFunc("/api/transactions/export", server.handleExport)
 	mux.HandleFunc("/api/transactions/", server.handleTransactionDetail)
 	mux.HandleFunc("/api/inventory", server.handleInventory)
 	mux.HandleFunc("/api/products", server.handleProducts)
 	mux.HandleFunc("/api/products/", server.handleProductDetail)
 	mux.HandleFunc("/api/summary", server.handleSummary)
+	mux.HandleFunc("/api/settings", server.handleSettings)
 	mux.HandleFunc("/api/captures", server.handleCaptures)
 	mux.HandleFunc("/api/devices", server.handleDevices)
 	mux.HandleFunc("/api/devices/", server.handleDeviceDetail)
 	// Catch-all, so an unknown path under /api/ answers in JSON like every
 	// other endpoint rather than the mux's plain-text 404.
 	mux.HandleFunc("/api/", server.handleNotFound)
-	return mux
+
+	var handler http.Handler = mux
+	handler = Recoverer(logger)(handler)
+	handler = RequestIDMiddleware(handler)
+	return handler
 }
 
 // publish broadcasts an event, logging rather than failing when it is dropped.
@@ -137,7 +143,9 @@ type transactionsResponse struct {
 	ShopID       string               `json:"shop_id"`
 	Transactions []models.Transaction `json:"transactions"`
 	Count        int                  `json:"count"`
+	Total        int                  `json:"total"`
 	Limit        int                  `json:"limit"`
+	Offset       int                  `json:"offset"`
 	// GeneratedAt is the instant the snapshot was taken.
 	//
 	// A client resyncing after a stream gap uses it to discard events it

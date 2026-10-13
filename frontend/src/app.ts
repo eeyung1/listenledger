@@ -14,7 +14,7 @@ import { startSocket } from "./ws.js";
 import { startViews } from "./views/index.js";
 
 /** Views that currently have a template under src/components/. */
-export type RoutePath = "/home" | "/transactions" | "/inventory";
+export type RoutePath = "/home" | "/transactions" | "/inventory" | "/settings";
 
 export interface RouteDefinition {
   readonly path: RoutePath;
@@ -34,6 +34,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   { path: "/home", title: "Overview", template: `${COMPONENT_BASE}home.html` },
   { path: "/transactions", title: "Transactions", template: `${COMPONENT_BASE}transactions.html` },
   { path: "/inventory", title: "Inventory", template: `${COMPONENT_BASE}inventory.html` },
+  { path: "/settings", title: "Settings", template: `${COMPONENT_BASE}settings.html` },
 ];
 
 export const DEFAULT_ROUTE: RoutePath = "/home";

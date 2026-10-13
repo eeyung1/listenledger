@@ -17,6 +17,7 @@ import type { RoutePath } from "../app.js";
 import { mountHome } from "./home.js";
 import { mountInventory } from "./inventory.js";
 import { mountTransactions } from "./transactions.js";
+import { mountSettings } from "./settings.js";
 
 /** Releases everything a view bound while it was mounted. */
 export type ViewCleanup = () => void;
@@ -28,6 +29,7 @@ const VIEWS: Readonly<Record<RoutePath, ViewModule>> = {
   "/home": mountHome,
   "/transactions": mountTransactions,
   "/inventory": mountInventory,
+  "/settings": mountSettings,
 };
 
 export interface StartViewsOptions {

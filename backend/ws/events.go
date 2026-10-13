@@ -33,6 +33,8 @@ const (
 	// EventProductCreated announces a new catalogue entry, including one
 	// confirmed from an unrecognised voice capture.
 	EventProductCreated EventType = "product.created"
+	// EventSettingsUpdated announces changes to shop configurations or thresholds.
+	EventSettingsUpdated EventType = "settings.updated"
 )
 
 // Event is the single envelope for everything the backend pushes.

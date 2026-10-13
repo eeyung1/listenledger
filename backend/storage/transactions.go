@@ -104,26 +104,65 @@ func insertTransaction(ctx context.Context, db executor, transaction models.Tran
 	return nil
 }
 
-// GetTransactions returns the newest movements for a shop.
-//
-// This is the snapshot a dashboard loads on first paint and refetches after a
-// reconnect has left a gap in the event stream. Ordering is by occurred_at
-// with id as a tie-break, so the sequence is total and a client that re-reads
-// the same page sees the same order.
-func (s *Store) GetTransactions(ctx context.Context, shopID string, limit int) ([]models.Transaction, error) {
+// TransactionFilter defines query constraints for filtering and paging transactions.
+type TransactionFilter struct {
+	Type      *models.TransactionType
+	Status    *models.TransactionStatus
+	ProductID string
+	From      *time.Time
+	To        *time.Time
+	Limit     int
+	Offset    int
+}
+
+// QueryTransactions returns movements for a shop matching the given filter, along with the total count.
+func (s *Store) QueryTransactions(ctx context.Context, shopID string, filter TransactionFilter) ([]models.Transaction, int, error) {
 	if shopID == "" {
-		return nil, errors.New("storage: GetTransactions requires a shop_id")
+		return nil, 0, errors.New("storage: QueryTransactions requires a shop_id")
 	}
 
-	const query = `SELECT ` + transactionColumns + `
-		  FROM transactions
-		 WHERE shop_id = ?
-		 ORDER BY occurred_at DESC, id DESC
-		 LIMIT ?`
+	whereClause := "WHERE shop_id = ?"
+	args := []any{shopID}
 
-	rows, err := s.db.QueryContext(ctx, query, shopID, ClampLimit(limit))
+	if filter.Type != nil && filter.Type.Valid() {
+		whereClause += " AND type = ?"
+		args = append(args, string(*filter.Type))
+	}
+	if filter.Status != nil && filter.Status.Valid() {
+		whereClause += " AND status = ?"
+		args = append(args, string(*filter.Status))
+	}
+	if filter.ProductID != "" {
+		whereClause += " AND product_id = ?"
+		args = append(args, filter.ProductID)
+	}
+	if filter.From != nil {
+		whereClause += " AND occurred_at >= ?"
+		args = append(args, formatTime(*filter.From))
+	}
+	if filter.To != nil {
+		whereClause += " AND occurred_at <= ?"
+		args = append(args, formatTime(*filter.To))
+	}
+
+	countQuery := "SELECT COUNT(*) FROM transactions " + whereClause
+	var total int
+	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("storage: count transactions: %w", err)
+	}
+
+	limit := ClampLimit(filter.Limit)
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	dataQuery := "SELECT " + transactionColumns + " FROM transactions " + whereClause + " ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?"
+	dataArgs := append(append([]any{}, args...), limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, dataQuery, dataArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("storage: query transactions: %w", err)
+		return nil, 0, fmt.Errorf("storage: query transactions: %w", err)
 	}
 	defer rows.Close()
 
@@ -132,14 +171,25 @@ func (s *Store) GetTransactions(ctx context.Context, shopID string, limit int) (
 	for rows.Next() {
 		transaction, err := scanTransaction(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		transactions = append(transactions, transaction)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("storage: iterate transactions: %w", err)
+		return nil, 0, fmt.Errorf("storage: iterate transactions: %w", err)
 	}
-	return transactions, nil
+	return transactions, total, nil
+}
+
+// GetTransactions returns the newest movements for a shop.
+//
+// This is the snapshot a dashboard loads on first paint and refetches after a
+// reconnect has left a gap in the event stream. Ordering is by occurred_at
+// with id as a tie-break, so the sequence is total and a client that re-reads
+// the same page sees the same order.
+func (s *Store) GetTransactions(ctx context.Context, shopID string, limit int) ([]models.Transaction, error) {
+	txns, _, err := s.QueryTransactions(ctx, shopID, TransactionFilter{Limit: limit})
+	return txns, err
 }
 
 // GetTransactionByID returns one movement, scoped to its shop.

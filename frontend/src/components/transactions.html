@@ -60,6 +60,9 @@
           <option value="cancelled">Cancelled</option>
         </select>
       </label>
+      <div class="filters__actions">
+        <a class="button button--secondary button--sm" data-hook="export-csv" href="#" download>Export CSV</a>
+      </div>
     </form>
 
     <table class="table" data-hook="ledger-table">
@@ -82,5 +85,11 @@
         </tr>
       </tbody>
     </table>
+
+    <div class="pagination" data-hook="ledger-pagination">
+      <button type="button" class="button button--secondary button--sm" data-hook="page-prev" disabled>Previous</button>
+      <span class="pagination__info" data-hook="page-info">Showing 0 of 0</span>
+      <button type="button" class="button button--secondary button--sm" data-hook="page-next" disabled>Next</button>
+    </div>
   </section>
 </section>

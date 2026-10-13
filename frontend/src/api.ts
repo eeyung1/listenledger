@@ -73,11 +73,23 @@ export interface Product {
   readonly low_stock_threshold?: number;
 }
 
+export interface TransactionQuery {
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+  readonly type?: string | undefined;
+  readonly status?: string | undefined;
+  readonly product_id?: string | undefined;
+  readonly from?: string | undefined;
+  readonly to?: string | undefined;
+}
+
 export interface TransactionsSnapshot {
   readonly shop_id: string;
   readonly transactions: readonly Transaction[];
   readonly count: number;
+  readonly total?: number | undefined;
   readonly limit: number;
+  readonly offset?: number | undefined;
   /**
    * The instant the snapshot was taken. A client resyncing after a stream gap
    * uses it to discard events older than this: they are already reflected in
@@ -190,11 +202,30 @@ async function patchJSON<T>(path: string, body: unknown): Promise<T> {
 export function fetchTransactions(
   shopId: string,
   limit: number = MAX_TRANSACTION_LIMIT,
+  query?: TransactionQuery,
 ): Promise<TransactionsSnapshot> {
-  return getJSON<TransactionsSnapshot>("/api/transactions", {
+  const params: Record<string, string> = {
     shop_id: shopId,
     limit: String(limit),
-  });
+  };
+  if (query?.offset !== undefined) params["offset"] = String(query.offset);
+  if (query?.type !== undefined && query.type !== "") params["type"] = query.type;
+  if (query?.status !== undefined && query.status !== "") params["status"] = query.status;
+  if (query?.product_id !== undefined && query.product_id !== "") params["product_id"] = query.product_id;
+  if (query?.from !== undefined && query.from !== "") params["from"] = query.from;
+  if (query?.to !== undefined && query.to !== "") params["to"] = query.to;
+  return getJSON<TransactionsSnapshot>("/api/transactions", params);
+}
+
+/** Constructs the URL for downloading a CSV ledger export with current filters. */
+export function getExportTransactionsUrl(shopId: string, query?: TransactionQuery): string {
+  const params = new URLSearchParams({ shop_id: shopId, format: "csv" });
+  if (query?.type !== undefined && query.type !== "") params.set("type", query.type);
+  if (query?.status !== undefined && query.status !== "") params.set("status", query.status);
+  if (query?.product_id !== undefined && query.product_id !== "") params.set("product_id", query.product_id);
+  if (query?.from !== undefined && query.from !== "") params.set("from", query.from);
+  if (query?.to !== undefined && query.to !== "") params.set("to", query.to);
+  return `/api/transactions/export?${params.toString()}`;
 }
 
 /** GET /api/inventory — the whole catalogue for a shop. */
@@ -257,3 +288,62 @@ export interface UpdateProductInput {
 export function updateProduct(id: string, input: UpdateProductInput): Promise<Product> {
   return patchJSON<Product>(`/api/products/${encodeURIComponent(id)}`, input);
 }
+
+export interface Device {
+  readonly id: string;
+  readonly shop_id: string;
+  readonly name: string;
+  readonly paired_at: string;
+  readonly revoked_at?: string | null | undefined;
+}
+
+export interface ShopSettings {
+  readonly id: string;
+  readonly owner_id: string;
+  readonly name: string;
+  readonly currency: string;
+  readonly timezone: string;
+  readonly confidence_threshold: number;
+  readonly sale_phrase: string;
+  readonly restock_phrase: string;
+}
+
+export interface SettingsResponse {
+  readonly shop: ShopSettings;
+  readonly devices: readonly Device[];
+}
+
+export interface UpdateSettingsInput {
+  readonly name?: string | undefined;
+  readonly currency?: string | undefined;
+  readonly timezone?: string | undefined;
+  readonly confidence_threshold?: number | undefined;
+  readonly sale_phrase?: string | undefined;
+  readonly restock_phrase?: string | undefined;
+}
+
+/** GET /api/settings — shop configuration and paired devices. */
+export function fetchSettings(shopId: string): Promise<SettingsResponse> {
+  return getJSON<SettingsResponse>("/api/settings", { shop_id: shopId });
+}
+
+/** PATCH /api/settings — update shop configuration and thresholds. */
+export function updateSettings(input: UpdateSettingsInput): Promise<ShopSettings> {
+  return patchJSON<ShopSettings>("/api/settings", input);
+}
+
+export interface PairDeviceResult {
+  readonly device: Device;
+  readonly token: string;
+}
+
+/** POST /api/devices — register a new edge capture device. */
+export function pairDevice(name: string): Promise<PairDeviceResult> {
+  return postJSON<PairDeviceResult>("/api/devices", { name });
+}
+
+/** POST /api/devices/{id}/revoke — revoke an edge capture device credential. */
+export function revokeDevice(id: string): Promise<{ success: boolean }> {
+  return postJSON<{ success: boolean }>(`/api/devices/${encodeURIComponent(id)}/revoke`);
+}
+

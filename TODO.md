@@ -1,10 +1,10 @@
 # TODO — ListenLedger
 
-## Voice loop, validation engine and edge capture increment (13 October 2026)
+## Operational MVP and Pilot Readiness increment (13 October 2026)
 
-Implemented server-side validation and recognition decision engine (`backend/validate/`) with exact SKU, exact name, configured alias ("Big Peak" -> "Peak Milk 400g"), and fuzzy matching, spoken number and currency parsing, boundary detection ("Thank you" sale vs "Stock received" restock), Blueprint §11 weakest-anchor confidence scoring, and multi-line receipt parsing. Implemented edge intake endpoint (`POST /api/captures`) with device authentication and atomic ledger/stock updates. Implemented edge device pairing (`POST /api/devices`) and revocation (`POST /api/devices/{id}/revoke`). Implemented server-side daily summary (`GET /api/summary`) and wired to overview KPIs. Implemented Rust edge engine (`edge/`) with audio framing, VAD, privacy-preserving zeroing, STT interface, boundary extraction, durable disk-persisted offline queue, and authenticated HTTP client. Next: physical microphone driver validation and release hardening.
+Implemented server-side query filtering and pagination (`GET /api/transactions?type=&status=&from=&to=&limit=&offset=`), CSV ledger export with OWASP formula injection protection (`GET /api/transactions/export?format=csv`), shop settings and device management endpoints (`GET /api/settings`, `PATCH /api/settings`), request-scoped tracing (`X-Request-ID`) and panic recovery middleware (`api.Recoverer`), automated SQLite hot backup and restore verification tooling (`scripts/verify_backup_restore.sh`, `storage/backup_test.go`), quantized Whisper weight download and checksum verification tooling (`edge/scripts/download_model.sh`), comprehensive operational deployment runbook (`RUNBOOK.md`), root task runner `Makefile`, and frontend Settings view (`#/settings`) with device pairing and CSV download controls.
 
-Status: the full processing loop (Hear → Understand → Validate → Record → Update) is now implemented across the Go orchestrator, SQLite store, edge crate, and dashboard.
+Next: Staff protocol training and controlled real-shop acceptance trials (Milestone 5).
 
 ## 1. Go backend: HTTP server — DONE (`backend/main.go`, `backend/api/`)
 
@@ -17,8 +17,8 @@ Status: the full processing loop (Hear → Understand → Validate → Record �
       `/ws` and `/api/`, so the default same-origin socket policy applies.
 - [x] `GET /healthz` reporting client and dropped-event counts.
 - [x] Snapshot endpoints in `backend/api/`:
-      - `GET /api/transactions?shop_id=&limit=` — newest first, limit clamped to
-        [1, 500], default 50
+      - `GET /api/transactions?shop_id=&limit=&offset=&type=&status=&from=&to=` — newest first, limit clamped to
+        [1, 500], default 50, with server-side filters and pagination total.
       - `GET /api/inventory?shop_id=` — full catalogue plus `low_stock_count`
 - [x] Both snapshot responses carry `generated_at`.
 - [x] Ingestion endpoints, `backend/api/products.go` and
@@ -32,15 +32,17 @@ Status: the full processing loop (Hear → Understand → Validate → Record �
         tokens, executes validation engine, and atomically adjusts stock or holds for review.
       - `GET /api/summary` — server-authoritative daily overview metrics.
       - `POST /api/devices` and `POST /api/devices/{id}/revoke` — device pairing and revocation.
+      - `GET /api/settings` and `PATCH /api/settings` — shop configuration and paired devices.
+      - `GET /api/transactions/export?format=csv` — CSV export with spreadsheet formula injection protection.
 - [x] `POST /api/dev/seed?shop_id=` (`backend/api/dev.go`) — **`-dev` only**.
       Wipes the shop, then inserts the blueprint's own worked examples: §9's
       Peak Milk aliases, §10's restock receipt, §11's 55%/98%/97% capture.
       Publishes the seeded state so an open dashboard updates without a reload.
+- [x] Request-scoped logging (`X-Request-ID`) and `Recoverer` middleware so
+      one panicking handler cannot take the process down.
 
 Remaining:
 
-- [ ] Add request-scoped logging (request ID) and a `recoverer` middleware so
-      one panicking handler cannot take the process down.
 - [ ] Restrict static serving to built assets. `http.FileServer` currently
       exposes the TypeScript sources and build config too — fine for the pilot,
       not for production.

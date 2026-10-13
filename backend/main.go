@@ -130,9 +130,11 @@ func serve(logger *slog.Logger, cfg config) error {
 	// convenience; a production deployment should serve only built assets.
 	mux.Handle("/", noStoreCache(http.FileServer(http.Dir(frontendDir))))
 
+	rootHandler := api.Recoverer(logger)(api.RequestIDMiddleware(mux))
+
 	server := &http.Server{
 		Addr:              cfg.addr,
-		Handler:           mux,
+		Handler:           rootHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		// WriteTimeout must stay zero: it is a deadline on the whole

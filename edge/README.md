@@ -18,6 +18,47 @@ Per blueprint §7A & §17, this crate implements:
 - `LISTENLEDGER_BACKEND_URL`: URL of the orchestrator API (defaults to `http://127.0.0.1:8080`).
 - `LISTENLEDGER_DEVICE_TOKEN`: Secret token obtained from `POST /api/devices` during device pairing.
 - `LISTENLEDGER_QUEUE_FILE`: Path to persistent queue storage (defaults to `captures_queue.jsonl`).
+- `LISTENLEDGER_MODEL_PATH`: Path to quantized speech-to-text model binary (defaults to `models/ggml-tiny.en.bin`).
+
+## Hardware Pilot Setup (Raspberry Pi & Linux Counter)
+
+1. **Microphone Hardware Recommendation**:
+   - Boundary microphone / USB conference speakerphone with hardware echo cancellation (e.g., Jabra Speak 410/510, Anker PowerConf S330, or a directional USB lapel microphone mounted near counter cash point).
+   - Verify card index and device mapping:
+     ```sh
+     arecord -l
+     ```
+   - Test capture levels with 16kHz 16-bit mono PCM:
+     ```sh
+     arecord -D hw:1,0 -f S16_LE -r 16000 -c 1 -d 5 test_mic.wav
+     ```
+
+2. **Quantized Whisper Model Download**:
+   - Download the validated `tiny.en` GGML model weights (verified via SHA256 checksum):
+     ```sh
+     ./scripts/download_model.sh tiny.en
+     ```
+
+3. **Pair Device with Store Dashboard**:
+   - Go to dashboard **Settings → Paired Capture Devices → Pair New Device**.
+   - Input device name (e.g., "Counter 1 Lapel Mic").
+   - Export the returned token into environment:
+     ```sh
+     export LISTENLEDGER_DEVICE_TOKEN="ll_dev_..."
+     export LISTENLEDGER_BACKEND_URL="https://your-shop-domain.com"
+     ```
+
+4. **Running the Edge Engine**:
+   ```sh
+   cargo run --release
+   ```
+
+## Privacy & Audio Retention Guarantee
+
+Per product blueprint §17:
+- **Zero Raw Audio Retention**: Audio is captured into ephemeral ring buffers in volatile system RAM only.
+- **Immediate Discard & Zeroing**: As soon as speech frames are processed and the voice activity boundary is detected, the raw PCM buffer is overwritten with zeros and freed.
+- **No Remote Audio Transmission**: Raw audio waveforms never leave the physical edge hardware. Only structured text anchors and per-anchor confidence scores are sent to the orchestrator.
 
 ## Building & Testing
 
