@@ -13,6 +13,7 @@
 import {
   createProduct,
   fetchInventory,
+  importCatalogue,
   updateProduct,
   type CreateProductInput,
   type Product,
@@ -41,6 +42,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   const countLabel = hook(root, "inventory-count");
   const searchInput = hook<HTMLInputElement>(root, "catalogue-query");
   const addButton = hook<HTMLButtonElement>(root, "catalogue-add");
+  const importButton = hook<HTMLButtonElement>(root, "catalogue-import");
 
   function showProductModal(existing?: Product): void {
     const isEdit = existing !== undefined;
@@ -193,6 +195,111 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     });
   }
 
+  function showImportModal(): void {
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal-dialog");
+
+    const header = el("div", "modal-header");
+    const title = el("h3", "modal-title", "Import Catalogue (CSV)");
+    const closeBtn = el("button", "button button--secondary button--sm", "✕");
+    closeBtn.type = "button";
+    header.append(title, closeBtn);
+
+    const form = el("form", "modal-form");
+    const help = el(
+      "p",
+      "modal-help",
+      "Upload or paste CSV with columns: sku, name, price_amount, price_currency, quantity, base_unit, aliases, packaging, low_stock_threshold"
+    );
+
+    const fileLabel = el("label", "form-field", "Choose CSV file");
+    const fileInput = el("input", "input") as HTMLInputElement;
+    fileInput.type = "file";
+    fileInput.accept = ".csv,text/csv";
+    fileLabel.append(fileInput);
+
+    const textLabel = el("label", "form-field", "Or paste CSV content directly");
+    const textArea = el("textarea", "input") as HTMLTextAreaElement;
+    textArea.rows = 5;
+    textArea.placeholder = "sku,name,price_amount,price_currency,quantity,base_unit,aliases,packaging,low_stock_threshold\nMILO-400,Milo 400g,250000,NGN,50,pack,Milo;Big Milo,carton:12,10";
+    textLabel.append(textArea);
+
+    const statusMsg = el("div", "status-badge status-badge--error");
+    statusMsg.hidden = true;
+
+    const actions = el("div", "modal-actions");
+    const cancelBtn = el("button", "button button--secondary", "Cancel");
+    cancelBtn.type = "button";
+    const submitBtn = el("button", "button button--primary", "Import");
+    submitBtn.type = "submit";
+    actions.append(cancelBtn, submitBtn);
+
+    form.append(help, fileLabel, textLabel, statusMsg, actions);
+    modal.append(header, form);
+    overlay.append(modal);
+    document.body.append(overlay);
+
+    const closeModal = (): void => {
+      overlay.remove();
+    };
+
+    closeBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === "string") {
+            textArea.value = reader.result;
+          }
+        };
+        reader.readAsText(file);
+      }
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const content = textArea.value.trim();
+      if (!content) {
+        statusMsg.hidden = false;
+        statusMsg.className = "status-badge status-badge--error";
+        statusMsg.textContent = "Please select a file or paste CSV content";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Importing...";
+      statusMsg.hidden = true;
+
+      try {
+        const res = await importCatalogue(content, "text/csv");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Import";
+        statusMsg.hidden = false;
+        if (res.failed > 0 && res.imported === 0 && res.updated === 0) {
+          statusMsg.className = "status-badge status-badge--error";
+          statusMsg.textContent = `Import failed: ${res.errors.join(", ")}`;
+        } else {
+          statusMsg.className = "status-badge status-badge--success";
+          statusMsg.textContent = `Import complete: ${res.imported} added, ${res.updated} updated${res.failed > 0 ? `, ${res.failed} errors` : ""}.`;
+          void refetch();
+          setTimeout(closeModal, 1200);
+        }
+      } catch (err: unknown) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Import";
+        statusMsg.hidden = false;
+        statusMsg.className = "status-badge status-badge--error";
+        statusMsg.textContent = err instanceof Error ? err.message : "Import failed";
+      }
+    });
+  }
+
   function packagingSummary(product: Product): string {
     const rules = product.packaging ?? [];
     if (rules.length === 0) return "—";
@@ -326,6 +433,10 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     showProductModal();
   };
 
+  const onImportClick = (): void => {
+    showImportModal();
+  };
+
   const onConnectionStatus = (event: Event): void => {
     const detail = (event as CustomEvent<ConnectionStatusDetail>).detail;
     if (detail.resyncRequired) {
@@ -338,6 +449,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   searchInput?.addEventListener("input", onSearch);
   addButton?.addEventListener("click", onAddClick);
+  importButton?.addEventListener("click", onImportClick);
 
   void refetch();
 
@@ -348,5 +460,6 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     searchInput?.removeEventListener("input", onSearch);
     addButton?.removeEventListener("click", onAddClick);
+    importButton?.removeEventListener("click", onImportClick);
   };
 }

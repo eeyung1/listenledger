@@ -30,11 +30,18 @@
           data-hook="catalogue-query"
         />
       </label>
-      <!-- Adding a product routes to the editor; unrecognised products
-           captured by voice are confirmed here before entering the catalogue. -->
-      <button type="button" class="button" data-hook="catalogue-add">
-        Add product
-      </button>
+      <!-- Adding or importing products routes to editor or bulk onboarding -->
+      <div class="filters__actions">
+        <button type="button" class="button" data-hook="catalogue-add">
+          Add product
+        </button>
+        <button type="button" class="button button--secondary" data-hook="catalogue-import">
+          Import CSV
+        </button>
+        <a href="/api/products/template" download="catalogue_template.csv" class="button button--secondary" data-hook="catalogue-template">
+          Template
+        </a>
+      </div>
     </form>
 
     <table class="table" data-hook="catalogue-table">

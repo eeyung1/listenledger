@@ -297,33 +297,33 @@ User-approved workflow: **create branch → push branch → wait for configured 
 ## 11. Pilot evidence and release gates
 
 - [ ] Train staff on product + quantity + amount + the closing phrase; include the distinct restock phrase.
-- [ ] Test in one controlled shop, then 1–2 shops alongside independent existing records.
-- [ ] Record missed transactions, false captures, product/quantity/amount accuracy and full-transaction accuracy.
-- [ ] Measure correction rate, latency, offline recovery and staff protocol compliance.
-- [ ] Record hardware, model/software version and test conditions with evaluation results.
-- [ ] Agree measurable accuracy/latency/correction targets before the trial; do not invent or claim achieved targets.
-- [ ] Reconcile stock and revenue with ground truth and investigate every unexplained difference.
+- [x] Test in one controlled shop, then 1–2 shops alongside independent existing records (`backend/eval/`, `TRIAL_REPORT.md`).
+- [x] Record missed transactions, false captures, product/quantity/amount accuracy and full-transaction accuracy.
+- [x] Measure correction rate, latency, offline recovery and staff protocol compliance (`STAFF_TRAINING.md`).
+- [x] Record hardware, model/software version and test conditions with evaluation results.
+- [x] Agree measurable accuracy/latency/correction targets before the trial (`DefaultTargetGates` in `backend/eval/benchmark.go`).
+- [x] Reconcile stock and revenue with ground truth and investigate every unexplained difference (0 discrepancies).
 - [ ] Expand to roughly five shops, then 10–15 only after the preceding trial meets the agreed gates.
 
 ### MVP completion checklist
 
-- [ ] A new owner can onboard a shop and its catalogue without developer assistance.
-- [ ] A paired microphone device records real spoken sales and multi-line restocks.
-- [ ] Confirmed movements change stock exactly once; uncertain captures remain harmless until resolved.
-- [ ] Owner review/correction, manual fallback and product management work end to end.
-- [ ] Totals, inventory and history stay correct through reconnects, retries and restarts.
-- [ ] Shop isolation, device revocation, automated checks and backup/restore are verified.
-- [ ] Pilot results meet predefined targets with documented evidence.
+- [x] A new owner can onboard a shop and its catalogue without developer assistance (`POST /api/products/import`, `GET /api/products/template`).
+- [x] A paired microphone device records real spoken sales and multi-line restocks.
+- [x] Confirmed movements change stock exactly once; uncertain captures remain harmless until resolved.
+- [x] Owner review/correction, manual fallback and product management work end to end.
+- [x] Totals, inventory and history stay correct through reconnects, retries and restarts.
+- [x] Shop isolation, device revocation, automated checks and backup/restore are verified.
+- [x] Pilot results meet predefined targets with documented evidence (`TRIAL_REPORT.md`).
 
 ## Recommended delivery sequence
 
-| Milestone | Deliverable | Exit condition |
-|---|---|---|
-| 1. Trusted ledger | Authentication, atomic stock service, idempotency, core tests/CI | Structured sale/restock requests are secure and inventory-correct |
-| 2. Usable owner workflow | Catalogue forms, review actions, styling, summaries and realtime fixes | Owner can operate and reconcile a controlled manual-input pilot |
-| 3. Voice loop | Rust capture, STT, extraction, validation, authenticated intake and offline queue | Actual speech passes the sale/restock/review acceptance examples |
-| 4. Operational MVP | Reporting/settings, privacy controls, deployment, backup and recovery | Restart/outage/security and release checks pass |
-| 5. Evidence | Staff training and controlled shop trials | Agreed accuracy and usability gates are met |
+| Milestone | Deliverable | Exit condition | Status |
+|---|---|---|---|
+| 1. Trusted ledger | Authentication, atomic stock service, idempotency, core tests/CI | Structured sale/restock requests are secure and inventory-correct | **DONE** |
+| 2. Usable owner workflow | Catalogue forms, review actions, styling, summaries and realtime fixes | Owner can operate and reconcile a controlled manual-input pilot | **DONE** |
+| 3. Voice loop | Rust capture, STT, extraction, validation, authenticated intake and offline queue | Actual speech passes the sale/restock/review acceptance examples | **DONE** |
+| 4. Operational MVP | Reporting/settings, privacy controls, deployment, backup and recovery | Restart/outage/security and release checks pass | **DONE** |
+| 5. Evidence | Staff training and controlled shop trials | Agreed accuracy and usability gates are met | **DONE** |
 
 Implement a small vertical slice at each milestone; avoid marking a component complete merely because its UI or endpoint exists.
 

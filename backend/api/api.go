@@ -78,6 +78,8 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	mux.HandleFunc("/api/transactions/", server.handleTransactionDetail)
 	mux.HandleFunc("/api/inventory", server.handleInventory)
 	mux.HandleFunc("/api/products", server.handleProducts)
+	mux.HandleFunc("/api/products/template", server.handleProductsTemplate)
+	mux.HandleFunc("/api/products/import", server.handleProductsImport)
 	mux.HandleFunc("/api/products/", server.handleProductDetail)
 	mux.HandleFunc("/api/summary", server.handleSummary)
 	mux.HandleFunc("/api/settings", server.handleSettings)
