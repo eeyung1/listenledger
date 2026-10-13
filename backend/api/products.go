@@ -180,6 +180,22 @@ func (s *Server) handleProductDetail(w http.ResponseWriter, r *http.Request) {
 			}
 			s.adjustProductStock(w, r, id)
 			return
+		case "archive":
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", http.MethodPost)
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			s.archiveProduct(w, r, id)
+			return
+		case "unarchive":
+			if r.Method != http.MethodPost {
+				w.Header().Set("Allow", http.MethodPost)
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			s.unarchiveProduct(w, r, id)
+			return
 		}
 	}
 	writeError(w, http.StatusNotFound, "not found")
@@ -400,4 +416,40 @@ func (s *Server) adjustProductStock(w http.ResponseWriter, r *http.Request, id s
 		Product:     product,
 		Transaction: txn,
 	})
+}
+
+func (s *Server) archiveProduct(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+	product, err := s.store.ArchiveProduct(r.Context(), shopID, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "product not found")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, "archive product", err)
+		return
+	}
+	s.publish(w, r, shopID, ws.EventInventoryUpdated, product)
+	writeJSON(w, http.StatusOK, product)
+}
+
+func (s *Server) unarchiveProduct(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+	product, err := s.store.UnarchiveProduct(r.Context(), shopID, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "product not found")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, "unarchive product", err)
+		return
+	}
+	s.publish(w, r, shopID, ws.EventInventoryUpdated, product)
+	writeJSON(w, http.StatusOK, product)
 }

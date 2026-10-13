@@ -12,10 +12,12 @@
 
 import {
   adjustProductStock,
+  archiveProduct,
   createProduct,
   fetchInventory,
   fetchProductMovements,
   importCatalogue,
+  unarchiveProduct,
   updateProduct,
   type CreateProductInput,
   type Product,
@@ -504,9 +506,15 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   }
 
   function catalogueRow(product: Product): HTMLTableRowElement {
-    const row = el("tr", `table__row${isLowStock(product) ? " table__row--low" : ""}`);
+    const isArchived = Boolean(product.archived_at);
+    const row = el("tr", `table__row${isArchived ? " table__row--archived" : isLowStock(product) ? " table__row--low" : ""}`);
 
-    const name = cell("table__cell table__cell--product", product.name);
+    const name = cell("table__cell table__cell--product");
+    name.append(document.createTextNode(product.name));
+    if (isArchived) {
+      name.append(el("span", "badge badge--rejected", "Archived"));
+    }
+
     const sku = cell("table__cell table__cell--mono", product.sku);
 
     // The aliases are the shop's own vocabulary; an empty list is a product the
@@ -522,7 +530,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
       "table__cell table__cell--stock",
       `${product.quantity} ${formatUnit(product.base_unit, product.quantity)}`,
     );
-    if (isLowStock(product)) {
+    if (!isArchived && isLowStock(product)) {
       stock.append(el("span", "badge badge--low-stock", "Low"));
     }
 
@@ -543,7 +551,41 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     historyBtn.title = "View product movement history ledger";
     historyBtn.addEventListener("click", () => showMovementHistoryModal(product));
 
-    actions.append(editBtn, auditBtn, historyBtn);
+    const archiveBtn = el(
+      "button",
+      `button button--sm ${isArchived ? "button--primary" : "button--secondary"}`,
+      isArchived ? "Restore" : "Archive",
+    );
+    archiveBtn.type = "button";
+    archiveBtn.title = isArchived
+      ? "Restore product to active speech recognition"
+      : "Safely archive product from speech recognition while preserving transaction history";
+    archiveBtn.addEventListener("click", async () => {
+      if (isArchived) {
+        archiveBtn.disabled = true;
+        try {
+          await unarchiveProduct(product.id);
+          void refetch();
+        } catch (err: unknown) {
+          archiveBtn.disabled = false;
+          alert(err instanceof Error ? err.message : "Failed to restore product");
+        }
+      } else {
+        if (!confirm(`Archive "${product.name}"? Historical ledger records remain intact, but it will no longer match spoken captures.`)) {
+          return;
+        }
+        archiveBtn.disabled = true;
+        try {
+          await archiveProduct(product.id);
+          void refetch();
+        } catch (err: unknown) {
+          archiveBtn.disabled = false;
+          alert(err instanceof Error ? err.message : "Failed to archive product");
+        }
+      }
+    });
+
+    actions.append(editBtn, auditBtn, historyBtn, archiveBtn);
 
     row.append(name, sku, aliases, price, stock, packaging, actions);
     return row;

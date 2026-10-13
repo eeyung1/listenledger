@@ -130,4 +130,6 @@ type Transaction struct {
 	// a reviewer can adjudicate a low-confidence record, and subject to the
 	// audio/transcript retention policy in blueprint §17.
 	Transcript string `json:"transcript,omitempty"`
+	// ReceiptID links multiple line items captured from a single spoken receipt.
+	ReceiptID string `json:"receipt_id,omitempty"`
 }

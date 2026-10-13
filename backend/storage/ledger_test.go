@@ -154,13 +154,13 @@ func TestResolveReview(t *testing.T) {
 	stock(t, s, 20) // unaffected
 
 	// 2. Cross-shop check: shop "b" cannot confirm shop "a"'s review transaction
-	if _, err := s.ResolveReview(ctx, "b", "held_sale", ReviewActionConfirm, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.ResolveReview(ctx, "b", "held_sale", ReviewActionConfirm, nil, "user_b", "unauthorized"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-shop confirm, got %v", err)
 	}
 	stock(t, s, 20)
 
 	// 3. Confirm the held sale
-	res, err := s.ResolveReview(ctx, "a", "held_sale", ReviewActionConfirm, nil)
+	res, err := s.ResolveReview(ctx, "a", "held_sale", ReviewActionConfirm, nil, "user_a", "verified sale")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +169,15 @@ func TestResolveReview(t *testing.T) {
 	}
 	stock(t, s, 18) // decreased by 2
 
+	// Verify review decision was recorded
+	dec, err := s.GetReviewDecision(ctx, "a", "held_sale")
+	if err != nil {
+		t.Fatalf("failed to get review decision: %v", err)
+	}
+	if dec.Decision != DecisionConfirmed || dec.DecidedBy != "user_a" || dec.Notes != "verified sale" {
+		t.Fatalf("unexpected decision record: %+v", dec)
+	}
+
 	// Verify stock_movement row exists
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM stock_movements WHERE transaction_id = 'held_sale' AND delta = -2`).Scan(&count); err != nil || count != 1 {
@@ -176,7 +185,7 @@ func TestResolveReview(t *testing.T) {
 	}
 
 	// 4. Repeated confirmation should fail with ErrConflict (cannot double-confirm)
-	if _, err := s.ResolveReview(ctx, "a", "held_sale", ReviewActionConfirm, nil); !errors.Is(err, ErrConflict) {
+	if _, err := s.ResolveReview(ctx, "a", "held_sale", ReviewActionConfirm, nil, "user_a", ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected ErrConflict on duplicate confirm, got %v", err)
 	}
 	stock(t, s, 18) // unchanged
@@ -189,7 +198,7 @@ func TestResolveReview(t *testing.T) {
 	}
 	stock(t, s, 18) // unaffected
 
-	rejRes, err := s.ResolveReview(ctx, "a", "held_reject", ReviewActionReject, nil)
+	rejRes, err := s.ResolveReview(ctx, "a", "held_reject", ReviewActionReject, nil, "auditor", "unrecognized chatter")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,8 +207,16 @@ func TestResolveReview(t *testing.T) {
 	}
 	stock(t, s, 18) // still unaffected
 
+	decRej, err := s.GetReviewDecision(ctx, "a", "held_reject")
+	if err != nil {
+		t.Fatalf("failed to get reject review decision: %v", err)
+	}
+	if decRej.Decision != DecisionRejected || decRej.DecidedBy != "auditor" || decRej.Notes != "unrecognized chatter" {
+		t.Fatalf("unexpected reject decision record: %+v", decRej)
+	}
+
 	// Cannot reject or confirm again
-	if _, err := s.ResolveReview(ctx, "a", "held_reject", ReviewActionConfirm, nil); !errors.Is(err, ErrConflict) {
+	if _, err := s.ResolveReview(ctx, "a", "held_reject", ReviewActionConfirm, nil, "user_a", ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected ErrConflict on confirming rejected transaction, got %v", err)
 	}
 
@@ -219,7 +236,7 @@ func TestResolveReview(t *testing.T) {
 		Quantity: 2,
 		Unit:     models.UnitCarton,
 	}
-	restockRes, err := s.ResolveReview(ctx, "a", "held_restock", ReviewActionConfirm, correctCartons)
+	restockRes, err := s.ResolveReview(ctx, "a", "held_restock", ReviewActionConfirm, correctCartons, "manager", "fixed carton unit")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +245,20 @@ func TestResolveReview(t *testing.T) {
 	}
 	stock(t, s, 42) // 18 + 24 = 42
 
+	decCorr, err := s.GetReviewDecision(ctx, "a", "held_restock")
+	if err != nil {
+		t.Fatalf("failed to get corrected review decision: %v", err)
+	}
+	if decCorr.Decision != DecisionCorrectedAndConfirmed || decCorr.DecidedBy != "manager" || decCorr.Notes != "fixed carton unit" {
+		t.Fatalf("unexpected corrected decision record: %+v", decCorr)
+	}
+	if decCorr.OriginalValues.Quantity != 1 || decCorr.OriginalValues.Unit != models.UnitPack {
+		t.Fatalf("original values mismatch: %+v", decCorr.OriginalValues)
+	}
+	if decCorr.CorrectedValues.Quantity != 2 || decCorr.CorrectedValues.Unit != models.UnitCarton {
+		t.Fatalf("corrected values mismatch: %+v", decCorr.CorrectedValues)
+	}
+
 	// 7. Insufficient stock on confirm should roll back
 	heldHugeSale := movement("held_huge")
 	heldHugeSale.Status = models.StatusReviewRequired
@@ -235,7 +266,7 @@ func TestResolveReview(t *testing.T) {
 	if _, err := s.RecordMovement(ctx, heldHugeSale, "req_huge", "hash_huge"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ResolveReview(ctx, "a", "held_huge", ReviewActionConfirm, nil); !errors.Is(err, ErrInsufficientStock) {
+	if _, err := s.ResolveReview(ctx, "a", "held_huge", ReviewActionConfirm, nil, "user_a", ""); !errors.Is(err, ErrInsufficientStock) {
 		t.Fatalf("expected ErrInsufficientStock, got %v", err)
 	}
 	stock(t, s, 42) // unchanged!

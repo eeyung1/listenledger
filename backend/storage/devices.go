@@ -132,3 +132,64 @@ func (s *Store) ListDevices(ctx context.Context, shopID string) ([]Device, error
 	}
 	return devices, nil
 }
+
+// GetDeviceByID returns a device by its ID and shop ID.
+func (s *Store) GetDeviceByID(ctx context.Context, shopID, deviceID string) (Device, error) {
+	query := `SELECT id, shop_id, name, token_hash, paired_at, revoked_at
+		FROM devices
+		WHERE shop_id = ? AND id = ?`
+
+	var d Device
+	var pairedAtStr string
+	var revokedAtStr sql.NullString
+
+	err := s.db.QueryRowContext(ctx, query, shopID, deviceID).Scan(
+		&d.ID, &d.ShopID, &d.Name, &d.TokenHash, &pairedAtStr, &revokedAtStr,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Device{}, ErrNotFound
+		}
+		return Device{}, fmt.Errorf("storage: query device by id: %w", err)
+	}
+
+	pairedAt, err := parseTime(pairedAtStr)
+	if err != nil {
+		return Device{}, fmt.Errorf("storage: parse paired_at: %w", err)
+	}
+	d.PairedAt = pairedAt
+
+	if revokedAtStr.Valid {
+		revokedAt, err := parseTime(revokedAtStr.String)
+		if err != nil {
+			return Device{}, fmt.Errorf("storage: parse revoked_at: %w", err)
+		}
+		d.RevokedAt = &revokedAt
+	}
+
+	return d, nil
+}
+
+// RotateDeviceToken updates a device's credential with a new token hash and resets revocation.
+func (s *Store) RotateDeviceToken(ctx context.Context, shopID, deviceID, newTokenHash string, rotatedAt time.Time) (Device, error) {
+	if shopID == "" || deviceID == "" || newTokenHash == "" {
+		return Device{}, errors.New("storage: invalid rotate device parameters")
+	}
+
+	query := `UPDATE devices
+		SET token_hash = ?, paired_at = ?, revoked_at = NULL
+		WHERE shop_id = ? AND id = ?`
+
+	res, err := s.db.ExecContext(ctx, query, newTokenHash, formatTime(rotatedAt), shopID, deviceID)
+	if err != nil {
+		return Device{}, fmt.Errorf("storage: rotate device token: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return Device{}, err
+	}
+	if n == 0 {
+		return Device{}, ErrNotFound
+	}
+	return s.GetDeviceByID(ctx, shopID, deviceID)
+}

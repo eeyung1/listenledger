@@ -28,6 +28,19 @@ func MatchProduct(candidate string, catalogue []models.Product) MatchResult {
 		return MatchResult{Confidence: 0.0, MatchedBy: "none"}
 	}
 
+	// Filter out archived products: soft-deactivated products are preserved in the ledger
+	// but are never matched against active speech recognition.
+	var active []models.Product
+	for _, p := range catalogue {
+		if !p.IsArchived() {
+			active = append(active, p)
+		}
+	}
+	catalogue = active
+	if len(catalogue) == 0 {
+		return MatchResult{Confidence: 0.0, MatchedBy: "none"}
+	}
+
 	// 1. Exact SKU match
 	for i := range catalogue {
 		p := &catalogue[i]

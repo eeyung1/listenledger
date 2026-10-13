@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eeyung1/listenledger-backend/auth"
 	"github.com/eeyung1/listenledger-backend/models"
 	"github.com/eeyung1/listenledger-backend/storage"
 	"github.com/eeyung1/listenledger-backend/ws"
@@ -86,6 +87,10 @@ func parseTransactionFilter(r *http.Request) (storage.TransactionFilter, error) 
 
 	if productID := strings.TrimSpace(q.Get("product_id")); productID != "" {
 		filter.ProductID = productID
+	}
+
+	if receiptID := strings.TrimSpace(q.Get("receipt_id")); receiptID != "" {
+		filter.ReceiptID = receiptID
 	}
 
 	if rawFrom := strings.TrimSpace(q.Get("from")); rawFrom != "" {
@@ -352,6 +357,15 @@ func (s *Server) handleTransactionDetail(w http.ResponseWriter, r *http.Request)
 	if len(parts) == 2 && parts[0] != "" {
 		id := parts[0]
 		action := parts[1]
+		if action == "decision" {
+			if r.Method != http.MethodGet {
+				w.Header().Set("Allow", http.MethodGet)
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			s.getTransactionDecision(w, r, id)
+			return
+		}
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -372,6 +386,39 @@ func (s *Server) handleTransactionDetail(w http.ResponseWriter, r *http.Request)
 	writeError(w, http.StatusNotFound, "not found")
 }
 
+func (s *Server) callerIdentity(r *http.Request) string {
+	if cookie, err := r.Cookie(auth.CookieName); err == nil && cookie != nil && cookie.Value != "" {
+		sum := sha256.Sum256([]byte(cookie.Value))
+		ident, err := s.store.SessionIdentity(r.Context(), hex.EncodeToString(sum[:]))
+		if err == nil {
+			if ident.Email != "" {
+				return ident.Email
+			}
+			if ident.OwnerID != "" {
+				return ident.OwnerID
+			}
+		}
+	}
+	return "owner"
+}
+
+func (s *Server) getTransactionDecision(w http.ResponseWriter, r *http.Request, id string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+	dec, err := s.store.GetReviewDecision(r.Context(), shopID, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "review decision not found")
+		return
+	}
+	if err != nil {
+		s.fail(w, r, "get review decision", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, dec)
+}
+
 func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request, id string) {
 	shopID, ok := s.shopID(w, r)
 	if !ok {
@@ -390,10 +437,11 @@ func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request, id strin
 }
 
 type confirmTransactionRequest struct {
-	ProductID string        `json:"product_id"`
-	Quantity  int           `json:"quantity"`
-	Unit      models.Unit   `json:"unit"`
-	Amount    *models.Money `json:"amount"`
+	ProductID string        `json:"product_id,omitempty"`
+	Quantity  int           `json:"quantity,omitempty"`
+	Unit      models.Unit   `json:"unit,omitempty"`
+	Amount    *models.Money `json:"amount,omitempty"`
+	Notes     string        `json:"notes,omitempty"`
 }
 
 func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id string) {
@@ -403,20 +451,25 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 	}
 
 	var corrections *storage.ReviewCorrections
+	notes := ""
 	if r.Body != nil && r.ContentLength > 0 {
 		var req confirmTransactionRequest
 		if !decodeJSON(w, r, &req) {
 			return
 		}
-		corrections = &storage.ReviewCorrections{
-			ProductID: strings.TrimSpace(req.ProductID),
-			Quantity:  req.Quantity,
-			Unit:      req.Unit,
-			Amount:    req.Amount,
+		notes = strings.TrimSpace(req.Notes)
+		if req.ProductID != "" || req.Quantity > 0 || req.Unit.Valid() || req.Amount != nil {
+			corrections = &storage.ReviewCorrections{
+				ProductID: strings.TrimSpace(req.ProductID),
+				Quantity:  req.Quantity,
+				Unit:      req.Unit,
+				Amount:    req.Amount,
+			}
 		}
 	}
 
-	result, err := s.store.ResolveReview(r.Context(), shopID, id, storage.ReviewActionConfirm, corrections)
+	decidedBy := s.callerIdentity(r)
+	result, err := s.store.ResolveReview(r.Context(), shopID, id, storage.ReviewActionConfirm, corrections, decidedBy, notes)
 	if err != nil {
 		switch {
 		case errors.Is(err, storage.ErrNotFound):
@@ -440,13 +493,27 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 	writeJSON(w, http.StatusOK, result.Transaction)
 }
 
+type rejectTransactionRequest struct {
+	Notes string `json:"notes,omitempty"`
+}
+
 func (s *Server) rejectTransaction(w http.ResponseWriter, r *http.Request, id string) {
 	shopID, ok := s.shopID(w, r)
 	if !ok {
 		return
 	}
 
-	result, err := s.store.ResolveReview(r.Context(), shopID, id, storage.ReviewActionReject, nil)
+	notes := ""
+	if r.Body != nil && r.ContentLength > 0 {
+		var req rejectTransactionRequest
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		notes = strings.TrimSpace(req.Notes)
+	}
+
+	decidedBy := s.callerIdentity(r)
+	result, err := s.store.ResolveReview(r.Context(), shopID, id, storage.ReviewActionReject, nil, decidedBy, notes)
 	if err != nil {
 		switch {
 		case errors.Is(err, storage.ErrNotFound):
@@ -647,4 +714,182 @@ func (s *Server) handleTransactionsManual(w http.ResponseWriter, r *http.Request
 		Transaction: result.Transaction,
 		Product:     result.Product,
 	})
+}
+
+type receiptResponse struct {
+	ReceiptID      string               `json:"receipt_id"`
+	ShopID         string               `json:"shop_id"`
+	Transactions   []models.Transaction `json:"transactions"`
+	TotalCount     int                  `json:"total_count"`
+	ConfirmedCount int                  `json:"confirmed_count"`
+	ReviewCount    int                  `json:"review_count"`
+	RejectedCount  int                  `json:"rejected_count"`
+	TotalAmount    models.Money         `json:"total_amount"`
+}
+
+type resolveReceiptRequest struct {
+	Notes string `json:"notes,omitempty"`
+}
+
+func (s *Server) handleReceiptDetail(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/receipts/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 1 && parts[0] != "" {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+		s.getReceipt(w, r, parts[0])
+		return
+	}
+	if len(parts) == 2 && parts[0] != "" {
+		receiptID := parts[0]
+		action := parts[1]
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+		switch action {
+		case "confirm":
+			s.confirmReceipt(w, r, receiptID)
+			return
+		case "reject":
+			s.rejectReceipt(w, r, receiptID)
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "not found")
+}
+
+func (s *Server) getReceipt(w http.ResponseWriter, r *http.Request, receiptID string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+	txns, _, err := s.store.QueryTransactions(r.Context(), shopID, storage.TransactionFilter{
+		ReceiptID: receiptID,
+		Limit:     100,
+	})
+	if err != nil {
+		s.fail(w, r, "get receipt", err)
+		return
+	}
+	if len(txns) == 0 {
+		writeError(w, http.StatusNotFound, "receipt not found")
+		return
+	}
+
+	var confirmedCount, reviewCount, rejectedCount int
+	var totalAmount int64
+	currency := txns[0].Amount.Currency
+	for _, t := range txns {
+		switch t.Status {
+		case models.StatusConfirmed:
+			confirmedCount++
+			if t.Amount.Currency == currency {
+				totalAmount += t.Amount.Amount
+			}
+		case models.StatusReviewRequired:
+			reviewCount++
+		case models.StatusRejected:
+			rejectedCount++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, receiptResponse{
+		ReceiptID:      receiptID,
+		ShopID:         shopID,
+		Transactions:   txns,
+		TotalCount:     len(txns),
+		ConfirmedCount: confirmedCount,
+		ReviewCount:    reviewCount,
+		RejectedCount:  rejectedCount,
+		TotalAmount:    models.Money{Amount: totalAmount, Currency: currency},
+	})
+}
+
+func (s *Server) confirmReceipt(w http.ResponseWriter, r *http.Request, receiptID string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var req resolveReceiptRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		_ = decodeJSON(w, r, &req)
+	}
+
+	txns, _, err := s.store.QueryTransactions(r.Context(), shopID, storage.TransactionFilter{
+		ReceiptID: receiptID,
+		Limit:     100,
+	})
+	if err != nil {
+		s.fail(w, r, "load receipt transactions", err)
+		return
+	}
+	if len(txns) == 0 {
+		writeError(w, http.StatusNotFound, "receipt not found")
+		return
+	}
+
+	decidedBy := s.callerIdentity(r)
+	for _, t := range txns {
+		if t.Status == models.StatusReviewRequired {
+			res, err := s.store.ResolveReview(r.Context(), shopID, t.ID, storage.ReviewActionConfirm, nil, decidedBy, req.Notes)
+			if err != nil {
+				switch {
+				case errors.Is(err, storage.ErrInsufficientStock):
+					writeError(w, http.StatusConflict, fmt.Sprintf("line %s: %s", t.ProductName, err.Error()))
+				default:
+					s.fail(w, r, "confirm receipt line", err)
+				}
+				return
+			}
+			if res.Product != nil {
+				s.publish(w, r, shopID, ws.EventInventoryUpdated, *res.Product)
+			}
+			s.publish(w, r, shopID, ws.EventTransactionUpdated, res.Transaction)
+		}
+	}
+
+	s.getReceipt(w, r, receiptID)
+}
+
+func (s *Server) rejectReceipt(w http.ResponseWriter, r *http.Request, receiptID string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var req resolveReceiptRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		_ = decodeJSON(w, r, &req)
+	}
+
+	txns, _, err := s.store.QueryTransactions(r.Context(), shopID, storage.TransactionFilter{
+		ReceiptID: receiptID,
+		Limit:     100,
+	})
+	if err != nil {
+		s.fail(w, r, "load receipt transactions", err)
+		return
+	}
+	if len(txns) == 0 {
+		writeError(w, http.StatusNotFound, "receipt not found")
+		return
+	}
+
+	decidedBy := s.callerIdentity(r)
+	for _, t := range txns {
+		if t.Status == models.StatusReviewRequired {
+			res, err := s.store.ResolveReview(r.Context(), shopID, t.ID, storage.ReviewActionReject, nil, decidedBy, req.Notes)
+			if err != nil {
+				s.fail(w, r, "reject receipt line", err)
+				return
+			}
+			s.publish(w, r, shopID, ws.EventTransactionUpdated, res.Transaction)
+		}
+	}
+
+	s.getReceipt(w, r, receiptID)
 }

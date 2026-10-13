@@ -39,9 +39,15 @@ func (s *Server) handleDeviceDetail(w http.ResponseWriter, r *http.Request) {
 	// e.g. /api/devices/{id}/revoke
 	path := strings.TrimPrefix(r.URL.Path, "/api/devices/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) == 2 && parts[1] == "revoke" && r.Method == http.MethodPost {
-		s.revokeDevice(w, r, parts[0])
-		return
+	if len(parts) == 2 && r.Method == http.MethodPost {
+		switch parts[1] {
+		case "revoke":
+			s.revokeDevice(w, r, parts[0])
+			return
+		case "rotate":
+			s.rotateDevice(w, r, parts[0])
+			return
+		}
 	}
 	writeError(w, http.StatusNotFound, "device action not found")
 }
@@ -137,5 +143,48 @@ func (s *Server) revokeDevice(w http.ResponseWriter, r *http.Request, deviceID s
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "revoked",
 		"id":     deviceID,
+	})
+}
+
+type rotateDeviceResponse struct {
+	ID        string    `json:"id"`
+	ShopID    string    `json:"shop_id"`
+	Name      string    `json:"name"`
+	Token     string    `json:"token"`
+	RotatedAt time.Time `json:"rotated_at"`
+}
+
+func (s *Server) rotateDevice(w http.ResponseWriter, r *http.Request, deviceID string) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var rawTokenBytes [24]byte
+	if _, err := rand.Read(rawTokenBytes[:]); err != nil {
+		s.fail(w, r, "generate device token", err)
+		return
+	}
+	rawToken := "dev_tok_" + hex.EncodeToString(rawTokenBytes[:])
+	hash := sha256.Sum256([]byte(rawToken))
+	tokenHash := hex.EncodeToString(hash[:])
+	now := time.Now().UTC()
+
+	dev, err := s.store.RotateDeviceToken(r.Context(), shopID, deviceID, tokenHash, now)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "device not found")
+			return
+		}
+		s.fail(w, r, "rotate device token", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, rotateDeviceResponse{
+		ID:        dev.ID,
+		ShopID:    dev.ShopID,
+		Name:      dev.Name,
+		Token:     rawToken,
+		RotatedAt: now,
 	})
 }
