@@ -121,7 +121,7 @@ func (s *Store) DeleteShopData(ctx context.Context, shopID string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	for _, table := range []string{"transactions", "products"} {
+	for _, table := range []string{"stock_movements", "ledger_requests", "transactions", "products"} {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM `+table+` WHERE shop_id = ?`, shopID,
 		); err != nil {

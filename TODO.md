@@ -2,7 +2,7 @@
 
 ## Authentication increment (13 October 2026)
 
-Implemented owner signup/login/logout, one-time recovery codes, persisted hashed sessions, shop isolation, write CSRF guards, persisted throttling and WebSocket session revalidation. Go/frontend CI and auth integration tests added. The README tracks current progress; older scaffold notes below remain historical where contradicted. Next: atomic ledger/stock operations and idempotency. Device credentials remain pending.
+Implemented owner signup/login/logout, one-time recovery codes, persisted hashed sessions, shop isolation, write CSRF guards, persisted throttling and WebSocket session revalidation. Go/frontend CI and auth integration tests added. The README tracks current progress; older scaffold notes below remain historical where contradicted. Atomic ledger/stock operations and idempotency now implemented with packaging conversion and race-tested rollback/retry coverage. Next: owner review actions and catalogue forms. Device credentials remain pending.
 
 
 Status: the realtime pipe and the storage layer are in place. The dashboard can
