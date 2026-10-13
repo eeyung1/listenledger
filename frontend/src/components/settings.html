@@ -1,0 +1,116 @@
+<!--
+  Settings & Hardware Device Management (route: #/settings)
+
+  Configures shop details, voice recognition boundary phrases,
+  confidence thresholds, and paired physical edge capture devices.
+-->
+<section class="view view--settings">
+  <header class="view__header">
+    <h1 class="view__title">Settings & Devices</h1>
+    <p class="view__subtitle">
+      Configure merchant preferences, voice loop boundary phrases, and paired microphone hardware.
+    </p>
+  </header>
+
+  <div class="settings-grid">
+    <!-- Shop Configuration Form -->
+    <section class="panel" aria-labelledby="shop-settings-heading">
+      <h2 class="panel__title" id="shop-settings-heading">Shop Details & Voice Boundaries</h2>
+      <form class="form settings-form" data-hook="settings-form">
+        <label class="form__field">
+          Shop Name
+          <input type="text" name="name" data-hook="setting-name" required maxlength="100" />
+        </label>
+
+        <div class="form__row">
+          <label class="form__field">
+            Currency
+            <input type="text" name="currency" data-hook="setting-currency" required maxlength="3" uppercase />
+          </label>
+          <label class="form__field">
+            Timezone
+            <input type="text" name="timezone" data-hook="setting-timezone" required />
+          </label>
+        </div>
+
+        <label class="form__field">
+          Review Confidence Threshold
+          <div class="range-field">
+            <input type="range" name="confidence_threshold" min="0.50" max="1.00" step="0.01" data-hook="setting-threshold-range" />
+            <span class="range-field__value" data-hook="setting-threshold-val">75%</span>
+          </div>
+          <span class="form__hint">
+            Captures where any anchor (product, quantity, or amount) falls below this threshold are held for owner review.
+          </span>
+        </label>
+
+        <div class="form__row">
+          <label class="form__field">
+            Sale Closing Phrase
+            <input type="text" name="sale_phrase" data-hook="setting-sale-phrase" required />
+            <span class="form__hint">Closing trigger for customer sales (e.g., “Thank you”).</span>
+          </label>
+          <label class="form__field">
+            Restock Closing Phrase
+            <input type="text" name="restock_phrase" data-hook="setting-restock-phrase" required />
+            <span class="form__hint">Closing trigger for supplier restocks (e.g., “Stock received”).</span>
+          </label>
+        </div>
+
+        <div class="form__actions">
+          <button type="submit" class="button button--primary" data-hook="save-settings-btn">Save Settings</button>
+          <span class="form__status" data-hook="settings-status" hidden></span>
+        </div>
+      </form>
+    </section>
+
+    <!-- Edge Devices Panel -->
+    <section class="panel" aria-labelledby="devices-heading">
+      <h2 class="panel__title" id="devices-heading">Paired Capture Devices</h2>
+      <p class="panel__hint">
+        Physical microphones and edge hubs authenticated to record transactions for this shop.
+      </p>
+
+      <form class="pair-device-form" data-hook="pair-device-form">
+        <div class="form__row">
+          <label class="form__field">
+            New Device Name
+            <input type="text" name="device_name" data-hook="device-name-input" placeholder="e.g. Counter Lapel Mic" required maxlength="60" />
+          </label>
+          <button type="submit" class="button button--secondary" data-hook="pair-device-btn">Pair New Device</button>
+        </div>
+      </form>
+
+      <!-- Token display dialog / card -->
+      <div class="device-token-card" data-hook="device-token-card" hidden>
+        <div class="device-token-card__header">
+          <strong>Device Paired Successfully</strong>
+          <button type="button" class="button button--icon" data-hook="close-token-card">&times;</button>
+        </div>
+        <p class="device-token-card__warning">
+          Copy this authentication token now. It will never be shown again:
+        </p>
+        <code class="device-token-card__code" data-hook="device-token-value"></code>
+      </div>
+
+      <ul class="device-list" data-hook="device-list">
+        <li class="device-list__empty" data-hook="device-list-empty">
+          No edge capture devices paired yet.
+        </li>
+      </ul>
+    </section>
+
+    <!-- Privacy & Hardware Notice -->
+    <section class="panel panel--privacy" aria-labelledby="privacy-heading">
+      <h2 class="panel__title" id="privacy-heading">Ambient Voice Privacy & Local Processing</h2>
+      <div class="privacy-notice">
+        <p>
+          <strong>Zero Audio Retention Policy:</strong> ListenLedger captures speech locally on paired hardware. Raw microphone PCM audio is framed in volatile device memory and discarded immediately once voice activity boundaries are detected.
+        </p>
+        <p>
+          Audio is never transmitted over the internet or saved to disk. Only extracted structured text and transcription anchors reach this dashboard.
+        </p>
+      </div>
+    </section>
+  </div>
+</section>

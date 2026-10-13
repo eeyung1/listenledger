@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -150,4 +151,92 @@ func (s *Store) GetShop(ctx context.Context, shopID string) (Shop, error) {
 		return Shop{}, fmt.Errorf("storage: get shop %s: %w", shopID, err)
 	}
 	return sh, nil
+}
+
+// UpdateShopSettingsParams specifies configurable shop properties.
+type UpdateShopSettingsParams struct {
+	Name                *string  `json:"name"`
+	Currency            *string  `json:"currency"`
+	Timezone            *string  `json:"timezone"`
+	ConfidenceThreshold *float64 `json:"confidence_threshold"`
+	SalePhrase          *string  `json:"sale_phrase"`
+	RestockPhrase       *string  `json:"restock_phrase"`
+}
+
+// UpdateShopSettings updates the configuration for an existing shop.
+func (s *Store) UpdateShopSettings(ctx context.Context, shopID string, params UpdateShopSettingsParams) (Shop, error) {
+	if shopID == "" {
+		return Shop{}, errors.New("storage: UpdateShopSettings requires a shop_id")
+	}
+
+	current, err := s.GetShop(ctx, shopID)
+	if err != nil {
+		return Shop{}, err
+	}
+
+	if params.Name != nil {
+		name := strings.TrimSpace(*params.Name)
+		if name == "" {
+			return Shop{}, errors.New("storage: shop name cannot be empty")
+		}
+		current.Name = name
+	}
+	if params.Currency != nil {
+		curr := strings.ToUpper(strings.TrimSpace(*params.Currency))
+		if len(curr) != 3 {
+			return Shop{}, errors.New("storage: currency must be a 3-letter code")
+		}
+		current.Currency = curr
+	}
+	if params.Timezone != nil {
+		tz := strings.TrimSpace(*params.Timezone)
+		if _, err := time.LoadLocation(tz); err != nil {
+			return Shop{}, fmt.Errorf("storage: invalid timezone %q: %w", tz, err)
+		}
+		current.Timezone = tz
+	}
+	if params.ConfidenceThreshold != nil {
+		thresh := *params.ConfidenceThreshold
+		if thresh < 0.50 || thresh > 1.00 {
+			return Shop{}, errors.New("storage: confidence threshold must be between 0.50 and 1.00")
+		}
+		current.ConfidenceThreshold = thresh
+	}
+	if params.SalePhrase != nil {
+		phrase := strings.TrimSpace(*params.SalePhrase)
+		if phrase == "" {
+			return Shop{}, errors.New("storage: sale phrase cannot be empty")
+		}
+		current.SalePhrase = phrase
+	}
+	if params.RestockPhrase != nil {
+		phrase := strings.TrimSpace(*params.RestockPhrase)
+		if phrase == "" {
+			return Shop{}, errors.New("storage: restock phrase cannot be empty")
+		}
+		current.RestockPhrase = phrase
+	}
+	if strings.EqualFold(current.SalePhrase, current.RestockPhrase) {
+		return Shop{}, errors.New("storage: sale phrase and restock phrase must be distinct")
+	}
+
+	const query = `UPDATE shops SET name = ?, currency = ?, timezone = ?,
+		confidence_threshold = ?, sale_phrase = ?, restock_phrase = ?
+		WHERE id = ?`
+	result, err := s.db.ExecContext(ctx, query,
+		current.Name, current.Currency, current.Timezone,
+		current.ConfidenceThreshold, current.SalePhrase, current.RestockPhrase,
+		shopID,
+	)
+	if err != nil {
+		return Shop{}, fmt.Errorf("storage: update shop %s: %w", shopID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Shop{}, fmt.Errorf("storage: update shop %s rows affected: %w", shopID, err)
+	}
+	if affected == 0 {
+		return Shop{}, ErrNotFound
+	}
+	return current, nil
 }

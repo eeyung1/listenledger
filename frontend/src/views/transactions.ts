@@ -14,9 +14,9 @@
  */
 
 import {
-  MAX_TRANSACTION_LIMIT,
   confirmTransaction,
   fetchTransactions,
+  getExportTransactionsUrl,
   rejectTransaction,
   type Transaction,
 } from "../api.js";
@@ -45,6 +45,9 @@ interface Filters {
 export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanup {
   let transactions: Transaction[] = [];
   let disposed = false;
+  let pageOffset = 0;
+  const pageSize = 50;
+  let totalCount = 0;
 
   const filters: Filters = { type: "", status: "" };
 
@@ -53,6 +56,10 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   const reviewCount = hook(root, "review-queue-count");
   const typeFilter = hook<HTMLSelectElement>(root, "filter-type");
   const statusFilter = hook<HTMLSelectElement>(root, "filter-status");
+  const exportLink = hook<HTMLAnchorElement>(root, "export-csv");
+  const pagePrev = hook<HTMLButtonElement>(root, "page-prev");
+  const pageNext = hook<HTMLButtonElement>(root, "page-next");
+  const pageInfo = hook(root, "page-info");
 
   function reviewCard(transaction: Transaction): HTMLLIElement {
     const card = el("li", "review-card");
@@ -154,6 +161,33 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     return row;
   }
 
+  function updateExportUrl(): void {
+    if (exportLink !== null) {
+      exportLink.href = getExportTransactionsUrl(shopId, {
+        type: filters.type || undefined,
+        status: filters.status || undefined,
+      });
+    }
+  }
+
+  function updatePaginationControls(): void {
+    if (pagePrev !== null) {
+      pagePrev.disabled = pageOffset <= 0;
+    }
+    if (pageNext !== null) {
+      pageNext.disabled = pageOffset + transactions.length >= totalCount;
+    }
+    if (pageInfo !== null) {
+      if (totalCount === 0) {
+        setText(pageInfo, "Showing 0 of 0");
+      } else {
+        const start = pageOffset + 1;
+        const end = pageOffset + transactions.length;
+        setText(pageInfo, `Showing ${start}–${end} of ${totalCount}`);
+      }
+    }
+  }
+
   function renderReviewQueue(): void {
     if (reviewQueue === null) return;
     clear(reviewQueue);
@@ -174,13 +208,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     if (ledgerBody === null) return;
     clear(ledgerBody);
 
-    const visible = transactions.filter((transaction) => {
-      if (filters.type !== "" && transaction.type !== filters.type) return false;
-      if (filters.status !== "" && transaction.status !== filters.status) return false;
-      return true;
-    });
-
-    if (visible.length === 0) {
+    if (transactions.length === 0) {
       const row = el("tr", "table__empty");
       const cellElement = cell("", "No transactions match these filters.");
       cellElement.colSpan = 7;
@@ -188,7 +216,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       ledgerBody.append(row);
       return;
     }
-    for (const transaction of visible) {
+    for (const transaction of transactions) {
       ledgerBody.append(ledgerRow(transaction));
     }
   }
@@ -196,13 +224,20 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   function render(): void {
     renderReviewQueue();
     renderLedger();
+    updatePaginationControls();
   }
 
   async function refetch(): Promise<void> {
     try {
-      const snapshot = await fetchTransactions(shopId, MAX_TRANSACTION_LIMIT);
+      updateExportUrl();
+      const snapshot = await fetchTransactions(shopId, pageSize, {
+        offset: pageOffset,
+        type: filters.type || undefined,
+        status: filters.status || undefined,
+      });
       if (disposed) return;
       transactions = [...snapshot.transactions];
+      totalCount = snapshot.total ?? snapshot.count;
       render();
     } catch (error) {
       if (disposed) return;
@@ -224,6 +259,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     if (index === -1) {
       if (isNew) {
         transactions.unshift(transaction);
+        totalCount++;
       } else {
         transactions.push(transaction);
       }
@@ -231,8 +267,6 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       transactions[index] = transaction;
     }
 
-    // Both panels depend on the list, and the review count changes when a row
-    // is resolved, so both are re-rendered rather than patched in place.
     render();
   }
 
@@ -248,12 +282,28 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
 
   const onTypeFilter = (): void => {
     filters.type = typeFilter?.value ?? "";
-    renderLedger();
+    pageOffset = 0;
+    void refetch();
   };
 
   const onStatusFilter = (): void => {
     filters.status = statusFilter?.value ?? "";
-    renderLedger();
+    pageOffset = 0;
+    void refetch();
+  };
+
+  const onPrevPage = (): void => {
+    if (pageOffset > 0) {
+      pageOffset = Math.max(0, pageOffset - pageSize);
+      void refetch();
+    }
+  };
+
+  const onNextPage = (): void => {
+    if (pageOffset + pageSize < totalCount) {
+      pageOffset += pageSize;
+      void refetch();
+    }
   };
 
   const onConnectionStatus = (event: Event): void => {
@@ -269,6 +319,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   typeFilter?.addEventListener("change", onTypeFilter);
   statusFilter?.addEventListener("change", onStatusFilter);
+  pagePrev?.addEventListener("click", onPrevPage);
+  pageNext?.addEventListener("click", onNextPage);
 
   void refetch();
 
@@ -280,5 +332,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     typeFilter?.removeEventListener("change", onTypeFilter);
     statusFilter?.removeEventListener("change", onStatusFilter);
+    pagePrev?.removeEventListener("click", onPrevPage);
+    pageNext?.removeEventListener("click", onNextPage);
   };
 }

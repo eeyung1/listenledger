@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/eeyung1/listenledger-backend/api"
@@ -21,10 +22,12 @@ func (d *dummyPublisher) Publish(shopID string, eventType any, payload any) bool
 
 func setupCaptureTest(t *testing.T) (*storage.Store, http.Handler, string) {
 	t.Helper()
-	store, err := storage.Open(":memory:")
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := storage.Open(dbPath)
 	if err != nil {
 		t.Fatalf("storage.Open: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 
 	shopID := "shop_cap_1"
 	// Create owner and shop in identity table

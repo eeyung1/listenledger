@@ -17,7 +17,8 @@ export type EventType =
   | "transaction.updated"
   | "transaction.review_required"
   | "inventory.updated"
-  | "product.created";
+  | "product.created"
+  | "settings.updated";
 
 /** The envelope every server message uses, mirroring ws.Event. */
 export interface ServerEvent<T = unknown> {
@@ -35,6 +36,7 @@ export const DOM_EVENT_NAMES: Readonly<Record<EventType, string>> = {
   "transaction.review_required": "ll:transaction-review-required",
   "inventory.updated": "ll:inventory-updated",
   "product.created": "ll:product-created",
+  "settings.updated": "ll:settings-updated",
 };
 
 /** Dispatched whenever the connection state changes. */
@@ -297,6 +299,7 @@ declare global {
     "ll:transaction-review-required": CustomEvent<ServerEvent>;
     "ll:inventory-updated": CustomEvent<ServerEvent>;
     "ll:product-created": CustomEvent<ServerEvent>;
+    "ll:settings-updated": CustomEvent<ServerEvent>;
     "ll:connection-status": CustomEvent<ConnectionStatusDetail>;
   }
 }

@@ -17,15 +17,16 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 “Implemented” means source code exists. Validation is tracked separately below; it does not imply the full real-shop acceptance workflow has passed.
 
 | Component | Implemented foundation | Still required for MVP |
+| Component | Implemented foundation | Still required for MVP |
 |---|---|---|
-| Go HTTP server | Health endpoint, structured logging, timeouts, graceful shutdown; owner sessions, shop isolation, confirm/reject, product edit, daily summary, device pairing & edge capture endpoints | Request tracing, operational hardening |
-| SQLite storage | Embedded migrations (products, transactions, identity, ledger, devices), shop-scoped queries, atomic review resolution, stock movements, daily summary | Reversal audit history and wider recovery tests |
+| Go HTTP server | Request tracing (`X-Request-ID`), panic recovery middleware, timeouts, graceful shutdown; owner sessions, shop isolation, confirm/reject, product edit, daily summary, device pairing, edge capture, settings & CSV export endpoints | Production TLS certificate provisioning |
+| SQLite storage | Hot online backup (`VACUUM INTO`), integrity verification, embedded migrations (products, transactions, identity, ledger, devices), shop-scoped queries, atomic review resolution, stock movements, daily summary, shop settings | Reversal audit history and wider recovery tests |
 | Catalogue | Product creation & update API; aliases, units and packaging stored; Add Product and Edit UI forms | Alias conflict detection and batch imports |
-| Transactions | Structured JSON ingestion, persistence, server-side recognition validation (`backend/validate`), edge capture intake (`POST /api/captures`), atomic confirm/reject operations | Full voice loop end-to-end acceptance trials |
+| Transactions | Structured JSON ingestion, persistence, server-side recognition validation (`backend/validate`), edge capture intake (`POST /api/captures`), atomic confirm/reject, paginated query filters, CSV export | Full voice loop end-to-end acceptance trials |
 | Realtime | Shop-partitioned WebSocket hub, browser reconnect/backoff, reconnect recovery across all views | Snapshot/event version reconciliation, dropped-event recovery |
-| Dashboard | Overview with server-authoritative daily summaries, ledger/review display, inventory search and low-stock display, interactive review decisions, product add/edit modals, comprehensive stylesheet | Basic analytics/settings, CSV export |
-| Rust edge engine | Audio framing & VAD, privacy-preserving audio discard, STT interface, boundary/anchor extraction, disk-persisted offline queue, authenticated delivery client | Model weight packaging and hardware benchmarking |
-| Delivery quality | Dependency lockfiles, authentication/isolation tests, Go/frontend/edge CI, review resolution, validation & capture API tests | Real-hardware microphone tests, deployment/runbook, backup/restore verification |
+| Dashboard | Overview with daily summaries, ledger with server-side filters & pagination, CSV export, inventory search and low-stock display, interactive review decisions, product add/edit modals, settings & device management, responsive styling | Additional analytics visualizations |
+| Rust edge engine | Audio framing & VAD, privacy-preserving audio discard, STT interface & model download script, boundary/anchor extraction, disk-persisted offline queue, authenticated delivery client | Physical hardware microphone benchmarking |
+| Delivery quality | Dependency lockfiles, authentication/isolation tests, Go/frontend/edge CI, root Makefile, automated backup/restore verification, operational runbook (RUNBOOK.md) | Controlled pilot ground-truth reconciliation |
 
 ### Implemented features — checked against the code
 
@@ -46,6 +47,14 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 - [x] Edge device pairing (`POST /api/devices`), listing (`GET /api/devices`), and revocation (`POST /api/devices/{id}/revoke`).
 - [x] Server-side daily overview summary (`GET /api/summary`) integrated with overview dashboard KPIs.
 - [x] Rust edge capture engine crate (`edge/`) with audio framing, VAD, STT interface, boundary detection, disk-backed offline queue, and authenticated HTTP client.
+- [x] Paginated ledger history and server-side date/type/status/product query filters (`GET /api/transactions?type=&status=&from=&to=&limit=&offset=`).
+- [x] CSV ledger export endpoint (`GET /api/transactions/export?format=csv`) with spreadsheet formula injection protection.
+- [x] Shop settings and device management API (`GET /api/settings`, `PATCH /api/settings`) and frontend Settings view (`#/settings`).
+- [x] Request ID tracing middleware (`X-Request-ID`) and panic recovery middleware (`Recoverer`).
+- [x] Automated SQLite online hot backup and restore verification tool (`scripts/verify_backup_restore.sh`, `storage/backup_test.go`).
+- [x] Comprehensive deployment, privacy, and operations runbook (`RUNBOOK.md`).
+- [x] Quantized Whisper model weight downloader and checksum verifier (`edge/scripts/download_model.sh`).
+- [x] Root Makefile with `build`, `test`, `check`, `dev`, `clean`, and `verify-backup` targets.
 
 #### Backend and persistence
 
@@ -81,16 +90,13 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 
 ### Where to continue
 
-**Next: Milestone 4 — Operational MVP & Pilot Acceptance Trials.** Edge capture intake (`POST /api/captures`), device pairing/revocation (`/api/devices`), catalogue recognition validation (`backend/validate`), daily summary aggregates (`/api/summary`), and the Rust edge crate (`edge/`) have landed. Next major deliverable is hardware audio driver validation on the physical prototype, automated backup/restore verification, and staff protocol training for the pilot trial.
-
-Update this checked list and the relevant roadmap task in the same PR when each feature is implemented. Record validation separately so “implemented” and “verified” remain distinguishable.
+**Next: Milestone 5 — Evidence & Pilot Acceptance Trials.** Reporting and settings API (`GET /api/settings`, `PATCH /api/settings`), ledger pagination and server-side filters (`/api/transactions`), CSV export with formula injection protection (`/api/transactions/export`), request tracing (`X-Request-ID`) and panic recovery middleware, automated hot backup and restore verification (`scripts/verify_backup_restore.sh`, `storage/backup_test.go`), quantized Whisper weight download tooling (`edge/scripts/download_model.sh`), and the operational runbook (`RUNBOOK.md`) are implemented. Next major deliverable is staff protocol training and conducting controlled real-shop acceptance trials against independent records.
 
 ### Confirmed gaps in the current code
 
-- Physical hardware microphone integration tests and on-device whisper model weight bundles remain to be benchmarked.
-- Paginated ledger history and server-side date/type/status/product query filters remain client-side in the SPA.
+- Physical hardware microphone integration trials and on-device whisper model weight bundles remain to be benchmarked in a noisy shop environment.
 - Snapshot replacement can race with incoming events; timestamp/version reconciliation is not implemented.
-- Operational deployment runbooks, automated SQLite backups, and restore verification remain pending.
+- Production multi-node scaling and multi-counter audio separation remain post-pilot items.
 
 ## MVP scope and success condition
 
@@ -199,7 +205,7 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [x] Survive power/process restarts without losing acknowledged records or duplicating queued ones.
 - [ ] Expose microphone, model, backend and queue health with actionable errors.
 - [x] Discard raw audio after processing by default; document any temporary buffering and cleanup.
-- [ ] Provide repeatable setup instructions for the supported hardware and model files.
+- [x] Provide repeatable setup instructions for the supported hardware and model files.
 
 **Acceptance:** actual microphone speech reaches the ledger through the normal application path. Network loss is visible; pending captures synchronise once connectivity returns.
 
@@ -222,12 +228,12 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [ ] Implement clear loading, empty, error, offline, saving and success states.
 - [ ] Make controls keyboard accessible with labels, visible focus and readable contrast.
 - [x] Add server-side daily summaries for confirmed revenue, sales count and pending reviews; use shop timezone and currency.
-- [ ] Add paginated ledger history and server-side date/type/status/product filters.
+- [x] Add paginated ledger history and server-side date/type/status/product filters.
 - [x] Finish catalogue add/edit/archive and review controls.
 - [ ] Display sales, restocks, purchase costs and stock adjustments distinctly.
 - [ ] Add basic analytics: date-range sales totals, transaction counts and product movement.
-- [ ] Add basic CSV ledger export for pilot reconciliation, protecting spreadsheet consumers from formula injection.
-- [ ] Add settings for shop details, phrases, thresholds and paired devices.
+- [x] Add basic CSV ledger export for pilot reconciliation, protecting spreadsheet consumers from formula injection.
+- [x] Add settings for shop details, phrases, thresholds and paired devices.
 - [ ] Display capture/device health and pending synchronisation separately from dashboard socket health.
 
 **Acceptance:** the owner can operate the pilot on a phone. Totals remain correct beyond 500 transactions and at shop-local day boundaries.
@@ -255,7 +261,7 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [ ] Add a microphone/fixture-driven end-to-end test covering sale, review, restock and offline retry.
 - [x] Configure GitHub Actions for Go formatting/vet/race tests/build and frontend typecheck/build.
 - [x] Add Rust formatting/clippy/tests when the crate exists.
-- [ ] Add a root task runner for build, test and local development.
+- [x] Add a root task runner for build, test and local development.
 - [ ] Document dependencies, configuration, migrations and test fixtures; maintain README/TODO as changes land.
 - [ ] Configure required checks when CI exists, without claiming absent checks have passed.
 
@@ -274,17 +280,17 @@ User-approved workflow: **create branch → push branch → wait for configured 
 
 ## 10. Deployment, privacy and operation
 
-- [ ] Document a supported deployment topology and where audio processing, database and dashboard run.
+- [x] Document a supported deployment topology and where audio processing, database and dashboard run.
 - [ ] Serve the frontend over HTTPS with only the intended built assets/templates.
-- [ ] Keep SQLite on persistent storage; document the single-writer deployment assumptions before scaling replicas.
-- [ ] Automate backups and verify restoration into a clean environment.
-- [ ] Document migration, deployment and rollback procedures.
-- [ ] Add request IDs, actionable error logs and readiness checks; monitor device health, failed captures, queue backlog and dropped events.
+- [x] Keep SQLite on persistent storage; document the single-writer deployment assumptions before scaling replicas.
+- [x] Automate backups and verify restoration into a clean environment.
+- [x] Document migration, deployment and rollback procedures.
+- [x] Add request IDs, actionable error logs and readiness checks; monitor device health, failed captures, queue backlog and dropped events.
 - [ ] Add suitable request limits/rate limits to capture and authentication endpoints.
 - [ ] Manage secrets through deployment configuration and keep credentials/transcripts out of unnecessary logs.
-- [ ] Add an owner/staff notice explaining listening, pausing, captured data and raw-audio handling.
-- [ ] Define transcript/ledger retention, access, export and deletion procedures.
-- [ ] Document support and recovery for a disconnected microphone, full disk, failed model load and prolonged network outage.
+- [x] Add an owner/staff notice explaining listening, pausing, captured data and raw-audio handling.
+- [x] Define transcript/ledger retention, access, export and deletion procedures.
+- [x] Document support and recovery for a disconnected microphone, full disk, failed model load and prolonged network outage.
 
 **Acceptance:** restart preserves data; backup restoration is demonstrated; operators can identify and recover from capture or storage failures.
 

@@ -305,3 +305,28 @@ func nullFloat(value *float64) any {
 	}
 	return *value
 }
+
+// Backup creates a clean, atomic snapshot of the database at destPath.
+func (s *Store) Backup(ctx context.Context, destPath string) error {
+	if destPath == "" {
+		return errors.New("storage: Backup requires a destination path")
+	}
+	escapedPath := strings.ReplaceAll(destPath, "'", "''")
+	query := fmt.Sprintf("VACUUM INTO '%s'", escapedPath)
+	if _, err := s.db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("storage: vacuum into %s: %w", destPath, err)
+	}
+	return nil
+}
+
+// VerifyIntegrity runs PRAGMA integrity_check on the database.
+func (s *Store) VerifyIntegrity(ctx context.Context) error {
+	var result string
+	if err := s.db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&result); err != nil {
+		return fmt.Errorf("storage: integrity check failed: %w", err)
+	}
+	if result != "ok" {
+		return fmt.Errorf("storage: database integrity corrupted: %s", result)
+	}
+	return nil
+}

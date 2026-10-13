@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,21 +45,84 @@ func (s *Server) handleTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// parseTransactionFilter parses query parameters into a TransactionFilter.
+func parseTransactionFilter(r *http.Request) (storage.TransactionFilter, error) {
+	q := r.URL.Query()
+	filter := storage.TransactionFilter{
+		Limit: storage.DefaultTransactionLimit,
+	}
+
+	if rawLimit := strings.TrimSpace(q.Get("limit")); rawLimit != "" {
+		l, err := strconv.Atoi(rawLimit)
+		if err != nil || l <= 0 {
+			return filter, errors.New("limit must be a positive integer")
+		}
+		filter.Limit = storage.ClampLimit(l)
+	}
+
+	if rawOffset := strings.TrimSpace(q.Get("offset")); rawOffset != "" {
+		off, err := strconv.Atoi(rawOffset)
+		if err != nil || off < 0 {
+			return filter, errors.New("offset must be a non-negative integer")
+		}
+		filter.Offset = off
+	}
+
+	if rawType := strings.TrimSpace(q.Get("type")); rawType != "" {
+		t := models.TransactionType(rawType)
+		if !t.Valid() {
+			return filter, fmt.Errorf("invalid type %q", rawType)
+		}
+		filter.Type = &t
+	}
+
+	if rawStatus := strings.TrimSpace(q.Get("status")); rawStatus != "" {
+		st := models.TransactionStatus(rawStatus)
+		if !st.Valid() {
+			return filter, fmt.Errorf("invalid status %q", rawStatus)
+		}
+		filter.Status = &st
+	}
+
+	if productID := strings.TrimSpace(q.Get("product_id")); productID != "" {
+		filter.ProductID = productID
+	}
+
+	if rawFrom := strings.TrimSpace(q.Get("from")); rawFrom != "" {
+		t, err := time.Parse(time.RFC3339, rawFrom)
+		if err != nil {
+			return filter, errors.New("from must be an RFC3339 timestamp")
+		}
+		filter.From = &t
+	}
+
+	if rawTo := strings.TrimSpace(q.Get("to")); rawTo != "" {
+		t, err := time.Parse(time.RFC3339, rawTo)
+		if err != nil {
+			return filter, errors.New("to must be an RFC3339 timestamp")
+		}
+		filter.To = &t
+	}
+
+	return filter, nil
+}
+
 // listTransactions serves GET /api/transactions — the ledger snapshot.
 func (s *Server) listTransactions(w http.ResponseWriter, r *http.Request) {
 	shopID, ok := s.shopID(w, r)
 	if !ok {
 		return
 	}
-	limit, ok := s.limitParam(w, r)
-	if !ok {
+	filter, err := parseTransactionFilter(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// The request context, not a background one: if the dashboard navigates
 	// away or the connection drops mid-query, the work is abandoned rather
 	// than left to finish for nobody.
-	transactions, err := s.store.GetTransactions(r.Context(), shopID, limit)
+	transactions, total, err := s.store.QueryTransactions(r.Context(), shopID, filter)
 	if err != nil {
 		s.fail(w, r, "list transactions", err)
 		return
@@ -67,7 +132,9 @@ func (s *Server) listTransactions(w http.ResponseWriter, r *http.Request) {
 		ShopID:       shopID,
 		Transactions: transactions,
 		Count:        len(transactions),
-		Limit:        limit,
+		Total:        total,
+		Limit:        filter.Limit,
+		Offset:       filter.Offset,
 		GeneratedAt:  time.Now().UTC(),
 	})
 }
