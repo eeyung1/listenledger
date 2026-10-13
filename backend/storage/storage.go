@@ -100,6 +100,14 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// Ping checks whether the underlying database connection is alive and responsive.
+func (s *Store) Ping(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("storage: store is closed or not initialized")
+	}
+	return s.db.PingContext(ctx)
+}
+
 // DeleteShopData removes every product and transaction belonging to one shop.
 //
 // DESTRUCTIVE. It exists for the development seeder, which needs a known

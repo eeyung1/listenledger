@@ -110,36 +110,68 @@ func ParseSpokenSegment(text string, defaultCurrency string) ParsedAnchors {
 		}
 	}
 
-	// 3. Extract Quantity
-	// Check numeric digits first at start or before product/unit
-	qtyPattern := regexp.MustCompile(`\b([0-9]+)\b`)
-	qtyMatches := qtyPattern.FindAllStringSubmatch(cleaned, -1)
-	for _, qm := range qtyMatches {
-		if val, err := strconv.Atoi(qm[1]); err == nil && val > 0 {
-			// Avoid confusing with amount digits if amount was matched
-			if res.AmountFound && int64(val*100) == res.AmountMinor {
-				continue
-			}
-			res.Quantity = val
-			res.QuantityFound = true
-			break
-		}
-	}
-
-	// If no numeric digit quantity, check spoken words
-	if !res.QuantityFound {
-		if qty, ok := extractSpokenQuantity(lower); ok {
-			res.Quantity = qty
-			res.QuantityFound = true
-		}
+	// 3. Extract Quantity with self-correction handling
+	if qty, ok := resolveSpokenQuantity(cleaned, lower, res); ok {
+		res.Quantity = qty
+		res.QuantityFound = true
 	}
 
 	// 4. Extract Product Mention
-	// Strip extracted numbers, units, amount phrases, "of", commas
+	// Strip extracted numbers, units, amount phrases, fillers, and punctuation
 	productText := cleanProductMention(cleaned, res)
 	res.ProductMention = productText
 
 	return res
+}
+
+func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool) {
+	// If self-correction phrases exist ("wait no", "sorry", "i mean", etc.), prefer the corrected value after the marker
+	markers := []string{"wait no", "no wait", "sorry", "i mean", "make that", "actually", "correction"}
+	var lastMarkerIdx = -1
+	var lastMarkerLen = 0
+	for _, m := range markers {
+		idx := strings.LastIndex(lower, m)
+		if idx > lastMarkerIdx {
+			lastMarkerIdx = idx
+			lastMarkerLen = len(m)
+		}
+	}
+
+	if lastMarkerIdx >= 0 {
+		afterClean := cleaned[lastMarkerIdx+lastMarkerLen:]
+		afterLower := strings.ToLower(afterClean)
+
+		// Check digits after marker
+		qtyPattern := regexp.MustCompile(`\b([0-9]+)\b`)
+		for _, qm := range qtyPattern.FindAllStringSubmatch(afterClean, -1) {
+			if val, err := strconv.Atoi(qm[1]); err == nil && val > 0 {
+				if res.AmountFound && int64(val*100) == res.AmountMinor {
+					continue
+				}
+				return val, true
+			}
+		}
+
+		// Check words after marker
+		if qty, ok := extractSpokenQuantity(afterLower); ok {
+			return qty, true
+		}
+	}
+
+	// Standard check: digits first
+	qtyPattern := regexp.MustCompile(`\b([0-9]+)\b`)
+	qtyMatches := qtyPattern.FindAllStringSubmatch(cleaned, -1)
+	for _, qm := range qtyMatches {
+		if val, err := strconv.Atoi(qm[1]); err == nil && val > 0 {
+			if res.AmountFound && int64(val*100) == res.AmountMinor {
+				continue
+			}
+			return val, true
+		}
+	}
+
+	// Fallback to words
+	return extractSpokenQuantity(lower)
 }
 
 func extractSpokenQuantity(text string) (int, bool) {
@@ -151,6 +183,10 @@ func extractSpokenQuantity(text string) (int, bool) {
 			continue
 		}
 		if val, ok := unitsMap[w]; ok && val > 0 {
+			// Skip if this word precedes a monetary scale or currency word (e.g. "four thousand", "four naira")
+			if i+1 < len(words) && (words[i+1] == "thousand" || words[i+1] == "million" || words[i+1] == "hundred" || words[i+1] == "naira" || words[i+1] == "kobo") {
+				continue
+			}
 			// Check compound e.g. "twenty five"
 			if i+1 < len(words) {
 				if nextVal, ok2 := unitsMap[words[i+1]]; ok2 && val >= 20 && nextVal < 10 {
@@ -169,10 +205,10 @@ func extractSpokenMoney(text string) (int64, bool) {
 	if idx < 0 {
 		idx = strings.Index(text, "kobo")
 	}
-	target := text
-	if idx > 0 {
-		target = text[:idx]
+	if idx < 0 {
+		return 0, false
 	}
+	target := text[:idx]
 
 	words := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(target, ",", " "), "-", " "))
 	// Trace backwards from the end of target words, collecting ONLY contiguous number tokens
@@ -241,8 +277,8 @@ func cleanProductMention(raw string, anchors ParsedAnchors) string {
 	}
 	s = regexp.MustCompile(`\b[0-9]+\b`).ReplaceAllString(s, " ")
 
-	// Remove noise words like "of", "and", "please", punctuation
-	s = regexp.MustCompile(`(?i)\b(?:of|and|please|for|at)\b`).ReplaceAllString(s, " ")
+	// Remove conversational greetings, correction markers, fillers, and noise words
+	s = regexp.MustCompile(`(?i)\b(?:good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|how\s+far|hello|hi|welcome|sorry|wait\s+no|no\s+wait|wait|no|i\s+mean|make\s+that|actually|correction|uh|um|ah|er|eh|okay|alright|of|and|please|for|at|that\s+is\s+all)\b`).ReplaceAllString(s, " ")
 
 	var b strings.Builder
 	for _, r := range s {
@@ -305,5 +341,20 @@ func SplitTranscriptLines(transcript, closingPhrase string) []string {
 	if len(lines) == 0 && strings.TrimSpace(text) != "" {
 		lines = append(lines, strings.TrimSpace(text))
 	}
-	return lines
+
+	// Merge orphaned amount segments into preceding product line
+	var merged []string
+	for _, l := range lines {
+		if len(merged) > 0 {
+			prevAnchors := ParseSpokenSegment(merged[len(merged)-1], "")
+			curAnchors := ParseSpokenSegment(l, "")
+			if curAnchors.AmountFound && curAnchors.ProductMention == "" && curAnchors.Quantity == 0 && !prevAnchors.AmountFound {
+				merged[len(merged)-1] = merged[len(merged)-1] + ", " + l
+				continue
+			}
+		}
+		merged = append(merged, l)
+	}
+
+	return merged
 }

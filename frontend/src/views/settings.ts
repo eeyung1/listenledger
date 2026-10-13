@@ -21,6 +21,8 @@ import type { ViewCleanup } from "./index.js";
 
 export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
   let disposed = false;
+  const abortController = new AbortController();
+  const signal = abortController.signal;
   let devices: Device[] = [];
 
   const nameInput = hook<HTMLInputElement>(root, "setting-name");
@@ -127,13 +129,13 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
 
   async function loadSettings(): Promise<void> {
     try {
-      const data = await fetchSettings(shopId);
-      if (disposed) return;
+      const data = await fetchSettings(shopId, signal);
+      if (disposed || signal.aborted) return;
       devices = [...data.devices];
       populateForm(data.shop);
       renderDevices();
     } catch (err: unknown) {
-      if (disposed) return;
+      if (disposed || signal.aborted) return;
       console.error("Failed to load settings:", err);
       if (settingsStatus) {
         settingsStatus.hidden = false;
@@ -226,6 +228,7 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
 
   return () => {
     disposed = true;
+    abortController.abort();
     rangeInput?.removeEventListener("input", onThresholdChange);
     settingsForm?.removeEventListener("submit", onSaveSettings);
     pairForm?.removeEventListener("submit", onPairDevice);

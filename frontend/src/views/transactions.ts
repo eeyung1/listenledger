@@ -14,6 +14,7 @@
  */
 
 import {
+  MAX_TRANSACTION_LIMIT,
   confirmTransaction,
   createManualTransaction,
   fetchInventory,
@@ -55,9 +56,19 @@ interface Filters {
 export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanup {
   let transactions: Transaction[] = [];
   let disposed = false;
+  const abortController = new AbortController();
+  const signal = abortController.signal;
   let pageOffset = 0;
   const pageSize = 50;
   let totalCount = 0;
+
+  function sortTransactions(list: Transaction[]): void {
+    list.sort((a, b) => {
+      const timeDiff = new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return b.id.localeCompare(a.id);
+    });
+  }
 
   const filters: Filters = { type: "", status: "", receipt_id: "" };
 
@@ -323,26 +334,33 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   async function refetch(): Promise<void> {
     try {
       updateExportUrl();
-      const snapshot = await fetchTransactions(shopId, pageSize, {
-        offset: pageOffset,
-        type: filters.type || undefined,
-        status: filters.status || undefined,
-        receipt_id: filters.receipt_id || undefined,
-      });
-      if (disposed) return;
+      const snapshot = await fetchTransactions(
+        shopId,
+        pageSize,
+        {
+          offset: pageOffset,
+          type: filters.type || undefined,
+          status: filters.status || undefined,
+          receipt_id: filters.receipt_id || undefined,
+        },
+        signal,
+      );
+      if (disposed || signal.aborted) return;
       transactions = [...snapshot.transactions];
+      sortTransactions(transactions);
       totalCount = snapshot.total ?? snapshot.count;
       if (typeof snapshot.last_seq === "number") {
         getSocket()?.syncSequence(snapshot.last_seq);
       }
       render();
     } catch (error) {
-      if (disposed) return;
+      if (disposed || signal.aborted) return;
       console.error("ListenLedger: could not load transactions", error);
       if (ledgerBody !== null) {
         clear(ledgerBody);
         const row = el("tr", "table__empty");
         const cellElement = cell("", "Could not reach the server. Retrying on reconnect.");
+        cellElement.className = "table__error";
         cellElement.colSpan = 8;
         row.append(cellElement);
         ledgerBody.append(row);
@@ -743,18 +761,21 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     });
   }
 
-  /** Inserts or replaces a transaction, keeping the list newest-first. */
+  /** Inserts or replaces a transaction, keeping the list newest-first and bounded. */
   function applyTransaction(transaction: Transaction, isNew: boolean): void {
     const index = transactions.findIndex((existing) => existing.id === transaction.id);
     if (index === -1) {
+      transactions.push(transaction);
       if (isNew) {
-        transactions.unshift(transaction);
         totalCount++;
-      } else {
-        transactions.push(transaction);
       }
     } else {
       transactions[index] = transaction;
+    }
+
+    sortTransactions(transactions);
+    if (transactions.length > MAX_TRANSACTION_LIMIT) {
+      transactions.length = MAX_TRANSACTION_LIMIT;
     }
 
     render();
@@ -821,6 +842,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
 
   return () => {
     disposed = true;
+    abortController.abort();
     window.removeEventListener("ll:transaction-received", onTransaction);
     window.removeEventListener("ll:transaction-review-required", onTransaction);
     window.removeEventListener("ll:transaction-updated", onTransactionUpdated);

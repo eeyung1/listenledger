@@ -189,7 +189,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Enforce legal status transitions and prevent repeated confirmation or concurrent requests from applying stock twice.
 - [x] Define insufficient-stock handling: block or hold for review; never silently create negative stock.
 - [x] Reject arbitrary client status overrides and derive status server-side; heuristic capture validation and owner confirmation APIs now exist.
-- [ ] Validate product identity, positive quantity, monetary values, currency and confidence ranges.
+- [x] Validate product identity, positive quantity, monetary values, currency and confidence ranges.
 - [x] Keep sales revenue separate from purchase/restock cost and enforce the shop currency for the initial MVP.
 - [x] Add auditable corrections/reversals so an incorrect confirmed capture can be fixed without destroying history.
 - [x] Publish events only after commit; ensure failed event delivery can be recovered from durable state.
@@ -206,7 +206,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Compute meaningful confidence/validation results rather than blindly trusting supplied scores.
 - [x] Apply configurable shop thresholds; flag ambiguous products, unexpected units and implausible amounts.
 - [x] Distinguish sales from restocking by explicit capture context and configured boundary phrases.
-- [ ] Verify spoken corrections, repeated phrases, incomplete speech and unrelated conversation using adversarial text and real-audio fixtures.
+- [x] Verify spoken corrections, repeated phrases, incomplete speech and unrelated conversation using adversarial text and real-audio fixtures.
 - [x] Store transaction transcripts and append validation reasons for held captures.
 - [x] Preserve original extracted values, separate review reasons and immutable owner correction/decision history.
 - [x] Build a representative set of English shop phrases and catalogue aliases for regression evaluation.
@@ -252,17 +252,17 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 ## 7. Dashboard, reporting and settings
 
 - [x] Add a responsive stylesheet and usable mobile navigation, tables/cards and forms.
-- [ ] Implement clear loading, empty, error, offline, saving and success states.
-- [ ] Make controls keyboard accessible with labels, visible focus and readable contrast.
+- [x] Implement clear loading, empty, error, offline, saving and success states.
+- [x] Make controls keyboard accessible with labels, visible focus and readable contrast.
 - [x] Add server-side daily summaries for confirmed revenue, sales count and pending reviews; use shop timezone and currency.
 - [x] Add paginated ledger history and server-side date/type/status/product filters.
 - [x] Implement catalogue add/edit/import, stock audits, manual-entry fallback and review Confirm/Reject controls.
-- [ ] Finish product archiving without deleting historical transactions.
+- [x] Finish product archiving without deleting historical transactions.
 - [x] Display sales, restocks, purchase costs and stock adjustments distinctly.
 - [x] Add basic analytics: date-range sales totals, transaction counts and product movement.
 - [x] Add basic CSV ledger export for pilot reconciliation, protecting spreadsheet consumers from formula injection.
 - [x] Add settings for shop details, phrases, thresholds and paired devices.
-- [ ] Display capture/device health and pending synchronisation separately from dashboard socket health.
+- [x] Display capture/device health and pending synchronisation separately from dashboard socket health.
 
 **Acceptance:** the owner can operate the pilot on a phone. Totals remain correct beyond 500 transactions and at shop-local day boundaries.
 
@@ -273,8 +273,8 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Implement snapshot/event sequencing or versioning so an older response cannot overwrite a newer update.
 - [x] Handle the initial-load connection gap as well as subsequent reconnects.
 - [x] Recover dropped events without relying on an unrelated future reconnect; choose resync signalling, version checks or periodic reconciliation.
-- [ ] Cancel/ignore obsolete view requests and clean up listeners when navigating.
-- [ ] Bound retained client-side history and maintain deterministic ledger ordering.
+- [x] Cancel/ignore obsolete view requests and clean up listeners when navigating.
+- [x] Bound retained client-side history and maintain deterministic ledger ordering.
 
 **Acceptance:** disconnect, reconnect, delayed responses, repeated events and navigation do not lose records, duplicate totals or leave stale inventory.
 
@@ -316,9 +316,9 @@ User-approved workflow: **create branch → push branch → wait for configured 
 - [x] Automate backups and verify restoration into a clean environment.
 - [x] Document migration, deployment and rollback procedures.
 - [x] Add request IDs, panic recovery and health reporting including dropped WebSocket events.
-- [ ] Add database readiness checks and complete device, capture and queue monitoring.
-- [ ] Add suitable request limits/rate limits to capture and authentication endpoints.
-- [ ] Manage secrets through deployment configuration and keep credentials/transcripts out of unnecessary logs.
+- [x] Add database readiness checks and complete device, capture and queue monitoring.
+- [x] Add suitable request limits/rate limits to capture and authentication endpoints.
+- [x] Manage secrets through deployment configuration and keep credentials/transcripts out of unnecessary logs.
 - [ ] Reconcile owner/staff notices with actual listening, pause and raw-audio behavior before enabling real capture.
 - [ ] Verify and implement the documented retention, access, export and deletion procedures.
 - [ ] Validate operational recovery instructions against real microphone, model-load, disk-full and network-outage behavior.

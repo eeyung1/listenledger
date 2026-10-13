@@ -12,9 +12,14 @@
 -->
 <section class="view view--home">
   <header class="view__header">
-    <h1 class="view__title">Overview</h1>
-    <!-- data-hook: connection status of the live feed (live / reconnecting / offline) -->
-    <p class="view__subtitle" data-hook="connection-status">Connecting…</p>
+    <div class="view__header-title-group">
+      <h1 class="view__title">Overview</h1>
+      <!-- data-hook: connection status of the live feed (live / reconnecting / offline) -->
+      <p class="view__subtitle" data-hook="connection-status">Connecting…</p>
+    </div>
+    <div class="view__header-badges">
+      <span class="badge badge--device badge--device-checking" data-hook="device-health-badge" role="status" aria-label="Edge capture hardware health">Hardware: Checking…</span>
+    </div>
   </header>
 
   <div class="onboarding-container" data-hook="onboarding-checklist-container"></div>

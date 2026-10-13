@@ -14,12 +14,14 @@
 
 import {
   MAX_TRANSACTION_LIMIT,
+  fetchDevices,
   fetchInventory,
   fetchOnboardingStatus,
   fetchSummary,
   fetchTransactions,
   runTestCapture,
   type DailySummary,
+  type Device,
   type OnboardingStatus,
   type Product,
   type Transaction,
@@ -59,17 +61,21 @@ interface HomeState {
   products: Product[];
   summary?: DailySummary | undefined;
   onboarding?: OnboardingStatus | undefined;
+  devices?: readonly Device[] | undefined;
 }
 
 export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const state: HomeState = { transactions: [], products: [] };
   let disposed = false;
+  const abortController = new AbortController();
+  const signal = abortController.signal;
 
   const feedList = hook(root, "live-feed");
   const feedEmpty = hook(root, "live-feed-empty");
   const lowStockList = hook(root, "low-stock-list");
   const connectionLabel = hook(root, "connection-status");
   const onboardingContainer = hook(root, "onboarding-checklist-container");
+  const deviceBadge = hook(root, "device-health-badge");
 
   function renderOnboarding(): void {
     if (onboardingContainer === null || state.onboarding === undefined) return;
@@ -297,8 +303,26 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     }
   }
 
+  function renderDeviceHealth(): void {
+    if (deviceBadge === null) return;
+    if (state.devices === undefined) {
+      setText(deviceBadge, "Hardware: Checking…");
+      deviceBadge.className = "badge badge--device badge--device-checking";
+      return;
+    }
+    const active = state.devices.filter((d) => !d.revoked_at);
+    if (active.length > 0) {
+      setText(deviceBadge, `Hardware: Connected (${active.length})`);
+      deviceBadge.className = "badge badge--device badge--device-online";
+    } else {
+      setText(deviceBadge, "Hardware: Not Paired");
+      deviceBadge.className = "badge badge--device badge--device-offline";
+    }
+  }
+
   function render(): void {
     renderKPIs();
+    renderDeviceHealth();
     renderOnboarding();
     renderFeed();
     renderLowStock();
@@ -307,18 +331,20 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   /** Fetches transactions, inventory and daily summary snapshots and replaces state wholesale. */
   async function refetch(): Promise<void> {
     try {
-      const [transactions, inventory, summary, onboarding] = await Promise.all([
-        fetchTransactions(shopId, MAX_TRANSACTION_LIMIT),
-        fetchInventory(shopId),
-        fetchSummary(shopId).catch(() => undefined),
-        fetchOnboardingStatus().catch(() => undefined),
+      const [transactions, inventory, summary, onboarding, devicesRes] = await Promise.all([
+        fetchTransactions(shopId, MAX_TRANSACTION_LIMIT, undefined, signal),
+        fetchInventory(shopId, signal),
+        fetchSummary(shopId, signal).catch(() => undefined),
+        fetchOnboardingStatus(signal).catch(() => undefined),
+        fetchDevices(signal).catch(() => undefined),
       ]);
-      if (disposed) return;
+      if (disposed || signal.aborted) return;
 
       state.transactions = [...transactions.transactions];
       state.products = [...inventory.products];
       state.summary = summary;
       state.onboarding = onboarding;
+      state.devices = devicesRes?.devices;
       const maxSeq = Math.max(
         transactions.last_seq ?? 0,
         inventory.last_seq ?? 0,
@@ -329,7 +355,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       }
       render();
     } catch (error) {
-      if (disposed) return;
+      if (disposed || signal.aborted) return;
       console.error("ListenLedger: could not load the overview", error);
       // The template's empty state is still in place, because a failed first
       // fetch means renderFeed never ran to replace it. Reusing it keeps the
@@ -355,9 +381,9 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     render();
 
     // Synchronize server-authoritative aggregates in the background
-    void fetchSummary(shopId)
+    void fetchSummary(shopId, signal)
       .then((summary) => {
-        if (disposed) return;
+        if (disposed || signal.aborted) return;
         state.summary = summary;
         renderKPIs();
       })
@@ -422,6 +448,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
   return () => {
     disposed = true;
+    abortController.abort();
     window.removeEventListener("ll:transaction-received", onTransactionReceived);
     window.removeEventListener("ll:transaction-review-required", onTransactionReceived);
     window.removeEventListener("ll:transaction-updated", onTransactionUpdated);

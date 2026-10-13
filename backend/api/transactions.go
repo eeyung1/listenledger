@@ -190,6 +190,22 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if body.ProductID != "" {
+		prod, err := s.store.GetProductByID(r.Context(), shopID, body.ProductID)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				writeError(w, http.StatusBadRequest, "product_id does not exist in shop catalogue")
+				return
+			}
+			s.fail(w, r, "lookup product for transaction", err)
+			return
+		}
+		if prod.ArchivedAt != nil {
+			writeError(w, http.StatusBadRequest, "product is archived and cannot receive new transactions")
+			return
+		}
+	}
+
 	transaction, err := body.transaction(shopID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -235,6 +251,19 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, stored)
 }
 
+// isAlpha checks if string contains only ASCII alphabetic characters.
+func isAlpha(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
+			return false
+		}
+	}
+	return true
+}
+
 // transaction validates the request and builds the record to store.
 func (b createTransactionRequest) transaction(shopID string) (models.Transaction, error) {
 	if !b.Type.Valid() {
@@ -252,6 +281,9 @@ func (b createTransactionRequest) transaction(shopID string) (models.Transaction
 	if b.Quantity <= 0 {
 		return models.Transaction{}, errors.New("quantity must be a positive integer")
 	}
+	if b.Quantity > 100000 {
+		return models.Transaction{}, errors.New("quantity exceeds maximum allowable threshold (100,000)")
+	}
 
 	if !b.Unit.Valid() {
 		return models.Transaction{}, errors.New("unit is not a recognised unit")
@@ -261,8 +293,14 @@ func (b createTransactionRequest) transaction(shopID string) (models.Transaction
 	if currency == "" {
 		return models.Transaction{}, errors.New("amount.currency is required")
 	}
+	if len(currency) != 3 || !isAlpha(currency) {
+		return models.Transaction{}, errors.New("amount.currency must be a valid 3-letter currency code")
+	}
 	if b.Amount.Amount < 0 {
 		return models.Transaction{}, errors.New("amount.amount cannot be negative")
+	}
+	if b.Amount.Amount > 1000000000000 { // 10 billion minor units (e.g. 10B naira)
+		return models.Transaction{}, errors.New("amount.amount exceeds maximum allowable value")
 	}
 
 	if b.Status != "" {
@@ -459,6 +497,30 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 		}
 		notes = strings.TrimSpace(req.Notes)
 		if req.ProductID != "" || req.Quantity > 0 || req.Unit.Valid() || req.Amount != nil {
+			if req.ProductID != "" {
+				prod, err := s.store.GetProductByID(r.Context(), shopID, strings.TrimSpace(req.ProductID))
+				if err != nil {
+					if errors.Is(err, storage.ErrNotFound) {
+						writeError(w, http.StatusBadRequest, "product_id does not exist in shop catalogue")
+						return
+					}
+					s.fail(w, r, "lookup product for confirmation", err)
+					return
+				}
+				if prod.ArchivedAt != nil {
+					writeError(w, http.StatusBadRequest, "cannot confirm transaction against an archived product")
+					return
+				}
+			}
+			if req.Quantity < 0 || req.Quantity > 100000 {
+				writeError(w, http.StatusBadRequest, "corrected quantity must be positive and not exceed 100,000")
+				return
+			}
+			if req.Amount != nil && (req.Amount.Amount < 0 || req.Amount.Amount > 1000000000000) {
+				writeError(w, http.StatusBadRequest, "corrected amount must be non-negative and bounded")
+				return
+			}
+
 			corrections = &storage.ReviewCorrections{
 				ProductID: strings.TrimSpace(req.ProductID),
 				Quantity:  req.Quantity,
@@ -621,6 +683,10 @@ func (s *Server) handleTransactionsManual(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "quantity must be greater than zero")
 		return
 	}
+	if req.Quantity > 100000 {
+		writeError(w, http.StatusBadRequest, "quantity exceeds maximum allowable threshold (100,000)")
+		return
+	}
 	if !req.Unit.Valid() {
 		writeError(w, http.StatusBadRequest, "unit is not a recognized packaging unit")
 		return
@@ -640,16 +706,26 @@ func (s *Server) handleTransactionsManual(w http.ResponseWriter, r *http.Request
 		s.fail(w, r, "fetch product for manual transaction", err)
 		return
 	}
+	if product.ArchivedAt != nil {
+		writeError(w, http.StatusBadRequest, "cannot record manual transaction for an archived product")
+		return
+	}
 
 	// Calculate or validate amount
 	amount := models.Money{Amount: 0, Currency: product.Price.Currency}
-	if req.Amount != nil && req.Amount.Amount > 0 {
-		if req.Amount.Currency != "" && req.Amount.Currency != product.Price.Currency {
-			writeError(w, http.StatusBadRequest, "currency mismatch with product currency")
+	if req.Amount != nil {
+		if req.Amount.Amount < 0 || req.Amount.Amount > 1000000000000 {
+			writeError(w, http.StatusBadRequest, "amount must be non-negative and bounded")
 			return
 		}
-		amount = *req.Amount
-		amount.Currency = product.Price.Currency
+		if req.Amount.Amount > 0 {
+			if req.Amount.Currency != "" && req.Amount.Currency != product.Price.Currency {
+				writeError(w, http.StatusBadRequest, "currency mismatch with product currency")
+				return
+			}
+			amount = *req.Amount
+			amount.Currency = product.Price.Currency
+		}
 	} else if req.Type == models.TypeSale && product.Price.Amount > 0 {
 		// Default sale amount to catalogue unit price
 		amount = models.Money{
