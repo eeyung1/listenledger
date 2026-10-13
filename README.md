@@ -10,23 +10,26 @@ The intended result is one sale for two Milo at NGN 4,000, a stock reduction of 
 
 ## Current status
 
-Implementation reviewed on **13 October 2026**, starting from commit `461e971`; owner authentication implementation added in the next milestone PR.
+Source reviewed on **13 October 2026**, at implementation commit `322d1c7`. The database migration plan was subsequently merged in [PR #9](https://github.com/eeyung1/listenledger/pull/9).
 
-**Stage: early software prototype; not ready for real-shop operation.** The Go API, SQLite persistence, WebSocket transport, and three dashboard views exist. Owner/shop authentication is implemented. Confirmed structured transactions update stock atomically with retry protection. Owner review actions (confirm/reject) and catalogue add/edit workflows are implemented. The server recognition and validation engine (`backend/validate`), edge capture intake (`POST /api/captures`), device pairing/credentials, daily summary (`GET /api/summary`), and Rust edge engine (`edge/`) with a durable offline queue are now implemented.
+**Stage: substantial ledger/dashboard prototype; real voice capture and shop-pilot acceptance remain unfinished.** Owner authentication, atomic single-transaction stock updates, retry protection, packaging conversion, review confirm/reject APIs, catalogue forms/import, daily summaries, settings, device pairing, CSV export, and backup tooling are implemented. The Go recognition engine processes text/structured captures. Rust has audio/VAD helpers, a mock STT provider, HTTP delivery, and a file-backed queue; its executable does not capture a microphone or run a real speech model.
+
+**Verified CI:** the implementation at `322d1c7` passed backend formatting/vet/race tests/build, frontend typecheck/build, and Rust tests in [CI run 38402269349](https://github.com/eeyung1/listenledger/actions/runs/38402269349). These checks do not establish browser end-to-end usability, crash-safe offline capture, microphone recognition, or real-shop accuracy.
+
+**Hosting/database:** SQLite remains the runtime database. [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md) documents the planned move to Supabase PostgreSQL with Render hosting. The plan is merged; the migration and deployment have not been performed by that change.
 
 “Implemented” means source code exists. Validation is tracked separately below; it does not imply the full real-shop acceptance workflow has passed.
 
 | Component | Implemented foundation | Still required for MVP |
-| Component | Implemented foundation | Still required for MVP |
 |---|---|---|
 | Go HTTP server | Request tracing (`X-Request-ID`), panic recovery middleware, timeouts, graceful shutdown; owner sessions, shop isolation, confirm/reject, product edit, daily summary, device pairing, edge capture, settings & CSV export endpoints | Production TLS certificate provisioning |
-| SQLite storage | Hot online backup (`VACUUM INTO`), integrity verification, embedded migrations (products, transactions, identity, ledger, devices), shop-scoped queries, atomic review resolution, stock movements, daily summary, shop settings | Reversal audit history and wider recovery tests |
-| Catalogue | Product creation & update API; aliases, units and packaging stored; Add Product and Edit UI forms | Alias conflict detection and batch imports |
-| Transactions | Structured JSON ingestion, persistence, server-side recognition validation (`backend/validate`), edge capture intake (`POST /api/captures`), atomic confirm/reject, paginated query filters, CSV export | Full voice loop end-to-end acceptance trials |
+| SQLite storage | Online backup (`VACUUM INTO`), integrity checks, migrations, shop-scoped queries, atomic individual movements/review resolution, summaries and settings | Receipt-wide atomicity, correction/reversal audit history, PostgreSQL migration and wider recovery tests |
+| Catalogue | Create/update API, Add/Edit forms, aliases, packaging and CSV/JSON import | Alias conflict feedback, safe unit edits, archiving and audited stock corrections |
+| Transactions | Structured/text capture intake, catalogue validation, atomic individual movements and review resolution, query filters, CSV export | Receipt-wide atomicity, stronger capture replay handling, full voice acceptance trials |
 | Realtime | Shop-partitioned WebSocket hub, browser reconnect/backoff, reconnect recovery across all views | Snapshot/event version reconciliation, dropped-event recovery |
 | Dashboard | Overview with daily summaries, ledger with server-side filters & pagination, CSV export, inventory search and low-stock display, interactive review decisions, product add/edit modals, settings & device management, responsive styling | Additional analytics visualizations |
-| Rust edge engine | Audio framing & VAD, privacy-preserving audio discard, STT interface & model download script, boundary/anchor extraction, disk-persisted offline queue, authenticated delivery client | Physical hardware microphone benchmarking |
-| Delivery quality | Dependency lockfiles, authentication/isolation tests, Go/frontend/edge CI, root Makefile, automated backup/restore verification, operational runbook (RUNBOOK.md) | Controlled pilot ground-truth reconciliation |
+| Rust edge engine | PCM/VAD helpers, STT interface with mock recognizer, boundary helper, model download script, JSON-lines queue and authenticated HTTP client | Actual microphone/STT integration, continuous capture/retry loop, crash-safe queue and hardware benchmarking |
+| Delivery quality | Go/npm dependency lockfiles, backend tests, Go/frontend/Rust CI, Makefile, backup verification tooling, runbook and scripted backend benchmark | Browser tests, real audio evaluation, genuine shop trials, corrected operational documentation |
 
 ### Implemented features — checked against the code
 
@@ -46,15 +49,18 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 - [x] Edge intake endpoint (`POST /api/captures`) with device authentication and atomic ledger/stock updates.
 - [x] Edge device pairing (`POST /api/devices`), listing (`GET /api/devices`), and revocation (`POST /api/devices/{id}/revoke`).
 - [x] Server-side daily overview summary (`GET /api/summary`) integrated with overview dashboard KPIs.
-- [x] Rust edge capture engine crate (`edge/`) with audio framing, VAD, STT interface, boundary detection, disk-backed offline queue, and authenticated HTTP client.
+- [x] Rust edge scaffold (`edge/`) with PCM/VAD helpers, mock STT, boundary detection, file-backed queue and authenticated HTTP client; actual listening is not implemented.
 - [x] Paginated ledger history and server-side date/type/status/product query filters (`GET /api/transactions?type=&status=&from=&to=&limit=&offset=`).
 - [x] CSV ledger export endpoint (`GET /api/transactions/export?format=csv`) with spreadsheet formula injection protection.
 - [x] Shop settings and device management API (`GET /api/settings`, `PATCH /api/settings`) and frontend Settings view (`#/settings`).
 - [x] Request ID tracing middleware (`X-Request-ID`) and panic recovery middleware (`Recoverer`).
 - [x] Automated SQLite online hot backup and restore verification tool (`scripts/verify_backup_restore.sh`, `storage/backup_test.go`).
-- [x] Comprehensive deployment, privacy, and operations runbook (`RUNBOOK.md`).
+- [x] Deployment/privacy runbook (`RUNBOOK.md`) and staff guide (`STAFF_TRAINING.md`) exist; instructions require reconciliation with the incomplete audio, queue and manual-entry implementation.
 - [x] Quantized Whisper model weight downloader and checksum verifier (`edge/scripts/download_model.sh`).
-- [x] Root Makefile with `build`, `test`, `check`, `dev`, `clean`, and `verify-backup` targets.
+- [x] Root Makefile with `build`, `test`, `check`, `dev`, `clean`, `verify-backup`, `eval`, and `trial` targets.
+- [x] Catalogue CSV/JSON import API, downloadable CSV template and frontend import form.
+- [x] Scripted backend evaluation harness (`backend/eval/`); it is not a physical-shop trial.
+- [x] SQLite-to-Supabase migration plan merged in PR #9; implementation remains pending.
 
 #### Backend and persistence
 
@@ -70,7 +76,7 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 - [x] `GET /api/transactions` returns a bounded, newest-first ledger snapshot.
 - [x] `POST /api/transactions` validates and stores structured sale/restock records, then publishes events after committing stock changes atomically.
 - [x] Review resolution endpoints (`/confirm` and `/reject`) apply stock changes atomically in one transaction with legal status enforcement.
-- [x] Confidence classification holds missing/low-confidence anchors for review and rejects caller status overrides; **server-generated recognition confidence is still missing**.
+- [x] Confidence classification holds missing/low-confidence anchors for review and rejects caller status overrides; **scores are heuristic validation results, not measured speech-model confidence**.
 - [x] Write handlers cap request bodies and reject unknown JSON fields.
 - [x] Development-only sample-data seeding and synthetic event broadcasting, disabled unless `-dev` is enabled.
 
@@ -81,7 +87,7 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 - [x] Browser reconnect with exponential backoff and jitter.
 - [x] Browser envelope checks reject malformed messages, unsupported versions/types and mismatched shop IDs.
 - [x] SPA routing for Overview, Transactions and Inventory.
-- [x] Overview renders the live feed, low-stock alerts and KPIs from fetched records; **complete server-side totals remain unfinished**.
+- [x] Overview renders the live feed, low-stock alerts and server-side daily summary KPIs; a failed summary request can fall back to incomplete page-based totals.
 - [x] All three views (Overview, Transactions, Inventory) refetch snapshots after reconnect.
 - [x] Transaction view renders the ledger, type/status filters and review cards with working Confirm and Reject actions.
 - [x] Inventory view renders products, aliases, packaging, low-stock indicators, search, and working Add/Edit modals.
@@ -90,13 +96,24 @@ Implementation reviewed on **13 October 2026**, starting from commit `461e971`; 
 
 ### Where to continue
 
-**Next: Milestone 5 — Evidence & Pilot Acceptance Trials.** Reporting and settings API (`GET /api/settings`, `PATCH /api/settings`), ledger pagination and server-side filters (`/api/transactions`), CSV export with formula injection protection (`/api/transactions/export`), request tracing (`X-Request-ID`) and panic recovery middleware, automated hot backup and restore verification (`scripts/verify_backup_restore.sh`, `storage/backup_test.go`), quantized Whisper weight download tooling (`edge/scripts/download_model.sh`), and the operational runbook (`RUNBOOK.md`) are implemented. Next major deliverable is staff protocol training and conducting controlled real-shop acceptance trials against independent records.
+**Next: reconcile evidence and finish the real voice loop.** The application has progressed beyond the original scaffold. Do not rebuild already implemented authentication, ledger, catalogue, settings or reporting features.
 
-### Confirmed gaps in the current code
+1. Replace mock STT with actual microphone capture and a selected speech model; prove one sale, held review and restock through the normal API.
+2. Finish owner correction/manual-entry forms and repair receipt atomicity, capture replay, queue crash safety and realtime reconciliation.
+3. Execute the [database migration plan](DATABASE_MIGRATION.md) before using Supabase as the database for Render hosting.
+4. Run recorded-audio evaluation and then a controlled shop trial alongside independent records.
 
-- Physical hardware microphone integration trials and on-device whisper model weight bundles remain to be benchmarked in a noisy shop environment.
-- Snapshot replacement can race with incoming events; timestamp/version reconciliation is not implemented.
-- Production multi-node scaling and multi-counter audio separation remain post-pilot items.
+Update this checklist in each implementation PR; keep source completion and runtime validation separate.
+
+### Confirmed gaps and evidence limits
+
+- `edge/src/main.rs` uses `MockSpeechRecognizer` on empty samples, submits a demonstration capture, and exits. `audio.rs` contains sample helpers, not a microphone driver. Download tooling is not model integration.
+- `TRIAL_REPORT.md` is generated by scripted HTTP-handler tests in `backend/eval/`. Shop location, hardware/model and noise conditions are hardcoded report text, not measured trial metadata. The harness skips background scenarios and assigns false-capture and protocol-compliance rates constants. Reported latency excludes microphone/STT processing. Do not cite its figures as real-shop evidence.
+- Correct-and-confirm exists in the API, but the dashboard only sends Confirm/Reject without correction inputs. Manual sale/restock entry, reversal history and full decision auditing remain incomplete.
+- `POST /api/captures` commits lines separately; a later error can leave earlier receipt lines recorded. Replay hashing follows validation and needs protection against changes to catalogue/settings and generated timestamps.
+- The edge queue rewrites its file in place on removal; a crash can lose pending records. Continuous delivery with retry/backoff is not wired in the executable.
+- Snapshot replacement can race with incoming events. Live ledger updates do not consistently respect filters or pagination; dropped-event recovery remains incomplete.
+- README, TODO, staff instructions and the trial report previously overstated completion. This README's qualified status supersedes those labels until the other documents are reconciled.
 
 ## MVP scope and success condition
 
@@ -113,7 +130,7 @@ The first MVP must support **both sales and voice-based restocking**, including 
 5. **Retry/restart:** resending the same capture after interruption does not duplicate the ledger entry or stock movement.
 6. **Isolation:** a different shop or an unpaired/revoked device cannot read or write this shop's data.
 
-All roadmap checkboxes below are **remaining work**, not completed features.
+Roadmap checkboxes below distinguish implemented tasks `[x]` from pending tasks `[ ]`. Passing a related unit test does not by itself satisfy the section's full acceptance condition.
 
 ## Architecture and repository
 
@@ -128,18 +145,21 @@ Processing loop: **Hear → Understand → Validate → Record → Update**.
 
 - [Product blueprint](Ambient_Sales_Capture_Blueprint_v0.2.md): product rationale and long-term vision.
 - [Engineering TODO](TODO.md): lower-level notes from the scaffold.
-- [Edge status](edge/README.md): current edge placeholder.
+- [Edge status](edge/README.md): edge scaffold and setup notes; use the limitations above when assessing completion.
+- [Database migration plan](DATABASE_MIGRATION.md): pending SQLite-to-Supabase work and Render deployment gates.
 
-This README is the MVP delivery checklist. Some older TODO statements are stale: all-view reconnect recovery and universal transaction deduplication are not implemented. Reconcile those statements when the corresponding work lands. Repository code and verified tests take precedence over completion labels in documentation.
+This README is the MVP delivery checklist. Older TODO statements are stale in both directions: some implemented features are still listed as missing, while voice/pilot work is labelled complete too early. Repository code and verified tests take precedence over completion labels.
 
 ## 1. Identity, onboarding and device access
 
 - [x] Add owner signup, login, logout and a defined account-recovery process.
 - [x] Store passwords securely if password-based authentication is selected; add session expiry/revocation, secure cookies, appropriate CSRF protection and login throttling.
-- [ ] Add persisted shop ownership and settings: name, currency, timezone, confidence threshold and sale/restock closing phrases.
+- [x] Add persisted shop ownership and settings: name, currency, timezone, confidence threshold and sale/restock closing phrases.
 - [x] Replace query-string identity with authenticated shop membership for both HTTP and WebSocket requests.
-- [x] Pair edge devices to a shop using revocable credentials; support unpairing and credential rotation.
-- [x] Derive device/shop identity server-side; reject attempts to submit records for another shop.
+- [x] Pair, list and revoke edge device credentials.
+- [ ] Complete and verify an explicit device credential rotation workflow.
+- [x] Resolve capture shop access from authenticated sessions/device tokens.
+- [ ] Enforce canonical device identity on every capture, including rejection or replacement of conflicting submitted device IDs.
 - [ ] Provide a simple onboarding flow: create shop → load catalogue/opening stock → configure microphone/device → test capture.
 - [x] Keep destructive development endpoints disabled outside explicit local development.
 
@@ -168,7 +188,7 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [x] Return the existing result for a matching retry; reject reuse of a capture ID with conflicting content.
 - [x] Enforce legal status transitions and prevent repeated confirmation or concurrent requests from applying stock twice.
 - [x] Define insufficient-stock handling: block or hold for review; never silently create negative stock.
-- [x] Reject arbitrary client status overrides and derive structured-ingestion status server-side. Recognition confidence generation and owner review confirmation are separate pending work.
+- [x] Reject arbitrary client status overrides and derive status server-side; heuristic capture validation and owner confirmation APIs now exist.
 - [ ] Validate product identity, positive quantity, monetary values, currency and confidence ranges.
 - [x] Keep sales revenue separate from purchase/restock cost and enforce the shop currency for the initial MVP.
 - [ ] Add auditable corrections/reversals so an incorrect confirmed capture can be fixed without destroying history.
@@ -186,8 +206,9 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [x] Compute meaningful confidence/validation results rather than blindly trusting supplied scores.
 - [x] Apply configurable shop thresholds; flag ambiguous products, unexpected units and implausible amounts.
 - [x] Distinguish sales from restocking by explicit capture context and configured boundary phrases.
-- [x] Handle corrections, repeated phrases, incomplete speech and unrelated conversation without silently creating sales.
-- [x] Preserve the original transcript, extracted values, reason for review and eventual owner correction.
+- [ ] Verify spoken corrections, repeated phrases, incomplete speech and unrelated conversation using adversarial text and real-audio fixtures.
+- [x] Store transaction transcripts and append validation reasons for held captures.
+- [ ] Preserve original extracted values, separate review reasons and immutable owner correction/decision history.
 - [x] Build a representative set of English shop phrases and catalogue aliases for regression evaluation.
 
 **Acceptance:** ambiguous or incomplete phrases go to review. A low product score cannot be hidden by a high average, and a closing phrase alone does not create a transaction.
@@ -196,23 +217,29 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 
 - [x] Initialise the Rust project and define a versioned capture contract with the backend.
 - [ ] Implement microphone selection, permission/error handling and an obvious listening/paused indicator.
-- [x] Capture PCM audio and add voice activity detection to avoid processing silence continuously.
-- [x] Integrate and benchmark a local speech-to-text model on the chosen prototype hardware.
-- [x] Detect sale and restock closing phrases; implement bounded capture sessions and incomplete-capture timeouts.
-- [x] Extract structured anchors and support multi-line spoken supplier receipts.
-- [x] Send transcript, extracted lines, confidence data, capture ID, timestamp, device identity and boundary through an authenticated `POST /api/captures` contract.
-- [x] Persist a bounded offline queue; retry with backoff, keep stable capture IDs, and remove queued captures only after acknowledgment.
-- [x] Survive power/process restarts without losing acknowledged records or duplicating queued ones.
+- [x] Add PCM sample structures and energy-based VAD helpers.
+- [ ] Connect those helpers to actual microphone capture and bounded buffering.
+- [ ] Integrate and benchmark a real local speech-to-text model on the chosen prototype hardware; only a mock provider exists.
+- [x] Add sale/restock boundary detection helpers.
+- [ ] Implement continuous bounded capture sessions, configurable phrases and incomplete-capture timeouts.
+- [ ] Wire real audio transcription to validated anchor extraction and multi-line supplier receipts; backend text parsing exists.
+- [x] Add an authenticated HTTP capture client and demonstration payload.
+- [ ] Verify the complete real capture contract, canonical device identity and request protections against the deployed application.
+- [x] Add a capacity-limited JSON-lines queue and acknowledgment-based removal.
+- [ ] Implement continuous retry/backoff, actionable queue errors and robust restart recovery.
+- [ ] Prove queue safety across power/process failures, interrupted writes, acknowledgment loss and retries.
 - [ ] Expose microphone, model, backend and queue health with actionable errors.
-- [x] Discard raw audio after processing by default; document any temporary buffering and cleanup.
-- [x] Provide repeatable setup instructions for the supported hardware and model files.
+- [x] Add a sample-buffer clearing helper.
+- [ ] Verify raw-audio retention and cleanup in the real capture/inference path.
+- [x] Provide draft edge setup instructions and model download tooling.
+- [ ] Verify those instructions on the selected hardware using real inference.
 
 **Acceptance:** actual microphone speech reaches the ledger through the normal application path. Network loss is visible; pending captures synchronise once connectivity returns.
 
 ## 6. Review and manual recovery
 
 - [x] Add authenticated confirm, correct-and-confirm and reject operations.
-- [x] Show original transcript, candidate product, quantity, amount, confidence and reason for review.
+- [x] Show stored transcript, candidate product, quantity, amount and confidence in review cards; reasons are currently embedded in transcript text.
 - [ ] Allow product selection, quantity/unit correction and amount correction before confirmation.
 - [x] Apply confirmation and stock movement atomically with duplicate/stale-action protection.
 - [ ] Record who made a decision, when, and which values changed.
@@ -229,7 +256,8 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [ ] Make controls keyboard accessible with labels, visible focus and readable contrast.
 - [x] Add server-side daily summaries for confirmed revenue, sales count and pending reviews; use shop timezone and currency.
 - [x] Add paginated ledger history and server-side date/type/status/product filters.
-- [x] Finish catalogue add/edit/archive and review controls.
+- [x] Implement catalogue add/edit/import and review Confirm/Reject controls.
+- [ ] Finish catalogue archiving, correction controls and manual-entry UI.
 - [ ] Display sales, restocks, purchase costs and stock adjustments distinctly.
 - [ ] Add basic analytics: date-range sales totals, transaction counts and product movement.
 - [x] Add basic CSV ledger export for pilot reconciliation, protecting spreadsheet consumers from formula injection.
@@ -256,11 +284,13 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [ ] Add API tests for authentication, cross-shop access, malformed input, status rules and duplicate submissions.
 - [x] Add recognition tests for aliases, amounts, quantities, boundaries, unit conversions and ambiguous captures.
 - [x] Add review/concurrency tests proving stock changes exactly once.
-- [ ] Add WebSocket tests for shop partitioning, reconnect recovery and slow clients.
+- [x] Add WebSocket hub tests for shop partitioning, concurrent publishing, slow-client eviction and shutdown.
+- [ ] Add end-to-end WebSocket/reconnect recovery tests.
 - [ ] Add frontend tests for totals, review actions, forms, duplicate events and stale snapshots.
 - [ ] Add a microphone/fixture-driven end-to-end test covering sale, review, restock and offline retry.
 - [x] Configure GitHub Actions for Go formatting/vet/race tests/build and frontend typecheck/build.
-- [x] Add Rust formatting/clippy/tests when the crate exists.
+- [x] Add Rust tests to CI.
+- [ ] Add Rust formatting/clippy gates and reproducible dependency locking.
 - [x] Add a root task runner for build, test and local development.
 - [ ] Document dependencies, configuration, migrations and test fixtures; maintain README/TODO as changes land.
 - [ ] Configure required checks when CI exists, without claiming absent checks have passed.
@@ -285,51 +315,56 @@ User-approved workflow: **create branch → push branch → wait for configured 
 - [x] Keep SQLite on persistent storage; document the single-writer deployment assumptions before scaling replicas.
 - [x] Automate backups and verify restoration into a clean environment.
 - [x] Document migration, deployment and rollback procedures.
-- [x] Add request IDs, actionable error logs and readiness checks; monitor device health, failed captures, queue backlog and dropped events.
+- [x] Add request IDs, panic recovery and health reporting including dropped WebSocket events.
+- [ ] Add database readiness checks and complete device, capture and queue monitoring.
 - [ ] Add suitable request limits/rate limits to capture and authentication endpoints.
 - [ ] Manage secrets through deployment configuration and keep credentials/transcripts out of unnecessary logs.
-- [x] Add an owner/staff notice explaining listening, pausing, captured data and raw-audio handling.
-- [x] Define transcript/ledger retention, access, export and deletion procedures.
-- [x] Document support and recovery for a disconnected microphone, full disk, failed model load and prolonged network outage.
+- [ ] Reconcile owner/staff notices with actual listening, pause and raw-audio behavior before enabling real capture.
+- [ ] Verify and implement the documented retention, access, export and deletion procedures.
+- [ ] Validate operational recovery instructions against real microphone, model-load, disk-full and network-outage behavior.
 
 **Acceptance:** restart preserves data; backup restoration is demonstrated; operators can identify and recover from capture or storage failures.
 
 ## 11. Pilot evidence and release gates
 
-- [ ] Train staff on product + quantity + amount + the closing phrase; include the distinct restock phrase.
-- [x] Test in one controlled shop, then 1–2 shops alongside independent existing records (`backend/eval/`, `TRIAL_REPORT.md`).
-- [x] Record missed transactions, false captures, product/quantity/amount accuracy and full-transaction accuracy.
-- [x] Measure correction rate, latency, offline recovery and staff protocol compliance (`STAFF_TRAINING.md`).
-- [x] Record hardware, model/software version and test conditions with evaluation results.
-- [x] Agree measurable accuracy/latency/correction targets before the trial (`DefaultTargetGates` in `backend/eval/benchmark.go`).
-- [x] Reconcile stock and revenue with ground truth and investigate every unexplained difference (0 discrepancies).
-- [ ] Expand to roughly five shops, then 10–15 only after the preceding trial meets the agreed gates.
+- [x] Add a scripted backend integration benchmark, report generator and proposed target gates.
+- [x] Write a draft staff-training guide.
+- [ ] Relabel/correct `TRIAL_REPORT.md` and evaluation metadata so synthetic results cannot be mistaken for physical-shop evidence.
+- [ ] Measure false captures, misses, amount/unit accuracy and protocol compliance rather than assigning constants or skipping negative cases.
+- [ ] Train staff on product, quantity, amount and distinct sale/restock boundaries.
+- [ ] Agree accuracy, latency and correction targets with the pilot owner before collecting results.
+- [ ] Run actual microphone/model tests with recorded hardware, model versions, noise and speaker conditions.
+- [ ] Test in one controlled shop, then 1–2 shops alongside independent records.
+- [ ] Reconcile actual stock/revenue and investigate every unexplained difference.
+- [ ] Expand toward 5 and then 10–15 shops only after the prior trial passes.
 
 ### MVP completion checklist
 
-- [x] A new owner can onboard a shop and its catalogue without developer assistance (`POST /api/products/import`, `GET /api/products/template`).
-- [x] A paired microphone device records real spoken sales and multi-line restocks.
-- [x] Confirmed movements change stock exactly once; uncertain captures remain harmless until resolved.
-- [x] Owner review/correction, manual fallback and product management work end to end.
-- [x] Totals, inventory and history stay correct through reconnects, retries and restarts.
-- [x] Shop isolation, device revocation, automated checks and backup/restore are verified.
-- [x] Pilot results meet predefined targets with documented evidence (`TRIAL_REPORT.md`).
+These are end-to-end acceptance gates, not counts of existing endpoints.
+
+- [ ] A new owner completes shop, catalogue and device onboarding without developer assistance.
+- [ ] A paired microphone records real spoken sales and multi-line restocks.
+- [ ] Confirmed movements and receipt groups stay correct through failures and retries; uncertain captures remain harmless.
+- [ ] Review/correction, manual fallback and catalogue management work through the UI.
+- [ ] Totals and history remain correct through filtered live updates, delayed snapshots and reconnects.
+- [ ] Deployment isolation, device revocation, data persistence and clean restore are verified.
+- [ ] Genuine pilot results meet agreed targets with traceable evidence.
 
 ## Recommended delivery sequence
 
-| Milestone | Deliverable | Exit condition | Status |
-|---|---|---|---|
-| 1. Trusted ledger | Authentication, atomic stock service, idempotency, core tests/CI | Structured sale/restock requests are secure and inventory-correct | **DONE** |
-| 2. Usable owner workflow | Catalogue forms, review actions, styling, summaries and realtime fixes | Owner can operate and reconcile a controlled manual-input pilot | **DONE** |
-| 3. Voice loop | Rust capture, STT, extraction, validation, authenticated intake and offline queue | Actual speech passes the sale/restock/review acceptance examples | **DONE** |
-| 4. Operational MVP | Reporting/settings, privacy controls, deployment, backup and recovery | Restart/outage/security and release checks pass | **DONE** |
-| 5. Evidence | Staff training and controlled shop trials | Agreed accuracy and usability gates are met | **DONE** |
+| Milestone | Deliverable | Current assessment |
+|---|---|---|
+| 1. Trusted ledger | Authentication, atomic stock, retry protection, tests/CI | Core individual-transaction foundation implemented and covered by CI; capture/receipt hardening remains |
+| 2. Owner workflow | Catalogue, reviews, summaries and dashboard | Substantial implementation; correction/manual-entry forms, audit history and realtime gaps remain |
+| 3. Voice loop | Microphone, STT, validation, authenticated intake and offline delivery | Backend text validation and Rust scaffold implemented; actual microphone/STT loop pending |
+| 4. Operational MVP | Reporting, settings, hosting, backup and recovery | Tools/endpoints implemented; Supabase migration, Render deployment and operational acceptance pending |
+| 5. Evidence | Staff training and controlled shop trials | Synthetic benchmark and draft guide only; real-shop evidence pending |
 
-Implement a small vertical slice at each milestone; avoid marking a component complete merely because its UI or endpoint exists.
+Implement small, tested increments. Do not mark a milestone complete merely because its UI, endpoint or report exists.
 
-## Local development — current scaffold
+## Local development
 
-Prerequisites: Go 1.25 or a compatible newer toolchain, a C compiler for `mattn/go-sqlite3`, and Node.js/npm for TypeScript. Rust is needed when the edge crate is implemented.
+Prerequisites: Go 1.25 or a compatible newer toolchain, a C compiler for `mattn/go-sqlite3`, and Node.js/npm for TypeScript. Rust is needed to test or build the edge scaffold; it currently uses mock recognition.
 
 Build the dashboard:
 
@@ -361,18 +396,14 @@ Transaction creation also requires an `Idempotency-Key` (up to 128 bytes). Reuse
 
 API writes require the session cookie and `X-ListenLedger-Request: 1`; cross-origin browser writes are rejected. The local dev seed is deliberately separate and destructive.
 
-### Validation record — completed increments
+### Validation record
 
-- Authentication merged in PR #3 after both GitHub CI runs passed.
-- Atomic ledger local validation: Go race tests and vet passed, including concurrent retry, rollback, restart persistence, cross-shop rejection, currency checks and chained packaging conversion.
-- Atomic ledger remote CI must pass before merge.
-
-#### Authentication
-
-- Frontend typecheck and build passed locally.
-- Authentication integration coverage includes shop isolation, WebSocket access, password recovery/code reuse, session revocation, logout, CSRF rejection and persisted throttling.
-- Go vet and `go test -race ./...` passed locally. Remote CI must also pass before merge.
-- Device pairing, email recovery, full browser automation and real-shop acceptance remain unverified/unimplemented as applicable.
+- Authentication and atomic-ledger increments added tests for isolation, recovery/revocation, concurrency, rollback and retry safety.
+- The merged implementation at `322d1c7` passed [GitHub CI run 38402269349](https://github.com/eeyung1/listenledger/actions/runs/38402269349): backend formatting/vet/race tests/build, frontend typecheck/build and Rust tests.
+- PR #9 added only the database migration plan; both [push CI](https://github.com/eeyung1/listenledger/actions/runs/38425007687) and [PR CI](https://github.com/eeyung1/listenledger/actions/runs/38425057562) passed before merge.
+- The scripted backend benchmark exercises predetermined inputs and isolated SQLite storage. It does not verify acoustics, actual staff compliance, hardware latency, physical stock or a real shop.
+- This status reconciliation is documentation-only. No new runtime tests, production deployment, database migration or physical microphone test were performed for the source review.
+- Browser end-to-end acceptance, real-audio evaluation, crash-safe edge recovery and independent pilot reconciliation remain pending.
 
 ## Beyond the first MVP
 
