@@ -27,6 +27,47 @@ Implementation reviewed on **13 October 2026**, against commit `461e971`.
 | Rust edge engine | Responsibility documented in `edge/README.md` | Audio capture, VAD, local STT, extraction, device transport and offline queue |
 | Delivery quality | Dependency lockfiles and development seed endpoints | Automated tests, CI, deployment/runbook, backup/restore verification |
 
+### Implemented features — checked against the code
+
+**Legend:** `[x]` = implemented in the reviewed source; `[ ]` = remaining work. A checked foundation does not imply the full MVP workflow or its runtime acceptance tests are complete.
+
+#### Backend and persistence
+
+- [x] Go HTTP server with request/header/idle timeouts, structured logging and graceful shutdown.
+- [x] `GET /healthz` with WebSocket client and dropped-event counts.
+- [x] Same-origin serving of the dashboard, REST API and WebSocket endpoint.
+- [x] SQLite connection configuration and embedded, versioned migrations.
+- [x] Product and transaction persistence with shop-scoped queries and cross-shop product-reference constraints.
+- [x] Money stored as integer minor units and timestamps stored consistently in UTC.
+- [x] Product model supports SKU, aliases, base unit, packaging definitions and low-stock threshold.
+- [x] `POST /api/products` creates a product with input validation.
+- [x] `GET /api/inventory` returns the catalogue and low-stock count.
+- [x] `GET /api/transactions` returns a bounded, newest-first ledger snapshot.
+- [x] `POST /api/transactions` validates and stores structured sale/restock records, then publishes an event; **stock adjustment is still missing**.
+- [x] Default confidence classification holds unscored/low-confidence records for review when no explicit status is supplied; **trusted recognition and status enforcement are still missing**.
+- [x] Write handlers cap request bodies and reject unknown JSON fields.
+- [x] Development-only sample-data seeding and synthetic event broadcasting, disabled unless `-dev` is enabled.
+
+#### Realtime and dashboard foundations
+
+- [x] Shop-partitioned WebSocket hub with versioned event envelopes.
+- [x] Same-origin WebSocket policy by default, ping/pong keepalive and slow-client eviction.
+- [x] Browser reconnect with exponential backoff and jitter.
+- [x] Browser envelope checks reject malformed messages, unsupported versions/types and mismatched shop IDs.
+- [x] SPA routing for Overview, Transactions and Inventory.
+- [x] Overview renders the live feed, low-stock alerts and KPIs from fetched records; **complete server-side totals remain unfinished**.
+- [x] Overview refetches snapshots after reconnect; **the other two views still need this behaviour**.
+- [x] Transaction view renders the ledger, type/status filters and review cards with transcripts/confidence; **review actions remain unfinished**.
+- [x] Inventory view renders products, aliases, packaging and low-stock indicators, with local search.
+- [x] Server-provided display text uses text-based DOM insertion.
+- [x] TypeScript build/typecheck configuration and committed npm/Go dependency lockfiles.
+
+### Where to continue
+
+**Next: Milestone 1 — Trusted ledger.** Start with section 1's owner/shop authentication, then section 3's atomic transaction/stock operation and retry protection. Add the corresponding tests and CI from section 9 alongside this work. The unchecked tasks in sections 1–11 remain the execution backlog; none of the missing voice, review, stock-update or security workflows is marked complete.
+
+Update this checked list and the relevant roadmap task in the same PR when each feature is implemented. Record validation separately so “implemented” and “verified” remain distinguishable.
+
 ### Confirmed gaps in the current code
 
 - `auth.QueryShopResolver` trusts a supplied `shop_id`; callers are not authenticated as owners of that shop.
