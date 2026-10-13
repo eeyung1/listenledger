@@ -1,5 +1,10 @@
 # TODO — ListenLedger
 
+## Authentication increment (13 October 2026)
+
+Implemented owner signup/login/logout, one-time recovery codes, persisted hashed sessions, shop isolation, write CSRF guards, persisted throttling and WebSocket session revalidation. Go/frontend CI and auth integration tests added. The README tracks current progress; older scaffold notes below remain historical where contradicted. Next: atomic ledger/stock operations and idempotency. Device credentials remain pending.
+
+
 Status: the realtime pipe and the storage layer are in place. The dashboard can
 connect, receive pushed events, and fetch snapshots from SQLite. Nothing writes
 real transactions yet — that starts with the capture endpoint and the validation
@@ -249,3 +254,4 @@ Remaining:
   orchestrator ever has to cross-compile (a shop-local Pi, a scratch container
   without gcc), swapping to the pure-Go `modernc.org/sqlite` is a one-line
   import and driver-name change.
+

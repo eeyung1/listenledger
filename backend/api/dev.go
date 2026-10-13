@@ -155,7 +155,7 @@ func buildSeedProducts(shopID string) []models.Product {
 			Name:    "Peak Milk 400g",
 			SKU:     "PEAK-400",
 			Aliases: []string{"Peak", "Peak tin", "Peak milk", "Big Peak"}, // blueprint §9
-			Price:   ngn(350000),                                            // NGN 3,500
+			Price:   ngn(350000),                                           // NGN 3,500
 			// At the reorder level, so the overview has a second alert.
 			Quantity:          4,
 			BaseUnit:          models.UnitPiece,

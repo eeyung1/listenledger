@@ -44,7 +44,8 @@ type Client struct {
 	// send carries marshalled events. The hub owns the write end of its
 	// lifecycle and closes it to signal a clean stop; nothing else may close
 	// or write to it directly.
-	send chan []byte
+	send       chan []byte
+	authorized func() bool
 }
 
 // newClient registers a freshly upgraded connection with the hub.
@@ -105,6 +106,9 @@ func (c *Client) WritePump() {
 	for {
 		select {
 		case payload, ok := <-c.send:
+			if c.authorized != nil && !c.authorized() {
+				return
+			}
 			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// The hub closed the channel: it is shutting down or has
@@ -117,6 +121,9 @@ func (c *Client) WritePump() {
 			}
 
 		case <-ticker.C:
+			if c.authorized != nil && !c.authorized() {
+				return
+			}
 			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return

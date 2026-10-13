@@ -64,9 +64,6 @@ const DEFAULT_MAX_BACKOFF_MS = 15_000;
  */
 const BACKOFF_JITTER = 0.2;
 
-/** Development fallback; the pilot runs a single shop. */
-const DEFAULT_SHOP_ID = "shop-1";
-
 export interface SocketOptions {
   readonly shopId: string;
   /** Overrides the derived same-origin URL. */
@@ -274,23 +271,6 @@ function isKnownEventType(value: string): value is EventType {
   return Object.prototype.hasOwnProperty.call(DOM_EVENT_NAMES, value);
 }
 
-/**
- * Resolves which shop this dashboard is showing.
- *
- * TEMPORARY: taken from ?shop_id= so a single-shop deployment can be exercised
- * before authentication exists, matching the backend's QueryShopResolver. Once
- * login lands this must come from the authenticated session — a shop
- * identifier in a URL is a development affordance, not an authorization
- * mechanism.
- */
-export function resolveShopId(): string {
-  const fromQuery = new URLSearchParams(window.location.search).get("shop_id");
-  if (fromQuery !== null && fromQuery.trim() !== "") {
-    return fromQuery.trim();
-  }
-  return DEFAULT_SHOP_ID;
-}
-
 let activeSocket: ListenLedgerSocket | null = null;
 
 /**
@@ -299,7 +279,7 @@ let activeSocket: ListenLedgerSocket | null = null;
  * One socket per dashboard: views attach and detach as the user navigates,
  * but the connection outlives them all.
  */
-export function startSocket(shopId: string = resolveShopId()): ListenLedgerSocket {
+export function startSocket(shopId: string): ListenLedgerSocket {
   if (activeSocket !== null) return activeSocket;
   activeSocket = new ListenLedgerSocket({ shopId });
   activeSocket.connect();
@@ -320,3 +300,4 @@ declare global {
     "ll:connection-status": CustomEvent<ConnectionStatusDetail>;
   }
 }
+

@@ -10,26 +10,30 @@ The intended result is one sale for two Milo at NGN 4,000, a stock reduction of 
 
 ## Current status
 
-Implementation reviewed on **13 October 2026**, against commit `461e971`.
+Implementation reviewed on **13 October 2026**, starting from commit `461e971`; owner authentication implementation added in the next milestone PR.
 
-**Stage: early software prototype; not ready for real-shop operation.** The Go API, SQLite persistence, WebSocket transport, and three dashboard views exist. The Rust audio engine is a placeholder. Recorded transactions do not yet change stock, and real authentication is absent.
+**Stage: early software prototype; not ready for real-shop operation.** The Go API, SQLite persistence, WebSocket transport, and three dashboard views exist. The Rust audio engine is a placeholder. Owner/shop authentication is implemented. Recorded transactions still do not change stock; device pairing and voice capture remain unfinished.
 
-“Implemented” below means source code exists; it does not mean runtime acceptance tests have passed. The review environment did not contain Go or the TypeScript compiler, so compilation and execution were not verified.
+“Implemented” means source code exists. Validation is tracked separately below; it does not imply the full real-shop acceptance workflow has passed.
 
 | Component | Implemented foundation | Still required for MVP |
 |---|---|---|
-| Go HTTP server | Health endpoint, structured logging, timeouts, graceful shutdown | Authenticated identity, request tracing, operational hardening |
+| Go HTTP server | Health endpoint, structured logging, timeouts, graceful shutdown; owner sessions and shop isolation | Device credentials, request tracing, operational hardening |
 | SQLite storage | Embedded migrations, products, transactions, shop-scoped queries | Atomic ledger/stock operations, idempotency, audit history, tested recovery |
 | Catalogue | Product creation API; aliases, units and packaging stored | Owner forms, editing, validation and operational unit conversion |
 | Transactions | Structured JSON ingestion, persistence, basic supplied-confidence classification | Recognition validation, trusted status decisions, stock effects, review actions |
 | Realtime | Shop-partitioned WebSocket hub, browser reconnect/backoff | Recovery in every view, consistent snapshots/events, duplicate protection |
 | Dashboard | Overview, ledger/review display, inventory search and low-stock display | Styling, working forms/actions, accurate aggregates, basic analytics/settings |
 | Rust edge engine | Responsibility documented in `edge/README.md` | Audio capture, VAD, local STT, extraction, device transport and offline queue |
-| Delivery quality | Dependency lockfiles and development seed endpoints | Automated tests, CI, deployment/runbook, backup/restore verification |
+| Delivery quality | Dependency lockfiles, authentication/isolation tests, Go/frontend CI | Wider ledger/edge/UI tests, deployment/runbook, backup/restore verification |
 
 ### Implemented features — checked against the code
 
 **Legend:** `[x]` = implemented in the reviewed source; `[ ]` = remaining work. A checked foundation does not imply the full MVP workflow or its runtime acceptance tests are complete.
+
+- [x] Owner signup/login/logout, recovery-code rotation, persistent sessions, per-account/IP throttling and authenticated shop isolation.
+- [x] Revoked/expired sessions cannot receive subsequent WebSocket payloads.
+- [x] Go/frontend CI workflow and authentication integration tests.
 
 #### Backend and persistence
 
@@ -64,25 +68,25 @@ Implementation reviewed on **13 October 2026**, against commit `461e971`.
 
 ### Where to continue
 
-**Next: Milestone 1 — Trusted ledger.** Start with section 1's owner/shop authentication, then section 3's atomic transaction/stock operation and retry protection. Add the corresponding tests and CI from section 9 alongside this work. The unchecked tasks in sections 1–11 remain the execution backlog; none of the missing voice, review, stock-update or security workflows is marked complete.
+**Next: Milestone 1 — Trusted ledger.** Owner/shop authentication is implemented. Continue with section 3's atomic transaction/stock operation and retry protection, adding ledger tests to the new CI workflow. The unchecked tasks in sections 1–11 remain the execution backlog; none of the missing voice, review, stock-update or security workflows is marked complete.
 
 Update this checked list and the relevant roadmap task in the same PR when each feature is implemented. Record validation separately so “implemented” and “verified” remain distinguishable.
 
 ### Confirmed gaps in the current code
 
-- `auth.QueryShopResolver` trusts a supplied `shop_id`; callers are not authenticated as owners of that shop.
+- Production routes now resolve shops from persisted owner sessions. Device pairing is still missing; the query resolver remains only a development/test helper.
 - `POST /api/transactions` saves a record but never adjusts stock.
 - Explicit caller-supplied transaction status can bypass automatic confidence classification.
 - There is no `POST /api/captures`, confirm/reject API, or product editing API.
 - Confidence scores are supplied by the client; no catalogue recognition engine generates them.
 - The review queue displays records but has no completed decision workflow.
 - “Add product” is unwired; product action cells are placeholders.
-- No stylesheet exists; login, signup, analytics and settings views are absent.
+- Account forms and basic styles exist. Full dashboard styling, analytics and settings are still incomplete.
 - Overview totals use at most the newest 500 records, not a complete daily aggregate.
 - Only the overview refetches on reconnect; inventory and transactions do not.
 - Overview new-transaction events are inserted without checking for an existing ID.
 - Snapshot replacement can race with incoming events; timestamp/version reconciliation is not implemented.
-- There are no committed automated tests or GitHub Actions workflows at this baseline.
+- Authentication tests and Go/frontend CI have been added. Ledger, recognition and wider UI coverage remain pending.
 
 ## MVP scope and success condition
 
@@ -120,14 +124,14 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 
 ## 1. Identity, onboarding and device access
 
-- [ ] Add owner signup, login, logout and a defined account-recovery process.
-- [ ] Store passwords securely if password-based authentication is selected; add session expiry/revocation, secure cookies, appropriate CSRF protection and login throttling.
+- [x] Add owner signup, login, logout and a defined account-recovery process.
+- [x] Store passwords securely if password-based authentication is selected; add session expiry/revocation, secure cookies, appropriate CSRF protection and login throttling.
 - [ ] Add persisted shop ownership and settings: name, currency, timezone, confidence threshold and sale/restock closing phrases.
-- [ ] Replace query-string identity with authenticated shop membership for both HTTP and WebSocket requests.
+- [x] Replace query-string identity with authenticated shop membership for both HTTP and WebSocket requests.
 - [ ] Pair edge devices to a shop using revocable credentials; support unpairing and credential rotation.
 - [ ] Derive device/shop identity server-side; reject attempts to submit records for another shop.
 - [ ] Provide a simple onboarding flow: create shop → load catalogue/opening stock → configure microphone/device → test capture.
-- [ ] Keep destructive development endpoints disabled outside explicit local development.
+- [x] Keep destructive development endpoints disabled outside explicit local development.
 
 **Acceptance:** two test owners cannot access each other's catalogue, ledger or live feed. Revoking a device prevents further submissions. Closing a session removes access.
 
@@ -245,7 +249,8 @@ This README is the MVP delivery checklist. Some older TODO statements are stale:
 - [ ] Add WebSocket tests for shop partitioning, reconnect recovery and slow clients.
 - [ ] Add frontend tests for totals, review actions, forms, duplicate events and stale snapshots.
 - [ ] Add a microphone/fixture-driven end-to-end test covering sale, review, restock and offline retry.
-- [ ] Configure GitHub Actions for Go formatting/vet/tests and frontend typecheck/build; add Rust formatting/clippy/tests when the crate exists.
+- [x] Configure GitHub Actions for Go formatting/vet/race tests/build and frontend typecheck/build.
+- [ ] Add Rust formatting/clippy/tests when the crate exists.
 - [ ] Add a root task runner for build, test and local development.
 - [ ] Document dependencies, configuration, migrations and test fixtures; maintain README/TODO as changes land.
 - [ ] Configure required checks when CI exists, without claiming absent checks have passed.
@@ -314,7 +319,7 @@ Implement a small vertical slice at each milestone; avoid marking a component co
 
 ## Local development — current scaffold
 
-Prerequisites: Go 1.21 or a compatible newer toolchain, a C compiler for `mattn/go-sqlite3`, and Node.js/npm for TypeScript. Rust is needed when the edge crate is implemented.
+Prerequisites: Go 1.25 or a compatible newer toolchain, a C compiler for `mattn/go-sqlite3`, and Node.js/npm for TypeScript. Rust is needed when the edge crate is implemented.
 
 Build the dashboard:
 
@@ -329,20 +334,27 @@ Run the backend from a separate terminal:
 
 ```sh
 cd backend
-go run . -addr 127.0.0.1:8080
+go run . -addr 127.0.0.1:8080 -dev
 ```
 
-Open `http://127.0.0.1:8080/?shop_id=shop-1#/home`. This is a local development identity, not authentication.
+Open `http://127.0.0.1:8080/`, create an account, and save the recovery code shown once. Local HTTP requires `-dev` for non-Secure cookies. Production must omit `-dev` and use HTTPS; session cookies are Secure, HttpOnly and SameSite=Strict. Sessions expire after 12 hours. Recovery rotates the one-time code and revokes all previous sessions; email-based recovery is not configured.
 
-For disposable sample data only, start with `go run . -addr 127.0.0.1:8080 -dev`, then:
+For disposable sample data only, use the authenticated account's shop ID from `GET /api/auth/session` (or the browser network response), then replace `YOUR_SHOP_ID` below:
 
 ```sh
-curl -X POST 'http://127.0.0.1:8080/api/dev/seed?shop_id=shop-1'
+curl -X POST 'http://127.0.0.1:8080/api/dev/seed?shop_id=YOUR_SHOP_ID'
 ```
 
 **The seed endpoint deletes the named shop's existing data before inserting examples.** Do not use it against valuable data or expose the development server publicly.
 
-These commands describe the scaffold setup; they were not executed successfully as part of the source review.
+API writes require the session cookie and `X-ListenLedger-Request: 1`; cross-origin browser writes are rejected. The local dev seed is deliberately separate and destructive.
+
+### Validation record — authentication increment
+
+- Frontend typecheck and build passed locally.
+- Authentication integration coverage includes shop isolation, WebSocket access, password recovery/code reuse, session revocation, logout, CSRF rejection and persisted throttling.
+- Go vet and `go test -race ./...` passed locally. Remote CI must also pass before merge.
+- Device pairing, email recovery, full browser automation and real-shop acceptance remain unverified/unimplemented as applicable.
 
 ## Beyond the first MVP
 
