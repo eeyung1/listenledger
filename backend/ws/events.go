@@ -35,6 +35,10 @@ const (
 	EventProductCreated EventType = "product.created"
 	// EventSettingsUpdated announces changes to shop configurations or thresholds.
 	EventSettingsUpdated EventType = "settings.updated"
+	// EventTargetGatesUpdated announces agreed changes to pilot release target gates.
+	EventTargetGatesUpdated EventType = "target_gates.updated"
+	// EventStaffTrainingCompleted announces completion of staff training drill session.
+	EventStaffTrainingCompleted EventType = "staff_training.completed"
 )
 
 // Event is the single envelope for everything the backend pushes.

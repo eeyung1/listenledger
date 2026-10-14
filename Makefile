@@ -37,6 +37,7 @@ check:
 
 verify-backup:
 	./scripts/verify_backup_restore.sh
+	./scripts/verify_postgres_backup.sh
 
 eval:
 	cd backend && $(GO) test -v -race ./eval

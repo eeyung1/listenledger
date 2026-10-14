@@ -24,12 +24,14 @@ type StepDetail struct {
 	Count       int    `json:"count,omitempty"`
 }
 
-// OnboardingSteps aggregates the 4 onboarding milestones.
+// OnboardingSteps aggregates the 6 onboarding milestones.
 type OnboardingSteps struct {
-	Profile     StepDetail `json:"profile"`
-	Catalogue   StepDetail `json:"catalogue"`
-	Devices     StepDetail `json:"devices"`
-	TestCapture StepDetail `json:"test_capture"`
+	Profile       StepDetail `json:"profile"`
+	Catalogue     StepDetail `json:"catalogue"`
+	Devices       StepDetail `json:"devices"`
+	StaffTraining StepDetail `json:"staff_training"`
+	TargetGates   StepDetail `json:"target_gates"`
+	TestCapture   StepDetail `json:"test_capture"`
 }
 
 // OnboardingStatusResponse reports shop setup progress.
@@ -56,8 +58,10 @@ func (s *Server) handleOnboardingStatus(w http.ResponseWriter, r *http.Request) 
 	// 1. Check Shop Profile
 	shop, err := s.store.GetShop(r.Context(), shopID)
 	profileCompleted := false
+	staffTrainingCompleted := false
 	if err == nil {
 		profileCompleted = strings.TrimSpace(shop.Name) != "" && strings.TrimSpace(shop.Currency) != ""
+		staffTrainingCompleted = shop.StaffTrainedAt != nil && *shop.StaffTrainedAt != ""
 	} else if !errors.Is(err, storage.ErrNotFound) {
 		s.fail(w, r, "fetch shop for onboarding status", err)
 		return
@@ -85,7 +89,14 @@ func (s *Server) handleOnboardingStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	devicesCompleted := activeDeviceCount > 0
 
-	// 4. Check Test Capture / Initial Transaction
+	// 4. Check Pilot Target Gates Agreement
+	_, targetGatesCompleted, err := s.store.GetTargetGates(r.Context(), shopID)
+	if err != nil {
+		s.fail(w, r, "get target gates for onboarding status", err)
+		return
+	}
+
+	// 5. Check Test Capture / Initial Transaction
 	_, totalTxns, err := s.store.QueryTransactions(r.Context(), shopID, storage.TransactionFilter{Limit: 1})
 	if err != nil {
 		s.fail(w, r, "query transactions for onboarding status", err)
@@ -111,6 +122,16 @@ func (s *Server) handleOnboardingStatus(w http.ResponseWriter, r *http.Request) 
 			Description: "Pair a counter microphone device or generate edge credentials",
 			Count:       activeDeviceCount,
 		},
+		StaffTraining: StepDetail{
+			Completed:   staffTrainingCompleted,
+			Title:       "Cashier Protocol Training",
+			Description: "Train staff on product names, quantities, and distinct sale/restock boundaries",
+		},
+		TargetGates: StepDetail{
+			Completed:   targetGatesCompleted,
+			Title:       "Pilot Target Gates Agreement",
+			Description: "Agree accuracy, latency, and correction targets with shop owner before trial",
+		},
 		TestCapture: StepDetail{
 			Completed:   testCaptureCompleted,
 			Title:       "Sound & Capture Test",
@@ -129,6 +150,12 @@ func (s *Server) handleOnboardingStatus(w http.ResponseWriter, r *http.Request) 
 	if devicesCompleted {
 		completedCount++
 	}
+	if staffTrainingCompleted {
+		completedCount++
+	}
+	if targetGatesCompleted {
+		completedCount++
+	}
 	if testCaptureCompleted {
 		completedCount++
 	}
@@ -137,8 +164,8 @@ func (s *Server) handleOnboardingStatus(w http.ResponseWriter, r *http.Request) 
 		ShopID:         shopID,
 		Steps:          steps,
 		CompletedSteps: completedCount,
-		TotalSteps:     4,
-		IsComplete:     completedCount == 4,
+		TotalSteps:     6,
+		IsComplete:     completedCount == 6,
 	})
 }
 
@@ -317,5 +344,282 @@ func (s *Server) handleOnboardingTestCapture(w http.ResponseWriter, r *http.Requ
 		Lines:            responseLines,
 		Summary:          summary,
 		TransactionID:    recordedTxnID,
+	})
+}
+
+// drillRequest is the payload of POST /api/onboarding/drill.
+type drillRequest struct {
+	ScenarioType string `json:"scenario_type"` // "clean_sale", "restock", "non_commercial_chatter", "spoken_correction", "custom"
+	Transcript   string `json:"transcript"`
+}
+
+type drillCheckItem struct {
+	Name   string `json:"name"`
+	Passed bool   `json:"passed"`
+	Detail string `json:"detail"`
+}
+
+type drillResponse struct {
+	Passed           bool             `json:"passed"`
+	Score            int              `json:"score"`
+	ScenarioType     string           `json:"scenario_type"`
+	BoundaryDetected bool             `json:"boundary_detected"`
+	ClosingPhrase    string           `json:"closing_phrase"`
+	RecognizedItem   string           `json:"recognized_item"`
+	Checklist        []drillCheckItem `json:"checklist"`
+	CoachingTips     []string         `json:"coaching_tips"`
+	StaffTrainedAt   string           `json:"staff_trained_at,omitempty"`
+}
+
+// handleOnboardingDrill evaluates a cashier protocol training interaction and provides coaching tips.
+func (s *Server) handleOnboardingDrill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var req drillRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	transcript := strings.TrimSpace(req.Transcript)
+	if transcript == "" {
+		writeError(w, http.StatusBadRequest, "transcript is required for cashier protocol drill")
+		return
+	}
+
+	scenarioType := strings.ToLower(strings.TrimSpace(req.ScenarioType))
+	if scenarioType == "" {
+		scenarioType = "clean_sale"
+	}
+
+	// 1. Fetch shop configuration
+	shop, err := s.store.GetShop(r.Context(), shopID)
+	salePhrase := "Thank you"
+	restockPhrase := "Stock received"
+	threshold := 0.75
+	currency := "NGN"
+	if err == nil {
+		if shop.SalePhrase != "" {
+			salePhrase = shop.SalePhrase
+		}
+		if shop.RestockPhrase != "" {
+			restockPhrase = shop.RestockPhrase
+		}
+		if shop.ConfidenceThreshold > 0 {
+			threshold = shop.ConfidenceThreshold
+		}
+		if shop.Currency != "" {
+			currency = shop.Currency
+		}
+	}
+
+	catalogue, err := s.store.ListProducts(r.Context(), shopID)
+	if err != nil {
+		s.fail(w, r, "load catalogue for drill", err)
+		return
+	}
+
+	// 2. Boundary phrase detection
+	_, detectedPhrase, boundaryFound := validate.DetectBoundary(transcript, salePhrase, restockPhrase)
+
+	var (
+		checklist      []drillCheckItem
+		coachingTips   []string
+		recognizedItem string
+	)
+
+	// 3. Scenario evaluation
+	switch scenarioType {
+	case "non_commercial_chatter":
+		boundaryOmitted := !boundaryFound
+		checklist = append(checklist, drillCheckItem{
+			Name:   "Closing Boundary Omission",
+			Passed: boundaryOmitted,
+			Detail: func() string {
+				if boundaryOmitted {
+					return "No closing phrase spoken during casual chatter (correct)"
+				}
+				return fmt.Sprintf("Accidental closing phrase %q detected in casual conversation", detectedPhrase)
+			}(),
+		})
+
+		checklist = append(checklist, drillCheckItem{
+			Name:   "Zero Ledger Distraction",
+			Passed: boundaryOmitted,
+			Detail: func() string {
+				if boundaryOmitted {
+					return "Microphone ignored non-commercial banter without creating phantom records"
+				}
+				return "Warning: microphone will create a review queue hold because closing phrase was spoken"
+			}(),
+		})
+
+		if !boundaryOmitted {
+			coachingTips = append(coachingTips, fmt.Sprintf("Never say closing phrases like %q during idle counter talk or greetings. Save them strictly for when a customer pays.", salePhrase))
+		} else {
+			coachingTips = append(coachingTips, "Great discipline! Casual counter chatter should flow naturally without trigger phrases.")
+		}
+
+	default: // clean_sale, restock, spoken_correction, custom
+		expectedPhrase := salePhrase
+		expectedType := models.TypeSale
+		if scenarioType == "restock" {
+			expectedPhrase = restockPhrase
+			expectedType = models.TypeRestock
+		}
+
+		// Check 1: Boundary phrase
+		boundaryCorrect := boundaryFound && strings.EqualFold(detectedPhrase, expectedPhrase)
+		checklist = append(checklist, drillCheckItem{
+			Name:   "Transaction Closing Boundary",
+			Passed: boundaryCorrect,
+			Detail: func() string {
+				if boundaryCorrect {
+					return fmt.Sprintf("Closing phrase %q cleanly recognized", detectedPhrase)
+				}
+				if boundaryFound {
+					return fmt.Sprintf("Used %q instead of expected %q", detectedPhrase, expectedPhrase)
+				}
+				return fmt.Sprintf("Missing closing boundary phrase (expected %q)", expectedPhrase)
+			}(),
+		})
+
+		if !boundaryFound {
+			coachingTips = append(coachingTips, fmt.Sprintf("Conclude the transaction with %q to cleanly signal completion to the counter microphone.", expectedPhrase))
+		} else if !strings.EqualFold(detectedPhrase, expectedPhrase) {
+			coachingTips = append(coachingTips, fmt.Sprintf("Use %q for %s (you said %q). Keep sale and restock phrases distinct.", expectedPhrase, scenarioType, detectedPhrase))
+		}
+
+		// Validation engine parse
+		capReq := validate.CaptureRequest{
+			Type:       expectedType,
+			Transcript: transcript,
+		}
+		validationRes, _ := s.validateEngine.Validate(
+			r.Context(),
+			capReq,
+			shopID,
+			currency,
+			threshold,
+			salePhrase,
+			restockPhrase,
+			catalogue,
+		)
+
+		var firstLine *models.Transaction
+		productMatched := false
+		qtyMatched := false
+		amtMatched := false
+
+		if len(validationRes.Lines) > 0 {
+			line := validationRes.Lines[0]
+			firstLine = &line.Transaction
+			recognizedItem = line.Transaction.ProductName
+			productMatched = line.MatchedBy != "none" && line.Transaction.ProductID != ""
+			qtyMatched = line.Transaction.Quantity > 0
+			amtMatched = line.Transaction.Amount.Amount > 0
+		}
+
+		// Check 2: Product Name
+		checklist = append(checklist, drillCheckItem{
+			Name:   "Product Name Recognition",
+			Passed: productMatched,
+			Detail: func() string {
+				if productMatched && firstLine != nil {
+					return fmt.Sprintf("Matched catalogue item: %s", firstLine.ProductName)
+				}
+				return "Product name was not matched against catalogue"
+			}(),
+		})
+		if !productMatched {
+			coachingTips = append(coachingTips, "Speak product names clearly using registered catalogue titles or aliases.")
+		}
+
+		// Check 3: Quantity & Packaging Unit
+		checklist = append(checklist, drillCheckItem{
+			Name:   "Explicit Quantity & Unit",
+			Passed: qtyMatched,
+			Detail: func() string {
+				if qtyMatched && firstLine != nil {
+					return fmt.Sprintf("Recognized %d %s", firstLine.Quantity, firstLine.Unit)
+				}
+				return "Quantity or unit missing/unclear"
+			}(),
+		})
+		if !qtyMatched {
+			coachingTips = append(coachingTips, "State the count and unit explicitly (e.g., '2 tins', '1 carton', '5 pieces').")
+		}
+
+		// Check 4: Spoken Price / Amount
+		checklist = append(checklist, drillCheckItem{
+			Name:   "Monetary Amount Clarity",
+			Passed: amtMatched,
+			Detail: func() string {
+				if amtMatched && firstLine != nil {
+					return fmt.Sprintf("Recognized price: %d %s", firstLine.Amount.Amount/100, firstLine.Amount.Currency)
+				}
+				return "Monetary price was not captured"
+			}(),
+		})
+		if !amtMatched {
+			coachingTips = append(coachingTips, "State the monetary price clearly in Naira (e.g. '7000 naira' or '4200 kobo').")
+		}
+
+		// Additional check for spoken corrections
+		if scenarioType == "spoken_correction" {
+			lower := strings.ToLower(transcript)
+			hasCorrectionKeyword := strings.Contains(lower, "wait") || strings.Contains(lower, "actually") ||
+				strings.Contains(lower, "make that") || strings.Contains(lower, "no") || strings.Contains(lower, "sorry")
+			checklist = append(checklist, drillCheckItem{
+				Name:   "Mid-Sentence Self-Correction",
+				Passed: hasCorrectionKeyword && productMatched && qtyMatched,
+				Detail: "Self-correction marker resolved correctly to final quantity",
+			})
+			if hasCorrectionKeyword && productMatched && qtyMatched {
+				coachingTips = append(coachingTips, "Spoken self-correction was handled cleanly! The ledger recorded the revised quantity.")
+			}
+		}
+	}
+
+	// 4. Calculate score
+	passedCount := 0
+	for _, c := range checklist {
+		if c.Passed {
+			passedCount++
+		}
+	}
+	score := int((float64(passedCount) / float64(len(checklist))) * 100.0)
+	passed := score >= 75
+
+	// 5. Mark staff trained if passed
+	staffTrainedAtStr := ""
+	if passed {
+		trainedTime, err := s.store.MarkStaffTrained(r.Context(), shopID)
+		if err == nil {
+			staffTrainedAtStr = trainedTime.Format(time.RFC3339)
+			s.publish(w, r, shopID, ws.EventStaffTrainingCompleted, map[string]any{
+				"trained_at": staffTrainedAtStr,
+				"score":      score,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, drillResponse{
+		Passed:           passed,
+		Score:            score,
+		ScenarioType:     scenarioType,
+		BoundaryDetected: boundaryFound,
+		ClosingPhrase:    detectedPhrase,
+		RecognizedItem:   recognizedItem,
+		Checklist:        checklist,
+		CoachingTips:     coachingTips,
+		StaffTrainedAt:   staffTrainedAtStr,
 	})
 }

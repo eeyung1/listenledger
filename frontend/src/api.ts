@@ -145,10 +145,12 @@ export class ApiError extends Error {
   }
 }
 
-async function getJSON<T>(path: string, params: Record<string, string>, signal?: AbortSignal): Promise<T> {
+async function getJSON<T>(path: string, params?: Record<string, string>, signal?: AbortSignal): Promise<T> {
   const url = new URL(path, window.location.origin);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
   }
 
   const reqInit: RequestInit = { headers: { Accept: "application/json" } };
@@ -390,6 +392,51 @@ export interface ShopSettings {
   readonly confidence_threshold: number;
   readonly sale_phrase: string;
   readonly restock_phrase: string;
+  readonly staff_trained_at?: string | null | undefined;
+}
+
+export interface TargetGates {
+  readonly min_full_transaction_accuracy: number;
+  readonly min_sku_accuracy: number;
+  readonly min_quantity_accuracy: number;
+  readonly min_unit_accuracy: number;
+  readonly min_amount_accuracy: number;
+  readonly max_false_capture_rate: number;
+  readonly max_missed_transaction_rate: number;
+  readonly max_correction_rate: number;
+  readonly min_protocol_compliance_rate: number;
+  readonly max_p95_latency_ms: number;
+  readonly agreed_at?: string | undefined;
+  readonly agreed_by?: string | undefined;
+}
+
+export interface TargetGatesResponse {
+  readonly gates: TargetGates;
+  readonly is_agreed: boolean;
+}
+
+/** GET /api/settings/target-gates — fetch agreed or proposed target release gates. */
+export function fetchTargetGates(signal?: AbortSignal): Promise<TargetGatesResponse> {
+  return getJSON<TargetGatesResponse>("/api/settings/target-gates", undefined, signal);
+}
+
+/** PUT /api/settings/target-gates — update and agree pilot target release gates. */
+export async function updateTargetGates(body: Partial<TargetGates>): Promise<TargetGatesResponse> {
+  const reqInit: RequestInit = {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "X-ListenLedger-Request": "1",
+    },
+    body: JSON.stringify(body),
+  };
+  const res = await fetch("/api/settings/target-gates", reqInit);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(`/api/settings/target-gates (${text || res.statusText})`, res.status);
+  }
+  return res.json() as Promise<TargetGatesResponse>;
 }
 
 export interface SettingsResponse {
@@ -638,6 +685,8 @@ export interface OnboardingSteps {
   readonly profile: OnboardingStep;
   readonly catalogue: OnboardingStep;
   readonly devices: OnboardingStep;
+  readonly staff_training: OnboardingStep;
+  readonly target_gates: OnboardingStep;
   readonly test_capture: OnboardingStep;
 }
 
@@ -702,6 +751,35 @@ export async function fetchDevices(signal?: AbortSignal): Promise<{ devices: rea
 export async function runTestCapture(body: TestCaptureRequest): Promise<TestCaptureResponse> {
   return postJSON<TestCaptureResponse>("/api/onboarding/test-capture", body);
 }
+
+export interface DrillCheckItem {
+  readonly name: string;
+  readonly passed: boolean;
+  readonly detail: string;
+}
+
+export interface DrillRequest {
+  readonly scenario_type: "clean_sale" | "restock" | "non_commercial_chatter" | "spoken_correction" | "custom";
+  readonly transcript: string;
+}
+
+export interface DrillResponse {
+  readonly passed: boolean;
+  readonly score: number;
+  readonly scenario_type: string;
+  readonly boundary_detected: boolean;
+  readonly closing_phrase: string;
+  readonly recognized_item: string;
+  readonly checklist: readonly DrillCheckItem[];
+  readonly coaching_tips: readonly string[];
+  readonly staff_trained_at?: string | undefined;
+}
+
+/** POST /api/onboarding/drill — run interactive cashier training drill. */
+export async function runTrainingDrill(body: DrillRequest): Promise<DrillResponse> {
+  return postJSON<DrillResponse>("/api/onboarding/drill", body);
+}
+
 
 
 

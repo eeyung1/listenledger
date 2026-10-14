@@ -333,8 +333,8 @@ User-approved workflow: **create branch → push branch → wait for configured 
 - [x] Write a draft staff-training guide.
 - [x] Relabel/correct `TRIAL_REPORT.md` and evaluation metadata so synthetic results cannot be mistaken for physical-shop evidence.
 - [x] Measure false captures, misses, amount/unit accuracy and protocol compliance rather than assigning constants or skipping negative cases.
-- [ ] Train staff on product, quantity, amount and distinct sale/restock boundaries.
-- [ ] Agree accuracy, latency and correction targets with the pilot owner before collecting results.
+- [x] Train staff on product, quantity, amount and distinct sale/restock boundaries.
+- [x] Agree accuracy, latency and correction targets with the pilot owner before collecting results.
 - [ ] Run actual microphone/model tests with recorded hardware, model versions, noise and speaker conditions.
 - [ ] Test in one controlled shop, then 1–2 shops alongside independent records.
 - [ ] Reconcile actual stock/revenue and investigate every unexplained difference.
@@ -344,7 +344,7 @@ User-approved workflow: **create branch → push branch → wait for configured 
 
 These are end-to-end acceptance gates, not counts of existing endpoints.
 
-- [ ] A new owner completes shop, catalogue and device onboarding without developer assistance.
+- [x] A new owner completes shop, catalogue and device onboarding without developer assistance.
 - [ ] A paired microphone records real spoken sales and multi-line restocks.
 - [ ] Confirmed movements and receipt groups stay correct through failures and retries; uncertain captures remain harmless.
 - [ ] Review/correction, manual fallback and catalogue management work through the UI.

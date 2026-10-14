@@ -56,8 +56,27 @@ var transferDependencyOrder = []tableTransferDef{
 	},
 	{
 		name:    "shops",
-		columns: []string{"id", "owner_id", "name", "currency", "timezone", "confidence_threshold", "sale_phrase", "restock_phrase"},
+		columns: []string{"id", "owner_id", "name", "currency", "timezone", "confidence_threshold", "sale_phrase", "restock_phrase", "staff_trained_at"},
 		orderBy: "id ASC",
+	},
+	{
+		name: "shop_target_gates",
+		columns: []string{
+			"shop_id",
+			"min_full_transaction_accuracy",
+			"min_sku_accuracy",
+			"min_quantity_accuracy",
+			"min_unit_accuracy",
+			"min_amount_accuracy",
+			"max_false_capture_rate",
+			"max_missed_transaction_rate",
+			"max_correction_rate",
+			"min_protocol_compliance_rate",
+			"max_p95_latency_ms",
+			"agreed_at",
+			"agreed_by",
+		},
+		orderBy: "shop_id ASC",
 	},
 	{
 		name:    "products",

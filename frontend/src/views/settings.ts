@@ -8,12 +8,15 @@
 
 import {
   fetchSettings,
+  fetchTargetGates,
   pairDevice,
   revokeDevice,
   rotateDeviceToken,
   updateSettings,
+  updateTargetGates,
   type Device,
   type ShopSettings,
+  type TargetGates,
 } from "../api.js";
 import { clear, el, formatDate, hook, setText } from "../format.js";
 import { CONNECTION_STATUS_EVENT, type ConnectionStatusDetail } from "../ws.js";
@@ -43,6 +46,23 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
   const tokenCard = hook(root, "device-token-card");
   const tokenVal = hook(root, "device-token-value");
   const closeTokenBtn = hook(root, "close-token-card");
+
+  const gatesBadge = hook(root, "gates-agreement-badge");
+  const gatesForm = hook<HTMLFormElement>(root, "target-gates-form");
+  const fullAccInput = hook<HTMLInputElement>(root, "gate-full-acc");
+  const skuAccInput = hook<HTMLInputElement>(root, "gate-sku-acc");
+  const qtyAccInput = hook<HTMLInputElement>(root, "gate-qty-acc");
+  const unitAccInput = hook<HTMLInputElement>(root, "gate-unit-acc");
+  const amtAccInput = hook<HTMLInputElement>(root, "gate-amt-acc");
+  const falseCapInput = hook<HTMLInputElement>(root, "gate-false-cap");
+  const missedTxnsInput = hook<HTMLInputElement>(root, "gate-missed-txns");
+  const correctionRateInput = hook<HTMLInputElement>(root, "gate-correction-rate");
+  const protocolCompInput = hook<HTMLInputElement>(root, "gate-protocol-comp");
+  const p95LatencyInput = hook<HTMLInputElement>(root, "gate-p95-latency");
+  const gatesMetaInfo = hook(root, "gates-meta-info");
+  const gatesMetaText = hook(root, "gates-meta-text");
+  const saveGatesBtn = hook<HTMLButtonElement>(root, "save-gates-btn");
+  const gatesStatus = hook(root, "gates-status");
 
   function renderDevices(): void {
     if (deviceList === null) return;
@@ -127,6 +147,39 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     if (restockPhraseInput) restockPhraseInput.value = shop.restock_phrase;
   }
 
+  async function loadTargetGates(): Promise<void> {
+    try {
+      const res = await fetchTargetGates(signal);
+      if (disposed || signal.aborted) return;
+      const g = res.gates;
+      if (fullAccInput) fullAccInput.value = g.min_full_transaction_accuracy.toString();
+      if (skuAccInput) skuAccInput.value = g.min_sku_accuracy.toString();
+      if (qtyAccInput) qtyAccInput.value = g.min_quantity_accuracy.toString();
+      if (unitAccInput) unitAccInput.value = g.min_unit_accuracy.toString();
+      if (amtAccInput) amtAccInput.value = g.min_amount_accuracy.toString();
+      if (falseCapInput) falseCapInput.value = g.max_false_capture_rate.toString();
+      if (missedTxnsInput) missedTxnsInput.value = g.max_missed_transaction_rate.toString();
+      if (correctionRateInput) correctionRateInput.value = g.max_correction_rate.toString();
+      if (protocolCompInput) protocolCompInput.value = g.min_protocol_compliance_rate.toString();
+      if (p95LatencyInput) p95LatencyInput.value = g.max_p95_latency_ms.toString();
+
+      if (gatesBadge) {
+        gatesBadge.className = `badge badge--${res.is_agreed ? "confirmed" : "review"}`;
+        setText(gatesBadge, res.is_agreed ? "Agreed by Owner" : "Pending Agreement");
+      }
+      if (gatesMetaInfo && gatesMetaText) {
+        if (res.is_agreed && g.agreed_at) {
+          gatesMetaInfo.hidden = false;
+          setText(gatesMetaText, `Formally agreed on ${formatDate(g.agreed_at)}${g.agreed_by ? ` by ${g.agreed_by}` : ""}.`);
+        } else {
+          gatesMetaInfo.hidden = true;
+        }
+      }
+    } catch {
+      // Ignored if abort or view unmounted
+    }
+  }
+
   async function loadSettings(): Promise<void> {
     try {
       const data = await fetchSettings(shopId, signal);
@@ -134,6 +187,7 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
       devices = [...data.devices];
       populateForm(data.shop);
       renderDevices();
+      await loadTargetGates();
     } catch (err: unknown) {
       if (disposed || signal.aborted) return;
       console.error("Failed to load settings:", err);
@@ -213,6 +267,58 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     }
   };
 
+  const onSaveGates = async (e: Event): Promise<void> => {
+    e.preventDefault();
+    if (saveGatesBtn) saveGatesBtn.disabled = true;
+    if (gatesStatus) {
+      gatesStatus.hidden = false;
+      gatesStatus.textContent = "Saving agreement…";
+      gatesStatus.className = "form__status";
+    }
+
+    try {
+      const payload: Partial<TargetGates> = {
+        min_full_transaction_accuracy: parseFloat(fullAccInput?.value ?? "90"),
+        min_sku_accuracy: parseFloat(skuAccInput?.value ?? "95"),
+        min_quantity_accuracy: parseFloat(qtyAccInput?.value ?? "95"),
+        min_unit_accuracy: parseFloat(unitAccInput?.value ?? "95"),
+        min_amount_accuracy: parseFloat(amtAccInput?.value ?? "95"),
+        max_false_capture_rate: parseFloat(falseCapInput?.value ?? "3"),
+        max_missed_transaction_rate: parseFloat(missedTxnsInput?.value ?? "5"),
+        max_correction_rate: parseFloat(correctionRateInput?.value ?? "10"),
+        min_protocol_compliance_rate: parseFloat(protocolCompInput?.value ?? "85"),
+        max_p95_latency_ms: parseFloat(p95LatencyInput?.value ?? "1500"),
+      };
+
+      const res = await updateTargetGates(payload);
+      if (gatesBadge) {
+        gatesBadge.className = "badge badge--confirmed";
+        setText(gatesBadge, "Agreed by Owner");
+      }
+      if (gatesMetaInfo && gatesMetaText && res.gates.agreed_at) {
+        gatesMetaInfo.hidden = false;
+        setText(
+          gatesMetaText,
+          `Formally agreed on ${formatDate(res.gates.agreed_at)}${res.gates.agreed_by ? ` by ${res.gates.agreed_by}` : ""}.`,
+        );
+      }
+      if (gatesStatus) {
+        gatesStatus.textContent = "Target gates successfully agreed!";
+        gatesStatus.className = "form__status form__status--success";
+        setTimeout(() => {
+          if (!disposed && gatesStatus) gatesStatus.hidden = true;
+        }, 3000);
+      }
+    } catch (err: unknown) {
+      if (gatesStatus) {
+        gatesStatus.textContent = err instanceof Error ? err.message : "Failed to save target gates";
+        gatesStatus.className = "form__status form__status--error";
+      }
+    } finally {
+      if (saveGatesBtn) saveGatesBtn.disabled = false;
+    }
+  };
+
   const onSettingsUpdated = (): void => {
     void loadSettings();
   };
@@ -220,9 +326,11 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
   rangeInput?.addEventListener("input", onThresholdChange);
   settingsForm?.addEventListener("submit", onSaveSettings);
   pairForm?.addEventListener("submit", onPairDevice);
+  gatesForm?.addEventListener("submit", onSaveGates);
   closeTokenBtn?.addEventListener("click", onCloseToken);
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   window.addEventListener("ll:settings-updated", onSettingsUpdated);
+  window.addEventListener("ll:target-gates-updated", onSettingsUpdated);
 
   void loadSettings();
 
@@ -232,8 +340,10 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     rangeInput?.removeEventListener("input", onThresholdChange);
     settingsForm?.removeEventListener("submit", onSaveSettings);
     pairForm?.removeEventListener("submit", onPairDevice);
+    gatesForm?.removeEventListener("submit", onSaveGates);
     closeTokenBtn?.removeEventListener("click", onCloseToken);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     window.removeEventListener("ll:settings-updated", onSettingsUpdated);
+    window.removeEventListener("ll:target-gates-updated", onSettingsUpdated);
   };
 }

@@ -972,3 +972,157 @@ func TestPostgres_PurgeTranscripts(t *testing.T) {
 		t.Errorf("expected recent transcript preserved, got %q", gotRecent.Transcript)
 	}
 }
+
+func TestPostgres_BackupAndRestoreVerification(t *testing.T) {
+	src := openTestPostgres(t)
+	ctx := context.Background()
+
+	shopID := "shop_pg_backup_test"
+	ownerID := "own_pg_backup_test"
+	seedPostgresShop(t, src, shopID, ownerID)
+
+	// 1. Seed agreed target gates
+	gates := models.TargetGates{
+		MinFullTransactionAccuracy: 91.0,
+		MinSKUAccuracy:             96.0,
+		MinQuantityAccuracy:        95.0,
+		MinUnitAccuracy:            95.0,
+		MinAmountAccuracy:          95.0,
+		MaxFalseCaptureRate:        2.5,
+		MaxMissedTransactionRate:   4.0,
+		MaxCorrectionRate:          9.0,
+		MinProtocolComplianceRate:  88.0,
+		MaxP95LatencyMs:            1400.0,
+	}
+	if _, err := src.SetTargetGates(ctx, shopID, gates, "Backup Test Owner"); err != nil {
+		t.Fatalf("set target gates: %v", err)
+	}
+
+	// 2. Mark staff trained
+	trainedAt, err := src.MarkStaffTrained(ctx, shopID)
+	if err != nil {
+		t.Fatalf("mark staff trained: %v", err)
+	}
+
+	// 3. Seed product and inventory
+	prod := models.Product{
+		ID:                "prd_pg_backup_item",
+		ShopID:            shopID,
+		Name:              "Peak Evaporated Milk",
+		SKU:               "PEAK-EVAP",
+		Aliases:           []string{"Peak Milk", "Liquid Peak"},
+		Price:             models.Money{Amount: 450000, Currency: "NGN"},
+		Quantity:          40,
+		BaseUnit:          models.UnitPack,
+		LowStockThreshold: 10,
+		Packaging: []models.PackagingRelation{
+			{From: models.UnitCarton, To: models.UnitPack, Factor: 24},
+		},
+	}
+	if err := src.InsertProduct(ctx, prod); err != nil {
+		t.Fatalf("insert product: %v", err)
+	}
+
+	// 4. Record sale transaction and stock movement
+	saleTxn := models.Transaction{
+		ID:          "txn_pg_backup_sale",
+		ShopID:      shopID,
+		Type:        models.TypeSale,
+		ProductID:   prod.ID,
+		ProductName: prod.Name,
+		Quantity:    2,
+		Unit:        models.UnitPack,
+		Amount:      models.Money{Amount: 900000, Currency: "NGN"},
+		Status:      models.StatusConfirmed,
+		OccurredAt:  time.Now().UTC(),
+		CreatedAt:   time.Now().UTC(),
+		Transcript:  "Two tins Peak milk, nine thousand naira. Thank you.",
+	}
+	movementRes, err := src.RecordMovement(ctx, saleTxn, "idem_pg_backup_sale", "hash_pg_backup_sale")
+	if err != nil {
+		t.Fatalf("record movement: %v", err)
+	}
+	if movementRes.Product.Quantity != 38 {
+		t.Fatalf("expected stock 38, got %d", movementRes.Product.Quantity)
+	}
+
+	// 5. Create fresh, isolated destination schema (clean restore target)
+	pgURL := os.Getenv("TEST_POSTGRES_URL")
+	if pgURL == "" {
+		pgURL = os.Getenv("DATABASE_URL")
+	}
+	rootDB, err := sql.Open("pgx", pgURL)
+	if err != nil {
+		t.Fatalf("open root postgres: %v", err)
+	}
+	defer rootDB.Close()
+
+	cleanSchema := fmt.Sprintf("clean_restore_%d", time.Now().UnixNano())
+	if _, err := rootDB.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA %s", cleanSchema)); err != nil {
+		t.Fatalf("create clean restore schema: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanDB, err := sql.Open("pgx", pgURL)
+		if err == nil {
+			defer cleanDB.Close()
+			_, _ = cleanDB.Exec(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", cleanSchema))
+		}
+	})
+
+	sep := "?"
+	if strings.Contains(pgURL, "?") {
+		sep = "&"
+	}
+	dstDSN := fmt.Sprintf("%s%ssearch_path=%s", pgURL, sep, cleanSchema)
+	dst, err := OpenPostgres(dstDSN)
+	if err != nil {
+		t.Fatalf("open destination postgres on clean schema: %v", err)
+	}
+	defer dst.Close()
+
+	// 6. Execute full logical restore & reconciliation from source into clean target
+	report, err := Transfer(ctx, src, dst, false)
+	if err != nil {
+		t.Fatalf("restore transfer to clean target failed: %v", err)
+	}
+	if !report.AllMatched {
+		t.Errorf("expected all tables and per-shop invariants to match after restore, got report: %+v", report)
+	}
+
+	// 7. Verify live application access on the restored store
+	restoredShop, err := dst.GetShop(ctx, shopID)
+	if err != nil {
+		t.Fatalf("dst.GetShop failed: %v", err)
+	}
+	if restoredShop.Name != "Shop "+shopID {
+		t.Errorf("expected shop name 'Shop %s', got %q", shopID, restoredShop.Name)
+	}
+	if restoredShop.StaffTrainedAt == nil || *restoredShop.StaffTrainedAt != formatTime(trainedAt) {
+		t.Errorf("expected staff_trained_at %v, got %v", formatTime(trainedAt), restoredShop.StaffTrainedAt)
+	}
+
+	restoredGates, isAgreed, err := dst.GetTargetGates(ctx, shopID)
+	if err != nil {
+		t.Fatalf("dst.GetTargetGates failed: %v", err)
+	}
+	if !isAgreed || restoredGates.MinFullTransactionAccuracy != 91.0 {
+		t.Errorf("expected restored target gates 91.0%% accuracy with isAgreed=true, got %+v", restoredGates)
+	}
+
+	restoredProd, err := dst.GetProductByID(ctx, shopID, prod.ID)
+	if err != nil {
+		t.Fatalf("dst.GetProductByID failed: %v", err)
+	}
+	if restoredProd.Quantity != 38 {
+		t.Errorf("expected restored product quantity 38, got %d", restoredProd.Quantity)
+	}
+
+	now := time.Now().UTC()
+	summary, err := dst.GetDailySummary(ctx, shopID, now.Add(-24*time.Hour), now.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("dst.GetDailySummary failed: %v", err)
+	}
+	if summary.TodaySalesAmount.Amount != 900000 {
+		t.Errorf("expected restored sales revenue 900000, got %d", summary.TodaySalesAmount.Amount)
+	}
+}

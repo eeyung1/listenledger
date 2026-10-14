@@ -3,8 +3,10 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/eeyung1/listenledger-backend/models"
 	"github.com/eeyung1/listenledger-backend/storage"
 	"github.com/eeyung1/listenledger-backend/ws"
 )
@@ -144,5 +146,79 @@ func (s *Server) handlePurgeTranscripts(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, purgeTranscriptsResponse{
 		PurgedCount: purged,
 		OlderThan:   cutoff.Format(time.RFC3339),
+	})
+}
+
+type targetGatesResponse struct {
+	Gates    models.TargetGates `json:"gates"`
+	IsAgreed bool               `json:"is_agreed"`
+}
+
+func (s *Server) handleTargetGates(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.getTargetGates(w, r)
+	case http.MethodPut:
+		s.updateTargetGates(w, r)
+	default:
+		w.Header().Set("Allow", "GET, PUT")
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) getTargetGates(w http.ResponseWriter, r *http.Request) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	gates, isAgreed, err := s.store.GetTargetGates(r.Context(), shopID)
+	if err != nil {
+		s.fail(w, r, "get target gates", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, targetGatesResponse{
+		Gates:    gates,
+		IsAgreed: isAgreed,
+	})
+}
+
+func (s *Server) updateTargetGates(w http.ResponseWriter, r *http.Request) {
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var req models.TargetGates
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	if err := req.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	agreedBy := strings.TrimSpace(req.AgreedBy)
+	if agreedBy == "" {
+		shop, err := s.store.GetShop(r.Context(), shopID)
+		if err == nil && shop.OwnerID != "" {
+			agreedBy = "Owner (" + shop.OwnerID + ")"
+		} else {
+			agreedBy = "Shop Owner"
+		}
+	}
+
+	updated, err := s.store.SetTargetGates(r.Context(), shopID, req, agreedBy)
+	if err != nil {
+		s.fail(w, r, "update target gates", err)
+		return
+	}
+
+	s.publish(w, r, shopID, ws.EventTargetGatesUpdated, updated)
+	writeJSON(w, http.StatusOK, targetGatesResponse{
+		Gates:    updated,
+		IsAgreed: true,
 	})
 }

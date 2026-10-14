@@ -20,8 +20,10 @@ import {
   fetchSummary,
   fetchTransactions,
   runTestCapture,
+  runTrainingDrill,
   type DailySummary,
   type Device,
+  type DrillRequest,
   type OnboardingStatus,
   type Product,
   type Transaction,
@@ -170,15 +172,72 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     }
     stepsGrid.append(step3);
 
-    // 4. Test Capture
-    const step4 = el("div", `onboarding-step ${ob.steps.test_capture.completed ? "onboarding-step--complete" : ""}`);
+    // 4. Staff Training
+    const step4 = el("div", `onboarding-step ${ob.steps.staff_training?.completed ? "onboarding-step--complete" : ""}`);
     const h4 = el("div", "onboarding-step__header");
     h4.append(
-      el("span", "onboarding-step__icon", ob.steps.test_capture.completed ? "✓" : "④"),
-      el("h3", "onboarding-step__title", ob.steps.test_capture.title),
+      el("span", "onboarding-step__icon", ob.steps.staff_training?.completed ? "✓" : "④"),
+      el("h3", "onboarding-step__title", ob.steps.staff_training?.title || "Cashier Protocol Training"),
     );
     step4.append(
       h4,
+      el(
+        "p",
+        "onboarding-step__desc",
+        ob.steps.staff_training?.completed
+          ? "Staff trained on closing phrases, SKU names, and corrections"
+          : (ob.steps.staff_training?.description || "Train cashier staff on sale and restock closing boundary protocols"),
+      ),
+    );
+    const trainAct = el("div", "onboarding-step__action");
+    const trainBtn = el(
+      "button",
+      "button button--sm button--primary",
+      ob.steps.staff_training?.completed ? "Practice Drills Again" : "Practice Drills",
+    );
+    trainBtn.type = "button";
+    trainBtn.addEventListener("click", () => {
+      showTrainingDrillModal(root, () => {
+        void refetch();
+      });
+    });
+    trainAct.append(trainBtn);
+    step4.append(trainAct);
+    stepsGrid.append(step4);
+
+    // 5. Target Gates Agreement
+    const step5 = el("div", `onboarding-step ${ob.steps.target_gates?.completed ? "onboarding-step--complete" : ""}`);
+    const h5 = el("div", "onboarding-step__header");
+    h5.append(
+      el("span", "onboarding-step__icon", ob.steps.target_gates?.completed ? "✓" : "⑤"),
+      el("h3", "onboarding-step__title", ob.steps.target_gates?.title || "Pilot Target Gates"),
+    );
+    step5.append(
+      h5,
+      el(
+        "p",
+        "onboarding-step__desc",
+        ob.steps.target_gates?.completed
+          ? "Owner agreed pilot release accuracy and latency gates"
+          : (ob.steps.target_gates?.description || "Agree accuracy, latency, and correction targets with shop owner"),
+      ),
+    );
+    if (!ob.steps.target_gates?.completed) {
+      const act = el("div", "onboarding-step__action");
+      act.innerHTML = `<a href="#/settings" class="button button--sm button--secondary">Review Targets</a>`;
+      step5.append(act);
+    }
+    stepsGrid.append(step5);
+
+    // 6. Test Capture
+    const step6 = el("div", `onboarding-step ${ob.steps.test_capture.completed ? "onboarding-step--complete" : ""}`);
+    const h6 = el("div", "onboarding-step__header");
+    h6.append(
+      el("span", "onboarding-step__icon", ob.steps.test_capture.completed ? "✓" : "⑥"),
+      el("h3", "onboarding-step__title", ob.steps.test_capture.title),
+    );
+    step6.append(
+      h6,
       el(
         "p",
         "onboarding-step__desc",
@@ -200,8 +259,8 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       });
     });
     testAct.append(testBtn);
-    step4.append(testAct);
-    stepsGrid.append(step4);
+    step6.append(testAct);
+    stepsGrid.append(step6);
 
     card.append(header, progressBar, stepsGrid);
     onboardingContainer.append(card);
@@ -567,6 +626,194 @@ function showTestCaptureModal(root: HTMLElement, onDone: () => void): void {
       resultContainer.append(el("p", "error", `Verification error: ${msg}`));
       submitBtn.disabled = false;
       setText(submitBtn, "Verify Recognition");
+    }
+  });
+}
+
+function showTrainingDrillModal(root: HTMLElement, onDone: () => void): void {
+  const existing = document.querySelector(".modal-backdrop");
+  if (existing) existing.remove();
+
+  const backdrop = el("div", "modal-backdrop");
+  const modal = el("div", "modal modal--edit-confirm");
+
+  const header = el("div", "modal__header");
+  header.append(
+    el("h2", "modal__title", "Cashier Protocol Training & Boundary Drills"),
+    el(
+      "p",
+      "modal__subtitle",
+      "Practice closing boundary protocols (e.g. 'Thank you', 'Stock received'), self-correction phrasing, and catalogue articulation.",
+    ),
+  );
+
+  const form = el("form", "modal__form");
+  form.setAttribute("novalidate", "");
+
+  const scenarioLabel = el("label", "field");
+  scenarioLabel.append(el("span", "field__label", "Training Scenario"));
+  const scenarioSelect = document.createElement("select");
+  scenarioSelect.innerHTML = `
+    <option value="clean_sale">Clean Sale Boundary ("Thank you")</option>
+    <option value="restock">Stock Restock Inflow ("Stock received")</option>
+    <option value="spoken_correction">Spoken Self-Correction ("Wait no, make that...")</option>
+    <option value="non_commercial_chatter">Non-Commercial Chatter Negative Control</option>
+    <option value="custom">Custom Cashier Phrase</option>
+  `;
+  scenarioLabel.append(scenarioSelect);
+
+  const transcriptLabel = el("label", "field");
+  transcriptLabel.append(el("span", "field__label", "Spoken Counter Phrase"));
+  const transcriptInput = document.createElement("textarea");
+  transcriptInput.rows = 2;
+  transcriptInput.required = true;
+  transcriptInput.value = "Two Peak Milk, seven thousand naira. Thank you.";
+  transcriptLabel.append(transcriptInput);
+
+  // Quick preset pills
+  const presets: Record<string, string> = {
+    clean_sale: "Two Peak Milk, seven thousand naira. Thank you.",
+    restock: "Three cartons of Milo. Stock received.",
+    spoken_correction: "Two Peak Milk. Wait no, make that three Peak Milk, ten thousand five hundred naira. Thank you.",
+    non_commercial_chatter: "Good afternoon ma, how are the children doing at school today?",
+    custom: "",
+  };
+
+  scenarioSelect.addEventListener("change", () => {
+    const val = scenarioSelect.value;
+    if (presets[val] !== undefined && val !== "custom") {
+      transcriptInput.value = presets[val];
+    }
+  });
+
+  const pills = el("div", "quick-pills");
+  const drillPills = [
+    { label: "Sale Drill", scenario: "clean_sale" as const, text: "Two Peak Milk, seven thousand naira. Thank you." },
+    { label: "Restock Drill", scenario: "restock" as const, text: "Three cartons of Milo. Stock received." },
+    { label: "Correction Drill", scenario: "spoken_correction" as const, text: "Two Peak Milk. Wait no, make that three Peak Milk, ten thousand five hundred naira. Thank you." },
+    { label: "Chatter (Negative)", scenario: "non_commercial_chatter" as const, text: "Good afternoon ma, how are the children doing at school today?" },
+  ];
+  for (const dp of drillPills) {
+    const btn = el("button", "pill-button", dp.label);
+    btn.type = "button";
+    btn.addEventListener("click", () => {
+      scenarioSelect.value = dp.scenario;
+      transcriptInput.value = dp.text;
+    });
+    pills.append(btn);
+  }
+  transcriptLabel.append(pills);
+
+  const resultContainer = el("div", "test-capture-result");
+  resultContainer.style.display = "none";
+
+  const actions = el("div", "modal__actions");
+  const cancelBtn = el("button", "button button--secondary", "Close");
+  cancelBtn.type = "button";
+  cancelBtn.addEventListener("click", () => {
+    backdrop.remove();
+    onDone();
+  });
+
+  const submitBtn = el("button", "button button--primary", "Evaluate Drill");
+  submitBtn.type = "submit";
+
+  actions.append(cancelBtn, submitBtn);
+
+  form.append(scenarioLabel, transcriptLabel, resultContainer, actions);
+  modal.append(header, form);
+  backdrop.append(modal);
+  root.append(backdrop);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = transcriptInput.value.trim();
+    if (!text) return;
+
+    submitBtn.disabled = true;
+    setText(submitBtn, "Evaluating…");
+    clear(resultContainer);
+    resultContainer.style.display = "block";
+    resultContainer.append(el("p", "hint", "Running training drill evaluation…"));
+
+    try {
+      const res = await runTrainingDrill({
+        scenario_type: scenarioSelect.value as DrillRequest["scenario_type"],
+        transcript: text,
+      });
+
+      clear(resultContainer);
+      const resHeader = el("div", "test-capture-result__header");
+      const passText = res.passed ? `✓ Drill Passed (${res.score}%)` : `⚠ Drill Needs Practice (${res.score}%)`;
+      resHeader.append(
+        el("strong", "", passText),
+        el(
+          "span",
+          `badge ${res.passed ? "badge--confirmed" : "badge--review"}`,
+          res.boundary_detected ? `Boundary: "${res.closing_phrase}"` : "No boundary detected",
+        ),
+      );
+      resultContainer.append(resHeader);
+
+      if (res.staff_trained_at) {
+        resultContainer.append(
+          el("p", "panel__hint", "Staff training milestone completed and verified for this shop."),
+        );
+      }
+
+      // Checklist items
+      if (res.checklist && res.checklist.length > 0) {
+        const checkListEl = el("div", "review-diff");
+        checkListEl.style.marginTop = "0.75rem";
+        for (const item of res.checklist) {
+          const itemRow = el("div", "review-diff__row");
+          itemRow.innerHTML = `
+            <div>
+              <strong>${item.passed ? "✓" : "✗"} ${item.name}</strong>
+              <div style="font-size: 0.85rem; color: ${item.passed ? "#28a745" : "#ba7d00"}; margin-top: 0.2rem;">
+                ${item.detail}
+              </div>
+            </div>
+          `;
+          checkListEl.append(itemRow);
+        }
+        resultContainer.append(checkListEl);
+      }
+
+      // Coaching tips
+      if (res.coaching_tips && res.coaching_tips.length > 0) {
+        const tipsContainer = el("div", "drill-coaching-tips");
+        tipsContainer.style.marginTop = "0.75rem";
+        tipsContainer.style.padding = "0.75rem";
+        tipsContainer.style.background = "#fff8e6";
+        tipsContainer.style.border = "1px solid #ffd591";
+        tipsContainer.style.borderRadius = "4px";
+        const tipsTitle = el("strong", "", "Coaching Tips:");
+        tipsContainer.append(tipsTitle);
+        const ul = document.createElement("ul");
+        ul.style.marginTop = "0.35rem";
+        ul.style.marginBottom = "0";
+        ul.style.paddingLeft = "1.2rem";
+        for (const tip of res.coaching_tips) {
+          const li = document.createElement("li");
+          li.style.fontSize = "0.85rem";
+          li.style.marginBottom = "0.2rem";
+          li.textContent = tip;
+          ul.append(li);
+        }
+        tipsContainer.append(ul);
+        resultContainer.append(tipsContainer);
+      }
+
+      setText(submitBtn, "Practice Again");
+      submitBtn.disabled = false;
+      cancelBtn.textContent = "Done & Close";
+    } catch (err: unknown) {
+      clear(resultContainer);
+      const msg = err instanceof Error ? err.message : String(err);
+      resultContainer.append(el("p", "error", `Evaluation error: ${msg}`));
+      submitBtn.disabled = false;
+      setText(submitBtn, "Evaluate Drill");
     }
   });
 }

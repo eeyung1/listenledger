@@ -270,3 +270,11 @@ Remaining:
   without gcc), swapping to the pure-Go `modernc.org/sqlite` is a one-line
   import and driver-name change.
 
+## 8. Milestone 18: Staff Protocol Training, Target Gates Agreement & Postgres Disaster Restoration — DONE
+
+- [x] **Cashier Protocol Training Simulator:** Interactive boundary drill engine (`POST /api/onboarding/drill`) evaluating closing boundary presence, SKU articulation, unit & amount detection, self-correction phrasing, and negative non-commercial chatter rejection. Returns structured checklist, actionable coaching tips, scoring percentage, and automatically records `staff_trained_at` upon passing ($score \ge 75\%$).
+- [x] **Owner Target Gates Agreement:** Configurable shop target gates (`GET/PUT /api/settings/target-gates`) persisting agreed accuracy, false-capture, hold-rate, and latency targets with dual-dialect SQLite (`0006_target_gates_and_training.sql`) and PostgreSQL migrations. Accessible via Settings UI and Onboarding checklist.
+- [x] **Onboarding Checklist Complete:** Six-step progressive onboarding workflow (`profile`, `catalogue`, `devices`, `staff_training`, `target_gates`, `test_capture`) with interactive modals and live progression.
+- [x] **Automated PostgreSQL Disaster Restore Verification:** Automated script (`scripts/verify_postgres_backup.sh`) and integration test (`TestPostgres_BackupAndRestoreVerification`) validating complete migration, transfer, and application access on clean target database.
+
+
