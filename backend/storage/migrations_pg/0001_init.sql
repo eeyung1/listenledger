@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     occurred_at         TEXT    NOT NULL,
     created_at          TEXT    NOT NULL,
     transcript          TEXT    NOT NULL DEFAULT '',
-    FOREIGN KEY (shop_id, product_id) REFERENCES products (shop_id, id)
+    FOREIGN KEY (shop_id, product_id) REFERENCES products (shop_id, id),
+    UNIQUE (shop_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_shop_date ON transactions (shop_id, occurred_at DESC, id DESC);
