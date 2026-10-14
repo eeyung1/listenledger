@@ -133,16 +133,18 @@ type Shop struct {
 	ConfidenceThreshold float64 `json:"confidence_threshold"`
 	SalePhrase          string  `json:"sale_phrase"`
 	RestockPhrase       string  `json:"restock_phrase"`
+	StaffTrainedAt      *string `json:"staff_trained_at,omitempty"`
 }
 
 // GetShop retrieves a shop by ID, including its thresholds and boundary phrases.
 func (s *Store) GetShop(ctx context.Context, shopID string) (Shop, error) {
-	query := `SELECT id, owner_id, name, currency, timezone, confidence_threshold, sale_phrase, restock_phrase
+	query := `SELECT id, owner_id, name, currency, timezone, confidence_threshold, sale_phrase, restock_phrase, staff_trained_at
 		FROM shops WHERE id = ?`
 	var sh Shop
+	var staffTrained sql.NullString
 	err := s.db.QueryRowContext(ctx, s.rebind(query), shopID).Scan(
 		&sh.ID, &sh.OwnerID, &sh.Name, &sh.Currency, &sh.Timezone,
-		&sh.ConfidenceThreshold, &sh.SalePhrase, &sh.RestockPhrase,
+		&sh.ConfidenceThreshold, &sh.SalePhrase, &sh.RestockPhrase, &staffTrained,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -150,7 +152,32 @@ func (s *Store) GetShop(ctx context.Context, shopID string) (Shop, error) {
 		}
 		return Shop{}, fmt.Errorf("storage: get shop %s: %w", shopID, err)
 	}
+	if staffTrained.Valid {
+		sh.StaffTrainedAt = &staffTrained.String
+	}
 	return sh, nil
+}
+
+// MarkStaffTrained records that cashier protocol training has been completed for the shop.
+func (s *Store) MarkStaffTrained(ctx context.Context, shopID string) (time.Time, error) {
+	if shopID == "" {
+		return time.Time{}, errors.New("storage: MarkStaffTrained requires a shop_id")
+	}
+	now := time.Now().UTC()
+	ts := formatTime(now)
+	query := s.rebind(`UPDATE shops SET staff_trained_at = ? WHERE id = ?`)
+	res, err := s.db.ExecContext(ctx, query, ts, shopID)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("storage: mark staff trained for shop %s: %w", shopID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("storage: mark staff trained rows affected: %w", err)
+	}
+	if n == 0 {
+		return time.Time{}, ErrNotFound
+	}
+	return now, nil
 }
 
 // UpdateShopSettingsParams specifies configurable shop properties.

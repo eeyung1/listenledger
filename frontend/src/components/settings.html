@@ -100,6 +100,80 @@
       </ul>
     </section>
 
+    <!-- Pilot Target Gates & Accuracy Agreements Panel -->
+    <section class="panel" aria-labelledby="target-gates-heading">
+      <div class="panel__header">
+        <h2 class="panel__title" id="target-gates-heading">Pilot Target Gates & Accuracy Agreement</h2>
+        <span class="badge" data-hook="gates-agreement-badge">Pending Agreement</span>
+      </div>
+      <p class="panel__hint">
+        Pre-agreed objective thresholds for physical retail trial deployment (README §11). Agreeing targets aligns shop owners and engineering before collecting operational trial evidence.
+      </p>
+
+      <form class="form target-gates-form" data-hook="target-gates-form">
+        <div class="form__row">
+          <label class="form__field">
+            Min. Full Accuracy (%)
+            <input type="number" step="0.1" min="50" max="100" data-hook="gate-full-acc" required />
+          </label>
+          <label class="form__field">
+            Min. SKU Accuracy (%)
+            <input type="number" step="0.1" min="50" max="100" data-hook="gate-sku-acc" required />
+          </label>
+        </div>
+
+        <div class="form__row">
+          <label class="form__field">
+            Min. Quantity Accuracy (%)
+            <input type="number" step="0.1" min="50" max="100" data-hook="gate-qty-acc" required />
+          </label>
+          <label class="form__field">
+            Min. Unit Accuracy (%)
+            <input type="number" step="0.1" min="50" max="100" data-hook="gate-unit-acc" required />
+          </label>
+          <label class="form__field">
+            Min. Amount Accuracy (%)
+            <input type="number" step="0.1" min="50" max="100" data-hook="gate-amt-acc" required />
+          </label>
+        </div>
+
+        <div class="form__row">
+          <label class="form__field">
+            Max. False Captures (%)
+            <input type="number" step="0.1" min="0" max="50" data-hook="gate-false-cap" required />
+          </label>
+          <label class="form__field">
+            Max. Missed Txns (%)
+            <input type="number" step="0.1" min="0" max="50" data-hook="gate-missed-txns" required />
+          </label>
+          <label class="form__field">
+            Max. Correction Rate (%)
+            <input type="number" step="0.1" min="0" max="50" data-hook="gate-correction-rate" required />
+          </label>
+        </div>
+
+        <div class="form__row">
+          <label class="form__field">
+            Min. Protocol Compliance (%)
+            <input type="number" step="0.1" min="50" max="100" data-hook="gate-protocol-comp" required />
+          </label>
+          <label class="form__field">
+            Max. p95 Latency (ms)
+            <input type="number" step="10" min="100" max="10000" data-hook="gate-p95-latency" required />
+          </label>
+        </div>
+
+        <div class="target-gates-meta" data-hook="gates-meta-info" hidden>
+          <p class="target-gates-meta__detail" data-hook="gates-meta-text"></p>
+        </div>
+
+        <div class="form__actions">
+          <button type="submit" class="button button--primary" data-hook="save-gates-btn">Agree & Save Target Gates</button>
+          <span class="form__status" data-hook="gates-status" hidden></span>
+        </div>
+      </form>
+    </section>
+
     <!-- Privacy & Hardware Notice -->
     <section class="panel panel--privacy" aria-labelledby="privacy-heading">
       <h2 class="panel__title" id="privacy-heading">Ambient Voice Privacy & Local Processing</h2>

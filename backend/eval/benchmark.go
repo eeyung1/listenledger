@@ -26,32 +26,10 @@ type Scenario struct {
 }
 
 // TargetGates represents the pre-agreed objective gates before the trial.
-type TargetGates struct {
-	MinFullTransactionAccuracy float64 // e.g. 90.0%
-	MinSKUAccuracy             float64 // e.g. 95.0%
-	MinQuantityAccuracy        float64 // e.g. 95.0%
-	MinUnitAccuracy            float64 // e.g. 95.0%
-	MinAmountAccuracy          float64 // e.g. 95.0%
-	MaxFalseCaptureRate        float64 // e.g. 3.0%
-	MaxMissedTransactionRate   float64 // e.g. 5.0%
-	MaxCorrectionRate          float64 // e.g. 10.0%
-	MinProtocolComplianceRate  float64 // e.g. 85.0%
-	MaxP95LatencyMs            float64 // e.g. 2000ms
-}
+type TargetGates = models.TargetGates
 
 // DefaultTargetGates defines the strict production acceptance thresholds.
-var DefaultTargetGates = TargetGates{
-	MinFullTransactionAccuracy: 90.0,
-	MinSKUAccuracy:             95.0,
-	MinQuantityAccuracy:        95.0,
-	MinUnitAccuracy:            95.0,
-	MinAmountAccuracy:          95.0,
-	MaxFalseCaptureRate:        3.0,
-	MaxMissedTransactionRate:   5.0,
-	MaxCorrectionRate:          10.0,
-	MinProtocolComplianceRate:  85.0,
-	MaxP95LatencyMs:            1500.0,
-}
+var DefaultTargetGates = models.DefaultTargetGates
 
 // InitialCatalogue returns the pilot shop's baseline product set.
 func InitialCatalogue() []models.Product {

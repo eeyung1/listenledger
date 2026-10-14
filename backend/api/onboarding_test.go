@@ -77,6 +77,12 @@ func TestOnboardingStatusProgression(t *testing.T) {
 			Devices struct {
 				Completed bool `json:"completed"`
 			} `json:"devices"`
+			StaffTraining struct {
+				Completed bool `json:"completed"`
+			} `json:"staff_training"`
+			TargetGates struct {
+				Completed bool `json:"completed"`
+			} `json:"target_gates"`
 			TestCapture struct {
 				Completed bool `json:"completed"`
 			} `json:"test_capture"`
@@ -95,6 +101,12 @@ func TestOnboardingStatusProgression(t *testing.T) {
 	}
 	if statusRes.Steps.Devices.Completed {
 		t.Errorf("expected devices step incomplete")
+	}
+	if statusRes.Steps.StaffTraining.Completed {
+		t.Errorf("expected staff training step incomplete")
+	}
+	if statusRes.Steps.TargetGates.Completed {
+		t.Errorf("expected target gates step incomplete")
 	}
 	if statusRes.Steps.TestCapture.Completed {
 		t.Errorf("expected test capture step incomplete")
@@ -132,7 +144,57 @@ func TestOnboardingStatusProgression(t *testing.T) {
 		t.Fatalf("expected 3 completed steps, got %d", statusRes.CompletedSteps)
 	}
 
-	// Step 4: Run test capture
+	// Step 4: Cashier Protocol Training Drill
+	drillBody := `{"scenario_type":"clean_sale","transcript":"Two Peak Milk, seven thousand naira. Thank you."}`
+	drillReq := httptest.NewRequest(http.MethodPost, "/api/onboarding/drill", strings.NewReader(drillBody))
+	drillReq.Header.Set("Content-Type", "application/json")
+	drillRec := httptest.NewRecorder()
+	handler.ServeHTTP(drillRec, drillReq)
+	if drillRec.Code != http.StatusOK {
+		t.Fatalf("cashier drill failed: %d %s", drillRec.Code, drillRec.Body.String())
+	}
+
+	var drillRes struct {
+		Passed         bool   `json:"passed"`
+		Score          int    `json:"score"`
+		StaffTrainedAt string `json:"staff_trained_at"`
+	}
+	if err := json.NewDecoder(drillRec.Body).Decode(&drillRes); err != nil {
+		t.Fatalf("decode drill response: %v", err)
+	}
+	if !drillRes.Passed || drillRes.Score < 75 || drillRes.StaffTrainedAt == "" {
+		t.Fatalf("expected passing drill result, got passed=%v score=%d trained_at=%s", drillRes.Passed, drillRes.Score, drillRes.StaffTrainedAt)
+	}
+
+	// Check status: 4 steps completed
+	req2b := httptest.NewRequest(http.MethodGet, "/api/onboarding/status", nil)
+	rec2b := httptest.NewRecorder()
+	handler.ServeHTTP(rec2b, req2b)
+	_ = json.NewDecoder(rec2b.Body).Decode(&statusRes)
+	if statusRes.CompletedSteps != 4 {
+		t.Fatalf("expected 4 completed steps, got %d", statusRes.CompletedSteps)
+	}
+
+	// Step 5: Pilot Owner Target Gates Agreement
+	gatesBody := `{"min_full_transaction_accuracy":90,"min_sku_accuracy":95,"min_quantity_accuracy":95,"min_unit_accuracy":95,"min_amount_accuracy":95,"max_false_capture_rate":3,"max_missed_transaction_rate":5,"max_correction_rate":10,"min_protocol_compliance_rate":85,"max_p95_latency_ms":1500,"agreed_by":"Owner pilot@mamadolu.ng"}`
+	gatesReq := httptest.NewRequest(http.MethodPut, "/api/settings/target-gates", strings.NewReader(gatesBody))
+	gatesReq.Header.Set("Content-Type", "application/json")
+	gatesRec := httptest.NewRecorder()
+	handler.ServeHTTP(gatesRec, gatesReq)
+	if gatesRec.Code != http.StatusOK {
+		t.Fatalf("update target gates failed: %d %s", gatesRec.Code, gatesRec.Body.String())
+	}
+
+	// Check status: 5 steps completed
+	req2c := httptest.NewRequest(http.MethodGet, "/api/onboarding/status", nil)
+	rec2c := httptest.NewRecorder()
+	handler.ServeHTTP(rec2c, req2c)
+	_ = json.NewDecoder(rec2c.Body).Decode(&statusRes)
+	if statusRes.CompletedSteps != 5 {
+		t.Fatalf("expected 5 completed steps, got %d", statusRes.CompletedSteps)
+	}
+
+	// Step 6: Run test capture
 	tcBody := `{"transcript":"Two Peak Milk, seven thousand naira. Thank you.","type":"sale"}`
 	tcReq := httptest.NewRequest(http.MethodPost, "/api/onboarding/test-capture", strings.NewReader(tcBody))
 	tcReq.Header.Set("Content-Type", "application/json")
@@ -168,14 +230,14 @@ func TestOnboardingStatusProgression(t *testing.T) {
 		t.Errorf("expected Peak Milk 400g recognized, got %+v", tcRes.Lines)
 	}
 
-	// Verify all 4 steps are complete
+	// Verify all 6 steps are complete
 	req3 := httptest.NewRequest(http.MethodGet, "/api/onboarding/status", nil)
 	rec3 := httptest.NewRecorder()
 	handler.ServeHTTP(rec3, req3)
 	_ = json.NewDecoder(rec3.Body).Decode(&statusRes)
 
-	if !statusRes.IsComplete || statusRes.CompletedSteps != 4 {
-		t.Errorf("expected onboarding complete (4/4), got %d/4 (is_complete=%v)", statusRes.CompletedSteps, statusRes.IsComplete)
+	if !statusRes.IsComplete || statusRes.CompletedSteps != 6 {
+		t.Errorf("expected onboarding complete (6/6), got %d/6 (is_complete=%v)", statusRes.CompletedSteps, statusRes.IsComplete)
 	}
 }
 
