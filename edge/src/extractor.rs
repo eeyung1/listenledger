@@ -49,8 +49,8 @@ pub struct BoundaryConfig {
 impl Default for BoundaryConfig {
     fn default() -> Self {
         Self {
-            sale_phrase: "thank you".to_string(),
-            restock_phrase: "stock received".to_string(),
+            sale_phrase: "Thank you".to_string(),
+            restock_phrase: "Stock received".to_string(),
         }
     }
 }
