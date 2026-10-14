@@ -22,7 +22,7 @@ Source reviewed on **13 October 2026**, at implementation commit `322d1c7`. The 
 
 | Component | Implemented foundation | Still required for MVP |
 |---|---|---|
-| Go HTTP server | Request tracing (`X-Request-ID`), panic recovery middleware, timeouts, graceful shutdown; owner sessions, shop isolation, confirm/reject, product edit, daily summary, device pairing, edge capture, settings & CSV export endpoints | Production TLS certificate provisioning |
+| Go HTTP server | Request tracing (`X-Request-ID`), panic recovery middleware, timeouts, graceful shutdown; owner sessions, shop isolation, confirm/reject, product edit, daily summary, device pairing, edge capture, settings, CSV export, direct TLS 1.2+ & reverse-proxy HSTS/CSP security headers | None (Core serving foundations complete) |
 | SQLite storage | Online backup (`VACUUM INTO`), integrity checks, migrations, shop-scoped queries, atomic individual movements/review resolution, summaries and settings | Receipt-wide atomicity, correction/reversal audit history, PostgreSQL migration and wider recovery tests |
 | Catalogue | Create/update API, Add/Edit forms, aliases, packaging, CSV/JSON import, alias/SKU collision validation, historical movement guards | Safe product archiving and audited stock corrections |
 | Transactions | Structured/text capture intake, catalogue validation, atomic individual movements and review resolution, query filters, CSV export | Receipt-wide atomicity, stronger capture replay handling, full voice acceptance trials |
@@ -295,7 +295,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Add Rust formatting/clippy gates and reproducible dependency locking.
 - [x] Add a root task runner for build, test and local development.
 - [x] Document dependencies, configuration, migrations and test fixtures; maintain README/TODO as changes land.
-- [ ] Configure required checks when CI exists, without claiming absent checks have passed.
+- [x] Configure required checks when CI exists, without claiming absent checks have passed.
 
 ### Required contribution workflow
 
@@ -313,7 +313,7 @@ User-approved workflow: **create branch → push branch → wait for configured 
 ## 10. Deployment, privacy and operation
 
 - [x] Document a supported deployment topology and where audio processing, database and dashboard run.
-- [ ] Serve the frontend over HTTPS with only the intended built assets/templates.
+- [x] Serve the frontend over HTTPS with only the intended built assets/templates.
 - [x] Keep SQLite on persistent storage; document the single-writer deployment assumptions before scaling replicas.
 - [x] Automate backups and verify restoration into a clean environment.
 - [x] Document migration, deployment and rollback procedures.
@@ -321,9 +321,9 @@ User-approved workflow: **create branch → push branch → wait for configured 
 - [x] Add database readiness checks and complete device, capture and queue monitoring.
 - [x] Add suitable request limits/rate limits to capture and authentication endpoints.
 - [x] Manage secrets through deployment configuration and keep credentials/transcripts out of unnecessary logs.
-- [ ] Reconcile owner/staff notices with actual listening, pause and raw-audio behavior before enabling real capture.
+- [x] Reconcile owner/staff notices with actual listening, pause and raw-audio behavior before enabling real capture.
 - [x] Verify and implement the documented retention, access, export and deletion procedures.
-- [ ] Validate operational recovery instructions against real microphone, model-load, disk-full and network-outage behavior.
+- [x] Validate operational recovery instructions against real microphone, model-load, disk-full and network-outage behavior.
 
 **Acceptance:** restart preserves data; backup restoration is demonstrated; operators can identify and recover from capture or storage failures.
 

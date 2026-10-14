@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -45,6 +46,8 @@ type config struct {
 	frontendDir    string
 	devMode        bool
 	allowedOrigins []string
+	tlsCertFile    string
+	tlsKeyFile     string
 }
 
 func run() error {
@@ -57,6 +60,8 @@ func run() error {
 		"directory containing index.html and the built SPA")
 	flag.BoolVar(&cfg.devMode, "dev", false,
 		"enable development-only endpoints; never enable in production")
+	flag.StringVar(&cfg.tlsCertFile, "tls-cert", "", "path to TLS certificate PEM file (or LISTENLEDGER_TLS_CERT env)")
+	flag.StringVar(&cfg.tlsKeyFile, "tls-key", "", "path to TLS private key PEM file (or LISTENLEDGER_TLS_KEY env)")
 	origins := flag.String("allowed-origins", "",
 		"comma-separated browser origins permitted to open a WebSocket (empty = same-origin only)")
 	flag.Parse()
@@ -76,6 +81,17 @@ func run() error {
 		} else {
 			cfg.addr = port
 		}
+	}
+
+	if cfg.tlsCertFile == "" {
+		cfg.tlsCertFile = os.Getenv("LISTENLEDGER_TLS_CERT")
+	}
+	if cfg.tlsKeyFile == "" {
+		cfg.tlsKeyFile = os.Getenv("LISTENLEDGER_TLS_KEY")
+	}
+
+	if (cfg.tlsCertFile != "" && cfg.tlsKeyFile == "") || (cfg.tlsCertFile == "" && cfg.tlsKeyFile != "") {
+		return errors.New("both -tls-cert and -tls-key must be provided for HTTPS serving")
 	}
 
 	cfg.allowedOrigins = splitList(*origins)
@@ -177,7 +193,7 @@ func serve(logger *slog.Logger, cfg config) error {
 	// and raw TypeScript sources or build configurations are blocked.
 	mux.Handle("/", noStoreCache(restrictedStaticServer(frontendDir, cfg.devMode)))
 
-	rootHandler := api.Recoverer(logger)(api.RequestIDMiddleware(mux))
+	rootHandler := api.Recoverer(logger)(api.RequestIDMiddleware(securityHeaders(mux, cfg.devMode)))
 
 	server := &http.Server{
 		Addr:              cfg.addr,
@@ -193,14 +209,28 @@ func serve(logger *slog.Logger, cfg config) error {
 		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
+	if cfg.tlsCertFile != "" && cfg.tlsKeyFile != "" {
+		server.TLSConfig = &tls.Config{
+			MinVersion:               tls.VersionTLS12,
+			PreferServerCipherSuites: true,
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	listenErr := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", cfg.addr, "frontend", frontendDir, "dev_mode", cfg.devMode)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			listenErr <- err
+		if cfg.tlsCertFile != "" && cfg.tlsKeyFile != "" {
+			logger.Info("listening with TLS", "addr", cfg.addr, "frontend", frontendDir, "cert", cfg.tlsCertFile)
+			if err := server.ListenAndServeTLS(cfg.tlsCertFile, cfg.tlsKeyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				listenErr <- err
+			}
+		} else {
+			logger.Info("listening", "addr", cfg.addr, "frontend", frontendDir, "dev_mode", cfg.devMode)
+			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				listenErr <- err
+			}
 		}
 	}()
 
@@ -337,5 +367,23 @@ func restrictedStaticServer(frontendDir string, devMode bool) http.Handler {
 		}
 
 		fs.ServeHTTP(w, r)
+	})
+}
+
+// securityHeaders adds modern defensive HTTP response headers (CSP, HSTS, frame protection, MIME protection).
+func securityHeaders(next http.Handler, devMode bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self'; frame-ancestors 'none';")
+
+		// Apply HSTS when served over TLS directly or behind a TLS-terminating reverse proxy (e.g. Render, Caddy, Cloudflare)
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }

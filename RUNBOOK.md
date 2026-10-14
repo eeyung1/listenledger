@@ -135,11 +135,14 @@ cd edge
    - In accordance with Blueprint §17, raw PCM audio exists solely in ephemeral memory buffers during speech.
    - Upon detecting voice boundary silence or the closing phrase, the audio buffer is overwritten with zeros and deallocated.
    - Raw audio is **never** written to local disk or transmitted across network connections.
-2. **Transcript Retention**:
-   - Spoken transcripts (e.g., “Two Milo, four thousand naira. Thank you.”) are stored in the SQLite ledger to enable owner adjudication in the Review Queue.
-   - Transcripts can be audited and exported via `GET /api/transactions/export?format=csv`.
+2. **Transcript Retention & Purging**:
+   - Spoken transcripts (e.g., “Two Milo, four thousand naira. Thank you.”) are stored in the database solely for owner review and dispute adjudication.
+   - Operators can execute automated retention purging via `POST /api/settings/purge-transcripts?retention_days=30` (or passing `older_than` ISO timestamp), which permanently clears historical transcripts while preserving financial ledger movements, amounts, and product movements.
+   - Transcripts can be audited and exported prior to purging via `GET /api/transactions/export?format=csv`.
 3. **Spreadsheet Formula Injection Defense**:
    - CSV exports sanitize leading formula trigger characters (`=`, `+`, `-`, `@`, `\t`, `\r`) by prepending a single quote `'` to protect Excel and Google Sheets consumers.
+4. **Physical Counter Placard Requirement**:
+   - In physical shop trials, a standard customer notification placard must be placed beside the microphone informing customers that audio is processed ephemerally on-device and never recorded or uploaded.
 
 ---
 
@@ -165,20 +168,61 @@ When background noise or unfamiliar pronunciations lower recognition confidence:
 
 ## 6. Service Health Monitoring & Troubleshooting
 
-### 6.1 Health Check Endpoint
-Query `GET /healthz`:
-```json
-{
-  "status": "ok",
-  "ws_clients": 2,
-  "ws_events_dropped": 0
-}
-```
-- If `ws_events_dropped` is increasing, check client network connectivity or adjust client reconnect backoff.
+### 6.1 Health Check Endpoints
+- **Liveness probe (`GET /healthz`)**:
+  ```json
+  {
+    "status": "ok",
+    "ws_clients": 2,
+    "ws_events_dropped": 0
+  }
+  ```
+  If `ws_events_dropped` is increasing, check client network connectivity or adjust client reconnect backoff.
+- **Readiness probe (`GET /readyz`)**:
+  Verifies live database connectivity via active ping. Returns HTTP 200 `ready` when storage is connected, or HTTP 503 `unavailable` if database connection pool is unreachable.
 
-### 6.2 Request Tracing
+### 6.2 Request Tracing & Panic Recovery
 Every request carries an `X-Request-ID` header. If a transaction fails or panics, locate the matching request ID in structured server logs:
 ```sh
 journalctl -u listenledger -f | grep "req_..."
 ```
 The server includes built-in panic recovery (`api.Recoverer`) preventing server crashes from uncaught handler exceptions.
+
+### 6.3 Operational Failure Modes & Recovery Procedures
+
+#### A. Microphone Disconnect / Unplugged Hardware
+- **Symptoms**: Edge log reports `Microphone capture inactive or disconnected`, `EdgeHealthReport.microphone_active = false`.
+- **Mitigation & Recovery**:
+  1. Inspect physical USB cable connection to the microphone.
+  2. Run `arecord -l` to verify audio device enumeration.
+  3. Edge engine will automatically attempt to reopen stream or prompt restart.
+  4. Staff should immediately use the dashboard **Manual Entry fallback** (`Add Transaction` in `#/transactions`) to record counter sales until the hardware is restored.
+
+#### B. Speech Model Initialization or Load Failure
+- **Symptoms**: Edge engine fails startup or reports `stt_model_loaded = false`.
+- **Mitigation & Recovery**:
+  1. Check model weights path in `LISTENLEDGER_STT_MODEL`.
+  2. Verify file integrity using `edge/scripts/download_model.sh tiny.en` to validate the SHA256 checksum.
+  3. Ensure sufficient RAM (minimum 512MB free memory for `tiny.en` quantization).
+
+#### C. Network Outage & Offline Capture Replay
+- **Symptoms**: Edge engine cannot reach orchestrator; dashboard indicates `Offline / Reconnecting`.
+- **Mitigation & Recovery**:
+  1. Staff continue speaking normal sales and restocking transactions at the counter.
+  2. Edge engine stores captures in the durable local queue (`~/.listenledger/queue.bin`, capacity 10,000 captures).
+  3. Upon network restoration, the background delivery worker flushes the queue with exponential backoff and jitter.
+  4. The server validates each capture against its persistent `Idempotency-Key` and intake hash, guaranteeing that no transaction or stock movement is ever duplicated.
+
+#### D. Disk Space Warning & Queue Bounds
+- **Symptoms**: Edge health report alerts `Queue capacity warning (90% full)`.
+- **Mitigation & Recovery**:
+  1. Check disk utilization (`df -h`).
+  2. Restore network connectivity to allow pending queue drain.
+  3. Bounded queue protects against out-of-memory or unbounded disk consumption by enforcing strict capacity limits.
+
+#### E. Production HTTPS & Security Headers
+- ListenLedger supports direct TLS serving as well as reverse-proxy termination:
+  - **Direct HTTPS**: Launch backend with `-tls-cert /path/to/cert.pem -tls-key /path/to/key.pem` (or environment variables `LISTENLEDGER_TLS_CERT` and `LISTENLEDGER_TLS_KEY`). The server configures TLS 1.2+ minimum version and secure ciphers.
+  - **Reverse Proxy**: Behind Caddy, Nginx, Render, or Cloudflare, the server respects `X-Forwarded-Proto: https` and applies strict HSTS (`Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`).
+  - **Defensive Headers**: All HTTP responses include `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and Content Security Policy (CSP).
+
