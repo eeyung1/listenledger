@@ -67,8 +67,50 @@ Even with high-precision acoustic models, ambiguous or low-confidence voice capt
 
 | Situation | Immediate Protocol | System Behavior |
 |---|---|---|
-| **Internet Outage** | Continue speaking sales normally with the closing phrase. | The edge Raspberry Pi stores encrypted captures in a local SQLite burst queue. Once WiFi restores, captures flush to the server automatically with idempotency keys. |
+| **Internet Outage** | Continue speaking sales normally with the closing phrase. | The edge capture device stores captures in a capacity-limited local JSON-lines queue (`~/.listenledger/queue.bin`). Once connectivity restores, captures flush to the server automatically with exponential backoff and idempotency deduplication. |
 | **Accidental Double-Speech** | No action required. | Duplicate retry protections reject replayed identical audio bursts without double-counting inventory. |
-| **Microphone Red Light Off** | Check USB connection or reboot Raspberry Pi. | Use manual entry on the dashboard (`Add Transaction` in `#transactions`) until hardware reboot completes. |
+| **Microphone Red Light Off** | Check USB connection or reboot edge device. | Use manual counter entry on the dashboard (`Add Transaction` in `#transactions`) until hardware reboot completes. |
 | **New Product Added to Shop** | Use **Import CSV** or **Add Product** in `#inventory`. | Provide common local nicknames under **Aliases** so staff speech matches immediately without retraining the AI model. |
+
+---
+
+## 5. Counter Privacy Notice & Customer Placard Protocol
+
+Customer transparency and privacy trust are paramount. A prominent counter placard must be placed beside the microphone on every sales counter.
+
+### Official Physical Placard Copy
+
+```
+┌────────────────────────────────────────────────────────┐
+│            LISTENLEDGER VOICE-ASSISTED COUNTER         │
+│                                                        │
+│  This counter uses on-device voice recognition to      │
+│  automatically log sales and stock movements.          │
+│                                                        │
+│  • Privacy Guaranteed: Speech is processed locally in  │
+│    temporary memory and deleted immediately.           │
+│  • No raw audio recordings are ever stored or sent     │
+│    to the cloud.                                       │
+│  • Only line items, quantities, and totals are logged. │
+│  • Spoken transcripts are purged after 30 days.        │
+└────────────────────────────────────────────────────────┘
+```
+
+### Customer Communication Script
+If a customer inquires about the microphone or counter device:
+- **Staff Response**: *"It's an automated digital receipt helper. It only listens for the items and total when we conclude the sale with 'Thank you'. It doesn't save any voice recordings or upload audio anywhere."*
+
+### Physical Pause / Mute Button Protocol
+- When staff take private phone calls, resolve personal matters, or step away from the counter:
+  - Press the hardware **Mute / Pause button** on the microphone (the LED indicator turns solid red / session state displays `PAUSED`).
+  - While paused, the edge engine drops all audio input and halts capture session framing.
+  - Press again to un-mute when resuming customer service.
+
+---
+
+## 6. Historical Data Retention & Purging
+
+- **30-Day Transcript Cutoff**: Spoken transcripts attached to historical transactions are maintained solely for owner review and dispute adjudication.
+- **Automated Purging**: Store owners or automated maintenance jobs trigger transcript purging (`POST /api/settings/purge-transcripts?retention_days=30`) which permanently blanks historical transcripts while preserving ledger amounts, SKUs, and stock audit trails.
+
 
