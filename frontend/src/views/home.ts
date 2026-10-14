@@ -28,6 +28,7 @@ import {
 } from "../api.js";
 import {
   clear,
+  computeKPIs,
   el,
   formatMoney,
   formatQuantity,
@@ -35,7 +36,6 @@ import {
   formatTime,
   hook,
   isLowStock,
-  isToday,
   setText,
 } from "../format.js";
 import {
@@ -208,37 +208,11 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   }
 
   function renderKPIs(): void {
-    if (state.summary !== undefined) {
-      setText(hook(root, "kpi-sales-today"), formatMoney(state.summary.today_sales_amount));
-      setText(hook(root, "kpi-transaction-count"), String(state.summary.today_sales_count));
-      setText(hook(root, "kpi-review-count"), String(state.summary.pending_reviews));
-      setText(hook(root, "kpi-low-stock-count"), String(state.summary.low_stock_count));
-      return;
-    }
-
-    const todaySales = state.transactions.filter(
-      (transaction) =>
-        transaction.type === "sale" &&
-        transaction.status === "confirmed" &&
-        isToday(transaction.occurred_at),
-    );
-
-    // Summed as integers in minor units; the only division happens when the
-    // total is formatted for display.
-    const revenue = todaySales.reduce((total, transaction) => total + transaction.amount.amount, 0);
-    const currency = todaySales[0]?.amount.currency ?? "NGN";
-
-    const awaitingReview = state.transactions.filter(
-      (transaction) => transaction.status === "review_required",
-    ).length;
-
-    setText(hook(root, "kpi-sales-today"), formatMoney({ amount: revenue, currency }));
-    setText(hook(root, "kpi-transaction-count"), String(todaySales.length));
-    setText(hook(root, "kpi-review-count"), String(awaitingReview));
-    setText(
-      hook(root, "kpi-low-stock-count"),
-      String(state.products.filter(isLowStock).length),
-    );
+    const kpis = computeKPIs(state.transactions, state.products, state.summary);
+    setText(hook(root, "kpi-sales-today"), formatMoney(kpis.revenue));
+    setText(hook(root, "kpi-transaction-count"), String(kpis.salesCount));
+    setText(hook(root, "kpi-review-count"), String(kpis.reviewCount));
+    setText(hook(root, "kpi-low-stock-count"), String(kpis.lowStockCount));
   }
 
   function feedRow(transaction: Transaction): HTMLLIElement {

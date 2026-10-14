@@ -11,8 +11,6 @@
 package api
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -147,18 +145,18 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	return true
 }
 
-// newID mints a prefixed identifier.
+// newID mints a prefixed sortable ULID identifier.
 //
 // Identifiers are generated here rather than by the database so the same value
 // can be used in the response, in the event published to dashboards, and in
 // logs without a read-back. The prefix keeps a stray ID recognisable in a log
-// line.
+// line, while the ULID payload guarantees chronological sortability and uniqueness.
 func newID(prefix string) (string, error) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	ulid, err := generateULID(time.Now())
+	if err != nil {
 		return "", fmt.Errorf("api: generate id: %w", err)
 	}
-	return prefix + "_" + hex.EncodeToString(raw[:]), nil
+	return prefix + "_" + ulid, nil
 }
 
 type transactionsResponse struct {

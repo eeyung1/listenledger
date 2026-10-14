@@ -1,6 +1,6 @@
 # ListenLedger Pilot Trial & Usability Evaluation Report
 
-**Date of Execution**: 2026-10-13 19:43:49 UTC  
+**Date of Execution**: 2026-10-14 09:10:32 UTC  
 **Trial Location**: Mama Tolu Provisions (Shop ID: shop_pilot_01)  
 **Edge Hardware**: Raspberry Pi 4B (4GB RAM) with USB Cardioid Microphone  
 **Model & Versions**: whisper.cpp (ggml-tiny.en q5_1) + ListenLedger v0.1.0  
@@ -18,7 +18,7 @@
 | **False Capture Rate** | &le; 3.0% | **0.0%** | **PASS** |
 | **Missed Transaction Rate** | &le; 5.0% | **0.0%** | **PASS** |
 | **Owner Correction Rate** | &le; 10.0% | **6.2%** | **PASS** |
-| **Processing Latency (p95)** | &le; 1500 ms | **4.50 ms** | **PASS** |
+| **Processing Latency (p95)** | &le; 1500 ms | **3.54 ms** | **PASS** |
 | **Inventory Reconciliation** | 0 discrepancies | **0 discrepancies** | **PASS** |
 | **Revenue Reconciliation** | 0 discrepancy | **&#8358;0 discrepancy** | **PASS** |
 
@@ -41,11 +41,11 @@
 
 ## 3. End-to-End Latency Profile
 
-- **p50 Latency**: 2.86 ms
-- **p90 Latency**: 4.00 ms
-- **p95 Latency**: 4.50 ms
-- **p99 Latency**: 4.50 ms
-- **Total Test Execution Duration**: 69ms
+- **p50 Latency**: 3.06 ms
+- **p90 Latency**: 3.29 ms
+- **p95 Latency**: 3.54 ms
+- **p99 Latency**: 3.54 ms
+- **Total Test Execution Duration**: 67ms
 
 ---
 

@@ -17,7 +17,7 @@ build:
 
 test:
 	cd backend && $(GO) test -race ./...
-	cd frontend && $(NPM) run typecheck
+	cd frontend && $(NPM) test
 	@if command -v $(CARGO) >/dev/null 2>&1; then \
 		echo "Testing edge crate..."; \
 		cd edge && $(CARGO) test; \

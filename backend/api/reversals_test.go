@@ -220,3 +220,59 @@ func TestProductMovementsAndStockAdjustmentEndpoints(t *testing.T) {
 		t.Fatalf("expected first movement delta -5, got %d", resMovements.Movements[0].Delta)
 	}
 }
+
+func TestAdjustProductStock_PackagingUnitConversion(t *testing.T) {
+	store, handler, shopID := setupCaptureTest(t)
+	ctx := context.Background()
+
+	milo, err := store.GetProductBySKU(ctx, shopID, "MILO-500")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Audit count adjustment specified in cartons (3 cartons = 36 packs)
+	adjustPayload := `{"quantity":3,"unit":"carton"}`
+	reqAdjust := httptest.NewRequest(http.MethodPost, "/api/products/"+milo.ID+"/adjust", bytes.NewBufferString(adjustPayload))
+	recAdjust := httptest.NewRecorder()
+	handler.ServeHTTP(recAdjust, reqAdjust)
+
+	if recAdjust.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", recAdjust.Code, recAdjust.Body.String())
+	}
+
+	var resAdjust struct {
+		Product     models.Product     `json:"product"`
+		Transaction models.Transaction `json:"transaction"`
+	}
+	if err := json.Unmarshal(recAdjust.Body.Bytes(), &resAdjust); err != nil {
+		t.Fatal(err)
+	}
+
+	if resAdjust.Product.Quantity != 36 {
+		t.Fatalf("expected adjusted quantity 36 packs (3 cartons x 12), got %d", resAdjust.Product.Quantity)
+	}
+	// Initial was 20, adjusted to 36 -> delta magnitude is 16
+	if resAdjust.Transaction.Quantity != 16 || resAdjust.Transaction.Type != models.TypeRestock {
+		t.Fatalf("expected audit restock txn of 16 packs, got %+v", resAdjust.Transaction)
+	}
+
+	// 2. Reject unsupported unit conversion (e.g. bottle for milo)
+	badUnitPayload := `{"quantity":2,"unit":"bottle"}`
+	reqBadUnit := httptest.NewRequest(http.MethodPost, "/api/products/"+milo.ID+"/adjust", bytes.NewBufferString(badUnitPayload))
+	recBadUnit := httptest.NewRecorder()
+	handler.ServeHTTP(recBadUnit, reqBadUnit)
+
+	if recBadUnit.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for unsupported unit conversion, got %d", recBadUnit.Code)
+	}
+
+	// 3. Reject invalid unit
+	invalidUnitPayload := `{"quantity":2,"unit":"invalid_unit"}`
+	reqInvalid := httptest.NewRequest(http.MethodPost, "/api/products/"+milo.ID+"/adjust", bytes.NewBufferString(invalidUnitPayload))
+	recInvalid := httptest.NewRecorder()
+	handler.ServeHTTP(recInvalid, reqInvalid)
+
+	if recInvalid.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for invalid unit vocabulary, got %d", recInvalid.Code)
+	}
+}

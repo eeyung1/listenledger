@@ -1,5 +1,11 @@
 # TODO — ListenLedger
 
+## Canonical Sortable Identifiers (ULID), Packaging Stock Conversions & Frontend Test Suite increment (14 October 2026) — MILESTONE 11 COMPLETE
+
+Settled canonical sortable identifiers across the backend orchestrator (`backend/api/ulid.go`, `backend/api/ulid_test.go`, and `newID` in `backend/api/api.go`): replaced ad-hoc 16-byte hex IDs with 26-character lowercase Crockford Base32 ULIDs (48-bit millisecond timestamp + 80-bit monotonic entropy), preserving domain prefixes (`txn_`, `prd_`, `cap_`, `dev_`, `rcp_`) while ensuring strict chronological sortability, millisecond monotonicity, and concurrent uniqueness. Implemented direct packaging unit conversion for inventory adjustments: added `AdjustStockPackaging` in `backend/storage/products.go` and wired optional `unit` conversion into `POST /api/products/{id}/adjust` (`backend/api/products.go`) using `models.BaseQuantity` to seamlessly convert bulk containers (e.g., cartons, crates) to base catalogue units with clear audit reason annotations. Implemented comprehensive frontend automated test suite (`frontend/test/`) using native Node.js test runner covering KPI calculations (`kpi.test.mjs`), review queue action dispatches and error handling (`review_queue.test.mjs`), and WebSocket connection sequence resync and transaction list deduplication (`resync_dedup.test.mjs`), integrated into `make test` and GitHub Actions CI.
+
+Next: Target prototype edge hardware verification, Whisper.cpp model bundling, and PostgreSQL production deployment.
+
 ## Multi-Line Receipt Atomicity, Deterministic Replay Hashing, Edge Continuous Sessions & E2E Verification increment (13 October 2026) — MILESTONE 10 COMPLETE
 
 Implemented multi-line receipt acceptance atomicity (`RecordReceiptMovements` in `backend/storage/ledger.go`): processing all lines of a receipt within a single SQLite transaction, rolling back atomically if any line fails (`ErrInsufficientStock`, `ErrConflict`, `ErrNotFound`, `ErrCurrency`, `ErrInvalidMovement`) with zero partial stock or ledger mutations, and emitting WebSocket events only after transaction commit. Implemented deterministic capture replay hashing (`backend/api/captures.go`): deriving idempotency fingerprints directly from intake payload anchors (`req.CaptureID`, `line.ProductName`, `line.Quantity`, `line.Unit`, `line.Amount`) rather than post-validation timestamps/IDs to protect replay deduplication against catalogue pricing or confidence threshold drift. Hardened the Rust edge capture engine (`edge/`): added audio device listing (`list_audio_devices`), `AudioInputSource` trait with `MockAudioSource`, `WavAudioSource`, and `AudioStreamSource`, bounded `AudioRingBuffer` preventing memory leaks with secure zeroing on discard, `CaptureSession` state machine (`Listening`, `ActiveCapture`, `BoundaryDetected`, `TimedOut`, `Paused`) with a 15-second incomplete-capture timeout, obvious status indicators, and immediate secure audio cleanup. Added configurable boundary phrases (`BoundaryConfig`) and multi-line item extraction in `edge/src/extractor.rs`, local CLI/whisper command runner (`CommandSpeechRecognizer`) in `edge/src/stt.rs`, and a continuous capture session loop with signal handling in `edge/src/main.rs`. Built comprehensive end-to-end integration and concurrency test suite (`backend/api/e2e_edge_test.go`) covering sale captures, held review captures, multi-line receipts, atomicity rollback on line failure, idempotency replay with catalogue drift, cross-shop isolation, and WebSocket reconnect recovery.
@@ -94,18 +100,14 @@ Implemented automated controlled shop trial benchmark suite (`backend/eval/`), v
 
 Remaining:
 
-- [ ] **IDs are minted ad hoc, not settled.** `api.newID(prefix)` returns
-      `prd_`/`txn_` plus 16 random bytes as hex. That is collision-safe and
-      greppable, but it is not the ULID this file previously recommended, and it
-      is not sortable — so a ledger's creation order is not recoverable from the
-      identifier. Settle it before the edge engine starts posting captures, and
-      change it in one place (`api.newID`), since storage never invents IDs.
-- [ ] **Unit conversion is unimplemented.** `AdjustStock` takes a delta in the
-      product's base unit; nothing converts "3 cartons" using
-      `Product.Packaging` yet. Until that exists, a restock spoken in cartons
-      must not be allowed near stock levels. The seed data deliberately contains
-      such a transaction (`txn_seed_0005`, 3 cartons of Milo against a product
-      stocked in packs) so the gap is visible rather than latent.
+- [x] **Canonical Sortable Identifiers (ULID) settled.** `api.newID(prefix)` generates
+      Crockford Base32-encoded 128-bit ULIDs (48-bit millisecond timestamp + 80-bit
+      monotonic entropy), preserving prefix conventions (`txn_`, `prd_`, `cap_`,
+      `dev_`, `rcp_`), making IDs chronologically and lexicographically sortable.
+- [x] **Direct Packaging Unit Conversion for Stock Adjustments.** Added
+      `AdjustStockPackaging` to `backend/storage/products.go` and wired optional unit
+      conversions in `POST /api/products/{id}/adjust` (`backend/api/products.go`)
+      using `models.BaseQuantity`.
 - [x] **Resolving a review must be atomic.** `ConfirmReviewTransaction` changes
       the status, updates quantity in one transaction, and publishes the event.
 - [x] Store tests: migration from empty, migration idempotency, shop isolation

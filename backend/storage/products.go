@@ -210,6 +210,46 @@ func (s *Store) AdjustStock(ctx context.Context, shopID, productID string, delta
 	return product, nil
 }
 
+// AdjustStockPackaging converts quantity in the given unit into the product's base unit
+// using models.BaseQuantity, applies the signed delta (positive for restock / incoming, negative for sale / outgoing)
+// to the product's stock, and returns the updated product.
+//
+// If unit is empty or equal to product.BaseUnit, quantity is used directly as base units.
+func (s *Store) AdjustStockPackaging(ctx context.Context, shopID, productID string, quantity int, unit models.Unit, isSale bool) (models.Product, error) {
+	if shopID == "" {
+		return models.Product{}, errors.New("storage: AdjustStockPackaging requires a shop_id")
+	}
+	if productID == "" {
+		return models.Product{}, errors.New("storage: AdjustStockPackaging requires a product_id")
+	}
+	if quantity < 0 {
+		return models.Product{}, errors.New("storage: quantity cannot be negative")
+	}
+	if quantity == 0 {
+		return s.GetProductByID(ctx, shopID, productID)
+	}
+
+	product, err := s.GetProductByID(ctx, shopID, productID)
+	if err != nil {
+		return models.Product{}, err
+	}
+
+	delta := quantity
+	if unit != "" && unit != product.BaseUnit {
+		converted, err := models.BaseQuantity(product, quantity, unit)
+		if err != nil {
+			return models.Product{}, fmt.Errorf("storage: adjust stock packaging: %w", err)
+		}
+		delta = converted
+	}
+
+	if isSale {
+		delta = -delta
+	}
+
+	return s.AdjustStock(ctx, shopID, productID, delta)
+}
+
 func (s *Store) queryProducts(ctx context.Context, q querier, query string, args ...any) ([]models.Product, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {

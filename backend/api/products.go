@@ -476,8 +476,9 @@ func (s *Server) getProductMovements(w http.ResponseWriter, r *http.Request, id 
 }
 
 type adjustStockRequest struct {
-	Quantity int    `json:"quantity"`
-	Reason   string `json:"reason"`
+	Quantity int         `json:"quantity"`
+	Reason   string      `json:"reason"`
+	Unit     models.Unit `json:"unit,omitempty"`
 }
 
 type adjustStockResponse struct {
@@ -500,7 +501,37 @@ func (s *Server) adjustProductStock(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
-	product, txn, err := s.store.AdjustProductStock(r.Context(), shopID, id, req.Quantity, req.Reason)
+	targetQty := req.Quantity
+	reason := req.Reason
+
+	if req.Unit != "" {
+		if !req.Unit.Valid() {
+			writeError(w, http.StatusBadRequest, "invalid unit")
+			return
+		}
+		p, err := s.store.GetProductByID(r.Context(), shopID, id)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "product not found")
+				return
+			}
+			s.fail(w, r, "adjust product stock: fetch product", err)
+			return
+		}
+		if req.Quantity > 0 && req.Unit != p.BaseUnit {
+			converted, err := models.BaseQuantity(p, req.Quantity, req.Unit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid unit conversion: %v", err))
+				return
+			}
+			targetQty = converted
+			if strings.TrimSpace(reason) == "" {
+				reason = fmt.Sprintf("Physical stock count adjustment (%d %s -> %d %s)", req.Quantity, req.Unit, targetQty, p.BaseUnit)
+			}
+		}
+	}
+
+	product, txn, err := s.store.AdjustProductStock(r.Context(), shopID, id, targetQty, reason)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "product not found")

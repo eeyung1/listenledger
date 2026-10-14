@@ -31,6 +31,7 @@ import {
   type Unit,
 } from "../api.js";
 import {
+  applyTransactionToList,
   cell,
   clear,
   el,
@@ -43,6 +44,7 @@ import {
   formatTime,
   hook,
   setText,
+  sortTransactions,
 } from "../format.js";
 import { CONNECTION_STATUS_EVENT, getSocket, type ConnectionStatusDetail } from "../ws.js";
 import type { ViewCleanup } from "./index.js";
@@ -61,14 +63,6 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   let pageOffset = 0;
   const pageSize = 50;
   let totalCount = 0;
-
-  function sortTransactions(list: Transaction[]): void {
-    list.sort((a, b) => {
-      const timeDiff = new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime();
-      if (timeDiff !== 0) return timeDiff;
-      return b.id.localeCompare(a.id);
-    });
-  }
 
   const filters: Filters = { type: "", status: "", receipt_id: "" };
 
@@ -763,21 +757,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
 
   /** Inserts or replaces a transaction, keeping the list newest-first and bounded. */
   function applyTransaction(transaction: Transaction, isNew: boolean): void {
-    const index = transactions.findIndex((existing) => existing.id === transaction.id);
-    if (index === -1) {
-      transactions.push(transaction);
-      if (isNew) {
-        totalCount++;
-      }
-    } else {
-      transactions[index] = transaction;
-    }
-
-    sortTransactions(transactions);
-    if (transactions.length > MAX_TRANSACTION_LIMIT) {
-      transactions.length = MAX_TRANSACTION_LIMIT;
-    }
-
+    const res = applyTransactionToList(transactions, transaction, isNew, MAX_TRANSACTION_LIMIT);
+    totalCount += res.totalIncrement;
     render();
   }
 
