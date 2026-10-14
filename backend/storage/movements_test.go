@@ -221,3 +221,78 @@ func TestAdjustProductStock(t *testing.T) {
 		t.Fatalf("expected no-op adjustment, got txn %+v, err %v", txn, err)
 	}
 }
+
+func TestAdjustStockPackaging(t *testing.T) {
+	s, _ := ledgerFixture(t)
+	ctx := context.Background()
+
+	// Initial stock is 20 packs. 1 carton = 12 packs.
+	stock(t, s, 20)
+
+	// 1. Restock 2 cartons -> +24 packs -> 44 packs
+	prod, err := s.AdjustStockPackaging(ctx, "a", "amilo", 2, models.UnitCarton, false)
+	if err != nil {
+		t.Fatalf("AdjustStockPackaging restock cartons failed: %v", err)
+	}
+	if prod.Quantity != 44 {
+		t.Fatalf("expected 44 packs after 2 carton restock, got %d", prod.Quantity)
+	}
+	stock(t, s, 44)
+
+	// 2. Sale 1 carton -> -12 packs -> 32 packs
+	prod, err = s.AdjustStockPackaging(ctx, "a", "amilo", 1, models.UnitCarton, true)
+	if err != nil {
+		t.Fatalf("AdjustStockPackaging sale carton failed: %v", err)
+	}
+	if prod.Quantity != 32 {
+		t.Fatalf("expected 32 packs after 1 carton sale, got %d", prod.Quantity)
+	}
+	stock(t, s, 32)
+
+	// 3. Restock 5 base units (UnitPack) directly -> +5 packs -> 37 packs
+	prod, err = s.AdjustStockPackaging(ctx, "a", "amilo", 5, models.UnitPack, false)
+	if err != nil {
+		t.Fatalf("AdjustStockPackaging base unit failed: %v", err)
+	}
+	if prod.Quantity != 37 {
+		t.Fatalf("expected 37 packs, got %d", prod.Quantity)
+	}
+	stock(t, s, 37)
+
+	// 4. Empty unit defaults to base unit -> -3 packs -> 34 packs
+	prod, err = s.AdjustStockPackaging(ctx, "a", "amilo", 3, "", true)
+	if err != nil {
+		t.Fatalf("AdjustStockPackaging empty unit failed: %v", err)
+	}
+	if prod.Quantity != 34 {
+		t.Fatalf("expected 34 packs, got %d", prod.Quantity)
+	}
+	stock(t, s, 34)
+
+	// 5. Zero quantity is a no-op
+	prod, err = s.AdjustStockPackaging(ctx, "a", "amilo", 0, models.UnitCarton, false)
+	if err != nil {
+		t.Fatalf("AdjustStockPackaging zero qty failed: %v", err)
+	}
+	if prod.Quantity != 34 {
+		t.Fatalf("expected 34 packs unchanged, got %d", prod.Quantity)
+	}
+
+	// 6. Insufficient stock refusal: sell 3 cartons (36 packs) when only 34 available
+	_, err = s.AdjustStockPackaging(ctx, "a", "amilo", 3, models.UnitCarton, true)
+	if !errors.Is(err, ErrInsufficientStock) {
+		t.Fatalf("expected ErrInsufficientStock, got %v", err)
+	}
+
+	// 7. Unsupported unit conversion fails
+	_, err = s.AdjustStockPackaging(ctx, "a", "amilo", 2, models.UnitBottle, false)
+	if err == nil {
+		t.Fatalf("expected error for unsupported packaging unit conversion, got nil")
+	}
+
+	// 8. Cross-shop isolation: shop "b" cannot adjust shop "a"'s product
+	_, err = s.AdjustStockPackaging(ctx, "b", "amilo", 1, models.UnitCarton, false)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-shop adjustment, got %v", err)
+	}
+}

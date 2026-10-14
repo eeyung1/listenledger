@@ -58,6 +58,9 @@ Source reviewed on **13 October 2026**, at implementation commit `322d1c7`. The 
 - [x] Deployment/privacy runbook (`RUNBOOK.md`) and staff guide (`STAFF_TRAINING.md`) exist; instructions require reconciliation with the incomplete audio, queue and manual-entry implementation.
 - [x] Quantized Whisper model weight downloader and checksum verifier (`edge/scripts/download_model.sh`).
 - [x] Root Makefile with `build`, `test`, `check`, `dev`, `clean`, `verify-backup`, `eval`, and `trial` targets.
+- [x] Canonical sortable Crockford Base32 ULID identifiers across backend entities (`backend/api/ulid.go`, `api.newID`).
+- [x] Direct packaging unit conversion for stock adjustments (`AdjustStockPackaging`, `POST /api/products/{id}/adjust`).
+- [x] Frontend automated test suite covering KPI calculations, review queue action dispatches, and connection resync deduplication (`frontend/test/`).
 - [x] Catalogue CSV/JSON import API, downloadable CSV template and frontend import form.
 - [x] Scripted backend evaluation harness (`backend/eval/`); it is not a physical-shop trial.
 - [x] SQLite-to-Supabase migration plan merged in PR #9; implementation remains pending.

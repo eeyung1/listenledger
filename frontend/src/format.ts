@@ -14,7 +14,7 @@
  *     a tag. This is why the views build elements rather than HTML strings.
  */
 
-import type { Money, Product, Transaction, TransactionStatus, Unit } from "./api.js";
+import type { DailySummary, Money, Product, Transaction, TransactionStatus, Unit } from "./api.js";
 
 /** Minor units per major unit, for the two-decimal currencies in V1. */
 const MINOR_UNITS_PER_MAJOR = 100;
@@ -205,4 +205,94 @@ export function setHidden(element: Element | null, hidden: boolean): void {
 /** Writes text into an element if both the element and the value exist. */
 export function setText(element: Element | null, text: string): void {
   if (element !== null) element.textContent = text;
+}
+
+export interface ComputedKPIs {
+  readonly revenue: Money;
+  readonly salesCount: number;
+  readonly reviewCount: number;
+  readonly lowStockCount: number;
+}
+
+/**
+ * Computes today's overview KPIs.
+ * When daily summary is provided (server-authoritative), it takes precedence.
+ * Otherwise, derives metrics from the locally held transactions and products.
+ */
+export function computeKPIs(
+  transactions: readonly Transaction[],
+  products: readonly Product[],
+  summary?: DailySummary,
+): ComputedKPIs {
+  if (summary !== undefined) {
+    return {
+      revenue: summary.today_sales_amount,
+      salesCount: summary.today_sales_count,
+      reviewCount: summary.pending_reviews,
+      lowStockCount: summary.low_stock_count,
+    };
+  }
+
+  const todaySales = transactions.filter(
+    (t) => t.type === "sale" && t.status === "confirmed" && isToday(t.occurred_at),
+  );
+  const revenueAmount = todaySales.reduce((total, t) => total + t.amount.amount, 0);
+  const currency = todaySales[0]?.amount.currency ?? "NGN";
+  const reviewCount = transactions.filter((t) => t.status === "review_required").length;
+  const lowStockCount = products.filter(isLowStock).length;
+
+  return {
+    revenue: { amount: revenueAmount, currency },
+    salesCount: todaySales.length,
+    reviewCount,
+    lowStockCount,
+  };
+}
+
+/**
+ * Sorts transactions deterministically: newest first by occurred_at, with id as tie-breaker.
+ */
+export function sortTransactions(list: Transaction[]): void {
+  list.sort((a, b) => {
+    const timeDiff = new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime();
+    if (timeDiff !== 0) return timeDiff;
+    return b.id.localeCompare(a.id);
+  });
+}
+
+export interface ApplyTransactionResult {
+  readonly isDuplicate: boolean;
+  readonly totalIncrement: number;
+}
+
+/**
+ * Inserts or updates a transaction in an existing list, deduplicating by ID,
+ * sorting deterministically, and enforcing an upper bound.
+ */
+export function applyTransactionToList(
+  list: Transaction[],
+  transaction: Transaction,
+  isNew: boolean,
+  limit?: number,
+): ApplyTransactionResult {
+  const index = list.findIndex((existing) => existing.id === transaction.id);
+  let isDuplicate = false;
+  let totalIncrement = 0;
+
+  if (index === -1) {
+    list.push(transaction);
+    if (isNew) {
+      totalIncrement = 1;
+    }
+  } else {
+    list[index] = transaction;
+    isDuplicate = true;
+  }
+
+  sortTransactions(list);
+  if (limit !== undefined && list.length > limit) {
+    list.length = limit;
+  }
+
+  return { isDuplicate, totalIncrement };
 }
