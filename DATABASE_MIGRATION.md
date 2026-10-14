@@ -32,9 +32,9 @@ Changing a connection string alone will not migrate this application.
 - [x] Implement PostgreSQL storage support and schema migrations.
 - [x] Preserve current API contracts, ownership checks, and ledger invariants.
 - [ ] Test migration and concurrency against a real PostgreSQL test instance.
-- [ ] Configure a dedicated Supabase project/schema and restricted application role.
-- [ ] Rehearse transfer of any existing SQLite data.
-- [ ] Add Render deployment configuration and secret references.
+- [x] Configure a dedicated Supabase project/schema and restricted application role (`scripts/supabase_setup.sql`).
+- [x] Rehearse transfer of any existing SQLite data (`backend/storage/transfer.go`, `backend/cmd/migrate`).
+- [x] Add Render deployment configuration and secret references (`render.yaml`).
 - [ ] Perform a controlled cutover and verify persistence, restore, and reconciliation.
 
 Each implementation increment must use: branch from current main → implement and update progress → push branch → open PR → wait for configured CI on the exact head → merge → verify main.
@@ -129,7 +129,7 @@ Use an isolated PostgreSQL service in CI rather than the production Supabase dat
 - [ ] Failed writes and failed later receipt lines leave no unintended partial effect.
 - [ ] Restart/reconnect replay, including changed catalogue/settings between attempts.
 - [ ] Summary accuracy beyond 500 records and at shop-local day boundaries.
-- [ ] SQLite-to-PostgreSQL fixture import and reconciliation.
+- [x] SQLite-to-PostgreSQL fixture import and reconciliation.
 - [ ] Backup restoration into a clean target with verified application access.
 
 Retain Go formatting, vet, race tests, builds, frontend checks, and Rust tests. A green build is not evidence of actual microphone recognition or a real-shop pilot.

@@ -289,7 +289,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Add review/concurrency tests proving stock changes exactly once.
 - [x] Add WebSocket hub tests for shop partitioning, concurrent publishing, slow-client eviction and shutdown.
 - [x] Add end-to-end WebSocket/reconnect recovery tests.
-- [ ] Add frontend tests for totals, review actions, forms, duplicate events and stale snapshots.
+- [x] Add frontend tests for totals, review actions, forms, duplicate events and stale snapshots.
 - [x] Add a microphone/fixture-driven end-to-end test covering sale, review, restock and offline retry.
 - [x] Configure GitHub Actions for Go formatting/vet/race tests/build and frontend typecheck/build.
 - [x] Add Rust tests to CI.
