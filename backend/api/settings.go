@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/eeyung1/listenledger-backend/storage"
 	"github.com/eeyung1/listenledger-backend/ws"
@@ -88,4 +89,60 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 
 	s.publish(w, r, shopID, ws.EventSettingsUpdated, updated)
 	writeJSON(w, http.StatusOK, updated)
+}
+
+type purgeTranscriptsRequest struct {
+	RetentionDays *int    `json:"retention_days"`
+	OlderThan     *string `json:"older_than"`
+}
+
+type purgeTranscriptsResponse struct {
+	PurgedCount int64  `json:"purged_count"`
+	OlderThan   string `json:"older_than"`
+}
+
+func (s *Server) handlePurgeTranscripts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	shopID, ok := s.shopID(w, r)
+	if !ok {
+		return
+	}
+
+	var req purgeTranscriptsRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+	}
+
+	var cutoff time.Time
+	if req.OlderThan != nil && *req.OlderThan != "" {
+		parsed, err := time.Parse(time.RFC3339, *req.OlderThan)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid older_than timestamp (expected RFC3339)")
+			return
+		}
+		cutoff = parsed
+	} else if req.RetentionDays != nil && *req.RetentionDays > 0 {
+		cutoff = time.Now().UTC().AddDate(0, 0, -*req.RetentionDays)
+	} else {
+		// Default to 30 days retention policy
+		cutoff = time.Now().UTC().AddDate(0, 0, -30)
+	}
+
+	purged, err := s.store.PurgeTranscripts(r.Context(), shopID, cutoff)
+	if err != nil {
+		s.fail(w, r, "purge transcripts", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, purgeTranscriptsResponse{
+		PurgedCount: purged,
+		OlderThan:   cutoff.Format(time.RFC3339),
+	})
 }

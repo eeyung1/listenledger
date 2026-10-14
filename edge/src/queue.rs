@@ -52,7 +52,10 @@ impl DurableQueue {
                 match serde_json::from_str::<CapturePayload>(trimmed) {
                     Ok(item) => in_memory.push_back(item),
                     Err(err) => {
-                        tracing::warn!("Discarding corrupt queue entry (incomplete write): {}", err);
+                        tracing::warn!(
+                            "Discarding corrupt queue entry (incomplete write): {}",
+                            err
+                        );
                         had_corrupted_lines = true;
                     }
                 }

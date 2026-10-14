@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_audio_ring_buffer_and_secure_discard() {
-        use super::audio::{AudioChunk, AudioRingBuffer, secure_discard_audio};
+        use super::audio::{secure_discard_audio, AudioChunk, AudioRingBuffer};
 
         let mut buffer = AudioRingBuffer::new(Duration::from_millis(90));
         assert!(buffer.is_empty());
@@ -289,7 +289,9 @@ mod tests {
 
     #[test]
     fn test_audio_input_sources() {
-        use super::audio::{list_audio_devices, AudioConfig, AudioInputSource, MockAudioSource, WavAudioSource};
+        use super::audio::{
+            list_audio_devices, AudioConfig, AudioInputSource, MockAudioSource, WavAudioSource,
+        };
 
         // 1. Device listing
         let devices = list_audio_devices().expect("list devices");
@@ -323,7 +325,8 @@ mod tests {
     #[test]
     fn test_configurable_boundary_and_multiline_extraction() {
         use super::extractor::{
-            detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig, TransactionType,
+            detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig,
+            TransactionType,
         };
 
         let custom_config = BoundaryConfig {
@@ -332,11 +335,15 @@ mod tests {
         };
 
         // Boundary detection with custom phrases
-        let (t_type, phrase) = detect_boundary_with_config("Three Milk, two thousand naira. All done.", &custom_config);
+        let (t_type, phrase) = detect_boundary_with_config(
+            "Three Milk, two thousand naira. All done.",
+            &custom_config,
+        );
         assert_eq!(t_type, Some(TransactionType::Sale));
         assert_eq!(phrase, Some("all done".to_string()));
 
-        let (t_type, phrase) = detect_boundary_with_config("Ten packs of water. Delivery confirmed.", &custom_config);
+        let (t_type, phrase) =
+            detect_boundary_with_config("Ten packs of water. Delivery confirmed.", &custom_config);
         assert_eq!(t_type, Some(TransactionType::Restock));
         assert_eq!(phrase, Some("delivery confirmed".to_string()));
 
@@ -370,6 +377,52 @@ mod tests {
         assert_eq!(cmd_stt.binary_path, "/bin/echo");
         assert_eq!(cmd_stt.model_path.as_deref(), Some("tiny.en"));
         assert_eq!(cmd_stt.language, "en");
+
+        let test_samples = vec![0.0f32; 160];
+        let echoed = cmd_stt.transcribe(&test_samples).expect("echo transcribe");
+        assert!(echoed.contains("-m tiny.en"));
+        assert!(echoed.contains("-l en"));
+        assert!(echoed.contains("-nt"));
+        assert!(echoed.contains(".wav"));
+    }
+
+    #[test]
+    fn test_encode_wav_and_wav_audio_source() {
+        use super::audio::{encode_wav, AudioConfig, AudioInputSource, WavAudioSource};
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let original_samples = vec![0.0, 0.25, -0.25, 0.5, -0.5, 0.75, -0.75];
+        let wav_bytes = encode_wav(&original_samples, 16000);
+        assert!(wav_bytes.len() >= 44 + original_samples.len() * 2);
+        assert_eq!(&wav_bytes[0..4], b"RIFF");
+        assert_eq!(&wav_bytes[8..12], b"WAVE");
+        assert_eq!(&wav_bytes[12..16], b"fmt ");
+
+        let config = AudioConfig {
+            sample_rate: 16000,
+            channels: 1,
+            frame_size_ms: 30,
+            vad_energy_threshold: 0.015,
+        };
+
+        // 1. In-memory bytes parse
+        let wav_src = WavAudioSource::from_wav_bytes(&wav_bytes, &config).expect("parse wav");
+        assert_eq!(wav_src.samples.len(), original_samples.len());
+        for (orig, decoded) in original_samples.iter().zip(wav_src.samples.iter()) {
+            assert!((orig - decoded).abs() < 0.001);
+        }
+
+        // 2. File-backed load
+        let mut tmp_file = NamedTempFile::new().expect("create temp file");
+        tmp_file.write_all(&wav_bytes).expect("write wav");
+        tmp_file.flush().expect("flush wav");
+
+        let mut file_src =
+            WavAudioSource::from_file(tmp_file.path(), &config).expect("load wav file");
+        assert!(!file_src.is_exhausted());
+        let frame = file_src.read_frame().expect("read frame");
+        assert!(frame.is_some());
+        assert!(file_src.is_exhausted());
     }
 }
-

@@ -59,6 +59,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check Rust formatting
+        working-directory: edge
+        run: cargo fmt --check
+      - name: Clippy lint
+        working-directory: edge
+        run: cargo clippy -- -D warnings
       - name: Test edge crate
         working-directory: edge
         run: cargo test

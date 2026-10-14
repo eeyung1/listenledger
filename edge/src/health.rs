@@ -45,17 +45,29 @@ impl EdgeHealthMonitor {
         self.last_delivery = Some(timestamp);
     }
 
-    pub fn report(&self, queue_len: usize, queue_capacity: usize, backend_reachable: bool) -> EdgeHealthReport {
+    pub fn report(
+        &self,
+        queue_len: usize,
+        queue_capacity: usize,
+        backend_reachable: bool,
+    ) -> EdgeHealthReport {
         let mut issues = Vec::new();
 
         if !self.microphone_active {
-            issues.push("Microphone capture inactive or disconnected: check audio input device".to_string());
+            issues.push(
+                "Microphone capture inactive or disconnected: check audio input device".to_string(),
+            );
         }
         if !self.stt_model_loaded {
-            issues.push("Speech model not loaded: check model weights path and memory limits".to_string());
+            issues.push(
+                "Speech model not loaded: check model weights path and memory limits".to_string(),
+            );
         }
         if !backend_reachable {
-            issues.push(format!("Backend unreachable at {}: captures will queue offline", self.backend_url));
+            issues.push(format!(
+                "Backend unreachable at {}: captures will queue offline",
+                self.backend_url
+            ));
         }
         let utilization = if queue_capacity > 0 {
             (queue_len as f64 / queue_capacity as f64) * 100.0
@@ -79,4 +91,3 @@ impl EdgeHealthMonitor {
         }
     }
 }
-
