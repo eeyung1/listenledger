@@ -113,7 +113,7 @@ pub fn encode_wav(samples: &[f32], sample_rate: u32) -> Vec<u8> {
     // "fmt " subchunk
     wav.extend_from_slice(b"fmt ");
     wav.extend_from_slice(&16u32.to_le_bytes()); // Subchunk1Size for PCM
-    wav.extend_from_slice(&1u16.to_le_bytes());  // AudioFormat 1 = PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // AudioFormat 1 = PCM
     wav.extend_from_slice(&num_channels.to_le_bytes());
     wav.extend_from_slice(&sample_rate.to_le_bytes());
     wav.extend_from_slice(&byte_rate.to_le_bytes());
@@ -207,7 +207,11 @@ impl WavAudioSource {
         Self {
             samples,
             position: 0,
-            frame_samples: if frame_samples == 0 { 480 } else { frame_samples },
+            frame_samples: if frame_samples == 0 {
+                480
+            } else {
+                frame_samples
+            },
             frame_duration: Duration::from_millis(config.frame_size_ms),
             name: "WavAudioSource".to_string(),
         }
@@ -252,9 +256,8 @@ impl WavAudioSource {
             offset = next_offset;
         }
 
-        let start = data_start.ok_or_else(|| {
-            AudioError::InvalidFormat("data chunk not found in WAV".to_string())
-        })?;
+        let start = data_start
+            .ok_or_else(|| AudioError::InvalidFormat("data chunk not found in WAV".to_string()))?;
         let data_slice = &bytes[start..start + data_len];
 
         let mut samples = Vec::new();
@@ -466,7 +469,11 @@ impl CaptureSession {
     }
 
     /// Feeds an incoming audio chunk into the session state machine.
-    pub fn process_frame(&mut self, chunk: AudioChunk, boundary_detected: bool) -> CaptureSessionState {
+    pub fn process_frame(
+        &mut self,
+        chunk: AudioChunk,
+        boundary_detected: bool,
+    ) -> CaptureSessionState {
         if self.state == CaptureSessionState::Paused {
             return CaptureSessionState::Paused;
         }

@@ -65,9 +65,15 @@ pub fn detect_boundary_with_config(
     let sale_phrase_lower = config.sale_phrase.to_lowercase();
 
     if lower.contains(&restock_phrase_lower) || lower.contains("restock complete") {
-        (Some(TransactionType::Restock), Some(config.restock_phrase.clone()))
+        (
+            Some(TransactionType::Restock),
+            Some(config.restock_phrase.clone()),
+        )
     } else if lower.contains(&sale_phrase_lower) {
-        (Some(TransactionType::Sale), Some(config.sale_phrase.clone()))
+        (
+            Some(TransactionType::Sale),
+            Some(config.sale_phrase.clone()),
+        )
     } else {
         (None, None)
     }
@@ -116,7 +122,11 @@ fn parse_line_clause(clause: &str) -> Option<ExtractedLine> {
     }
 
     let item_part = parts[0];
-    let amount_part = if parts.len() > 1 { Some(parts[1]) } else { None };
+    let amount_part = if parts.len() > 1 {
+        Some(parts[1])
+    } else {
+        None
+    };
 
     let words: Vec<&str> = item_part.split_whitespace().collect();
     if words.is_empty() {

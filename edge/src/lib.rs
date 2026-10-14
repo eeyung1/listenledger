@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_audio_ring_buffer_and_secure_discard() {
-        use super::audio::{AudioChunk, AudioRingBuffer, secure_discard_audio};
+        use super::audio::{secure_discard_audio, AudioChunk, AudioRingBuffer};
 
         let mut buffer = AudioRingBuffer::new(Duration::from_millis(90));
         assert!(buffer.is_empty());
@@ -289,7 +289,9 @@ mod tests {
 
     #[test]
     fn test_audio_input_sources() {
-        use super::audio::{list_audio_devices, AudioConfig, AudioInputSource, MockAudioSource, WavAudioSource};
+        use super::audio::{
+            list_audio_devices, AudioConfig, AudioInputSource, MockAudioSource, WavAudioSource,
+        };
 
         // 1. Device listing
         let devices = list_audio_devices().expect("list devices");
