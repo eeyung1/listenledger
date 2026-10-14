@@ -84,6 +84,7 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	mux.HandleFunc("/api/products/", server.handleProductDetail)
 	mux.HandleFunc("/api/summary", server.handleSummary)
 	mux.HandleFunc("/api/settings", server.handleSettings)
+	mux.HandleFunc("/api/settings/purge-transcripts", server.handlePurgeTranscripts)
 	mux.HandleFunc("/api/captures", server.captureLimiter.LimitMiddleware(server.handleCaptures))
 	mux.HandleFunc("/api/receipts/", server.handleReceiptDetail)
 	mux.HandleFunc("/api/devices", server.handleDevices)

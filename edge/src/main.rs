@@ -1,15 +1,14 @@
 use chrono::Utc;
 use listenledger_edge::audio::{
-    list_audio_devices, AudioConfig, AudioInputSource, CaptureSession,
-    CaptureSessionState, MockAudioSource,
+    list_audio_devices, AudioConfig, AudioInputSource, CaptureSession, CaptureSessionState,
+    MockAudioSource, WavAudioSource,
 };
 use listenledger_edge::client::CaptureClient;
 use listenledger_edge::extractor::{
-    detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig,
-    CapturePayload,
+    detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig, CapturePayload,
 };
 use listenledger_edge::queue::DurableQueue;
-use listenledger_edge::stt::{MockSpeechRecognizer, SpeechRecognizer};
+use listenledger_edge::stt::{CommandSpeechRecognizer, MockSpeechRecognizer, SpeechRecognizer};
 use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -51,16 +50,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let audio_config = AudioConfig::default();
     let boundary_config = BoundaryConfig::default();
     let mut session = CaptureSession::new(audio_config.clone());
-    let stt = MockSpeechRecognizer::default();
+
+    // STT Recognizer selection (dynamic model binary / mock)
+    let stt: Box<dyn SpeechRecognizer> = if let Ok(binary) = env::var("LISTENLEDGER_STT_BINARY") {
+        let mut recognizer = CommandSpeechRecognizer::new(binary);
+        if let Ok(model) = env::var("LISTENLEDGER_STT_MODEL") {
+            recognizer = recognizer.with_model(model);
+        }
+        if let Ok(lang) = env::var("LISTENLEDGER_STT_LANGUAGE") {
+            recognizer = recognizer.with_language(lang);
+        }
+        println!(
+            "Using CommandSpeechRecognizer: binary={}, model={:?}, lang={}",
+            recognizer.binary_path, recognizer.model_path, recognizer.language
+        );
+        Box::new(recognizer)
+    } else {
+        println!("No LISTENLEDGER_STT_BINARY set; using MockSpeechRecognizer");
+        Box::new(MockSpeechRecognizer::default())
+    };
+
+    // Audio input source selection
+    let audio_source_env =
+        env::var("LISTENLEDGER_AUDIO_SOURCE").unwrap_or_else(|_| "mock".to_string());
+    let mut source: Box<dyn AudioInputSource> = if audio_source_env.starts_with("wav:") {
+        let path = audio_source_env.trim_start_matches("wav:");
+        println!("Loading audio from WAV file: {}", path);
+        Box::new(WavAudioSource::from_file(path, &audio_config)?)
+    } else if audio_source_env == "mock" {
+        println!("Using synthetic demonstration speech burst (MockAudioSource)");
+        Box::new(MockAudioSource::with_speech_burst(50, 0.05))
+    } else {
+        println!(
+            "Audio source '{}' specified; using MockAudioSource fallback",
+            audio_source_env
+        );
+        Box::new(MockAudioSource::with_speech_burst(50, 0.05))
+    };
 
     println!(
         "Capture session initialized: status={}",
         session.status_indicator()
     );
     println!("Listening for counter speech (press Ctrl+C to stop)...");
-
-    // Mock audio source producing demonstration speech burst
-    let mut source = MockAudioSource::with_speech_burst(50, 0.05);
 
     let mut tick_interval = tokio::time::interval(Duration::from_millis(30));
 
@@ -73,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ = tick_interval.tick() => {
                 if let Ok(Some(chunk)) = source.read_frame() {
-                    let boundary_hint = source.frames.is_empty();
+                    let boundary_hint = source.is_exhausted();
                     let state = session.process_frame(chunk, boundary_hint);
 
                     match state {

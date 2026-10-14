@@ -370,6 +370,53 @@ mod tests {
         assert_eq!(cmd_stt.binary_path, "/bin/echo");
         assert_eq!(cmd_stt.model_path.as_deref(), Some("tiny.en"));
         assert_eq!(cmd_stt.language, "en");
+
+        let test_samples = vec![0.0f32; 160];
+        let echoed = cmd_stt.transcribe(&test_samples).expect("echo transcribe");
+        assert!(echoed.contains("-m tiny.en"));
+        assert!(echoed.contains("-l en"));
+        assert!(echoed.contains("-nt"));
+        assert!(echoed.contains(".wav"));
+    }
+
+    #[test]
+    fn test_encode_wav_and_wav_audio_source() {
+        use super::audio::{encode_wav, AudioConfig, AudioInputSource, WavAudioSource};
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let original_samples = vec![0.0, 0.25, -0.25, 0.5, -0.5, 0.75, -0.75];
+        let wav_bytes = encode_wav(&original_samples, 16000);
+        assert!(wav_bytes.len() >= 44 + original_samples.len() * 2);
+        assert_eq!(&wav_bytes[0..4], b"RIFF");
+        assert_eq!(&wav_bytes[8..12], b"WAVE");
+        assert_eq!(&wav_bytes[12..16], b"fmt ");
+
+        let config = AudioConfig {
+            sample_rate: 16000,
+            channels: 1,
+            frame_size_ms: 30,
+            vad_energy_threshold: 0.015,
+        };
+
+        // 1. In-memory bytes parse
+        let wav_src = WavAudioSource::from_wav_bytes(&wav_bytes, &config).expect("parse wav");
+        assert_eq!(wav_src.samples.len(), original_samples.len());
+        for (orig, decoded) in original_samples.iter().zip(wav_src.samples.iter()) {
+            assert!((orig - decoded).abs() < 0.001);
+        }
+
+        // 2. File-backed load
+        let mut tmp_file = NamedTempFile::new().expect("create temp file");
+        tmp_file.write_all(&wav_bytes).expect("write wav");
+        tmp_file.flush().expect("flush wav");
+
+        let mut file_src =
+            WavAudioSource::from_file(tmp_file.path(), &config).expect("load wav file");
+        assert!(!file_src.is_exhausted());
+        let frame = file_src.read_frame().expect("read frame");
+        assert!(frame.is_some());
+        assert!(file_src.is_exhausted());
     }
 }
 

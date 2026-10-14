@@ -883,3 +883,92 @@ func TestPostgres_SummaryAccuracyAndDayBoundaries(t *testing.T) {
 		t.Errorf("expected pending_reviews 1, got %d", summary.PendingReviews)
 	}
 }
+
+func TestPostgres_PurgeTranscripts(t *testing.T) {
+	s := openTestPostgres(t)
+	ctx := context.Background()
+
+	shopID := "shop_pg_purge"
+	seedPostgresShop(t, s, shopID, "own_pg_purge")
+
+	p := models.Product{
+		ID:                "prod_pg_purge_1",
+		ShopID:            shopID,
+		Name:              "Indomie Box",
+		SKU:               "INDO-PURGE",
+		Price:             models.Money{Amount: 500000, Currency: "NGN"},
+		Quantity:          100,
+		BaseUnit:          "box",
+		LowStockThreshold: 10,
+	}
+	if err := s.InsertProduct(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	oldTime := now.AddDate(0, 0, -40)
+	recentTime := now.AddDate(0, 0, -5)
+
+	oldTxn := models.Transaction{
+		ID:          "txn_pg_purge_old",
+		ShopID:      shopID,
+		Type:        models.TypeSale,
+		ProductID:   p.ID,
+		ProductName: p.Name,
+		Quantity:    2,
+		Unit:        models.Unit(p.BaseUnit),
+		Amount:      models.Money{Amount: 1000000, Currency: "NGN"},
+		Status:      models.StatusConfirmed,
+		OccurredAt:  oldTime,
+		CreatedAt:   oldTime,
+		Transcript:  "Two Indomie boxes, ten thousand naira. All done.",
+	}
+	if err := s.InsertTransaction(ctx, oldTxn); err != nil {
+		t.Fatal(err)
+	}
+
+	recentTxn := models.Transaction{
+		ID:          "txn_pg_purge_recent",
+		ShopID:      shopID,
+		Type:        models.TypeSale,
+		ProductID:   p.ID,
+		ProductName: p.Name,
+		Quantity:    1,
+		Unit:        models.Unit(p.BaseUnit),
+		Amount:      models.Money{Amount: 500000, Currency: "NGN"},
+		Status:      models.StatusConfirmed,
+		OccurredAt:  recentTime,
+		CreatedAt:   recentTime,
+		Transcript:  "One Indomie box, five thousand naira. All done.",
+	}
+	if err := s.InsertTransaction(ctx, recentTxn); err != nil {
+		t.Fatal(err)
+	}
+
+	purged, err := s.PurgeTranscripts(ctx, shopID, now.AddDate(0, 0, -30))
+	if err != nil {
+		t.Fatalf("PurgeTranscripts failed on postgres: %v", err)
+	}
+	if purged != 1 {
+		t.Fatalf("expected 1 row purged, got %d", purged)
+	}
+
+	gotOld, err := s.GetTransactionByID(ctx, shopID, oldTxn.ID)
+	if err != nil {
+		t.Fatalf("get old txn: %v", err)
+	}
+	if gotOld.Transcript != "" {
+		t.Errorf("expected empty transcript, got %q", gotOld.Transcript)
+	}
+	if gotOld.Amount.Amount != 1000000 {
+		t.Errorf("expected amount to stay 1000000, got %d", gotOld.Amount.Amount)
+	}
+
+	gotRecent, err := s.GetTransactionByID(ctx, shopID, recentTxn.ID)
+	if err != nil {
+		t.Fatalf("get recent txn: %v", err)
+	}
+	if gotRecent.Transcript != recentTxn.Transcript {
+		t.Errorf("expected recent transcript preserved, got %q", gotRecent.Transcript)
+	}
+}

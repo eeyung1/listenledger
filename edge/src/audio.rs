@@ -94,12 +94,59 @@ pub fn secure_discard_audio(chunk: &mut AudioChunk) {
     chunk.samples.clear();
 }
 
+/// Encodes raw 32-bit floating-point PCM audio samples into standard 16-bit mono RIFF WAV bytes.
+pub fn encode_wav(samples: &[f32], sample_rate: u32) -> Vec<u8> {
+    let num_channels: u16 = 1;
+    let bits_per_sample: u16 = 16;
+    let byte_rate: u32 = sample_rate * (num_channels as u32) * (bits_per_sample as u32 / 8);
+    let block_align: u16 = num_channels * (bits_per_sample / 8);
+    let subchunk2_size: u32 = (samples.len() as u32) * (bits_per_sample as u32 / 8);
+    let chunk_size: u32 = 36 + subchunk2_size;
+
+    let mut wav = Vec::with_capacity(44 + subchunk2_size as usize);
+
+    // RIFF chunk descriptor
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&chunk_size.to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+
+    // "fmt " subchunk
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes()); // Subchunk1Size for PCM
+    wav.extend_from_slice(&1u16.to_le_bytes());  // AudioFormat 1 = PCM
+    wav.extend_from_slice(&num_channels.to_le_bytes());
+    wav.extend_from_slice(&sample_rate.to_le_bytes());
+    wav.extend_from_slice(&byte_rate.to_le_bytes());
+    wav.extend_from_slice(&block_align.to_le_bytes());
+    wav.extend_from_slice(&bits_per_sample.to_le_bytes());
+
+    // "data" subchunk
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&subchunk2_size.to_le_bytes());
+
+    for &sample in samples {
+        let clamped = sample.clamp(-1.0, 1.0);
+        let pcm_val = if clamped >= 0.0 {
+            (clamped * 32767.0).round() as i16
+        } else {
+            (clamped * 32768.0).round() as i16
+        };
+        wav.extend_from_slice(&pcm_val.to_le_bytes());
+    }
+
+    wav
+}
+
 /// Abstract audio input source stream.
 pub trait AudioInputSource: Send + Sync {
     /// Reads the next available audio frame.
     fn read_frame(&mut self) -> Result<Option<AudioChunk>, AudioError>;
     /// Human-readable source descriptor.
     fn name(&self) -> &str;
+    /// Indicates whether the input source has depleted its frames.
+    fn is_exhausted(&self) -> bool {
+        false
+    }
 }
 
 /// In-memory mock audio source for test suites and offline regression verification.
@@ -138,6 +185,10 @@ impl AudioInputSource for MockAudioSource {
     fn name(&self) -> &str {
         &self.name
     }
+
+    fn is_exhausted(&self) -> bool {
+        self.frames.is_empty()
+    }
 }
 
 /// File/buffer-backed audio source slicing raw PCM samples into frames.
@@ -161,6 +212,79 @@ impl WavAudioSource {
             name: "WavAudioSource".to_string(),
         }
     }
+
+    /// Parses a standard 16-bit PCM RIFF WAV byte buffer into a WavAudioSource.
+    pub fn from_wav_bytes(bytes: &[u8], config: &AudioConfig) -> Result<Self, AudioError> {
+        if bytes.len() < 44 {
+            return Err(AudioError::InvalidFormat(
+                "WAV buffer too small (< 44 bytes)".to_string(),
+            ));
+        }
+        if &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+            return Err(AudioError::InvalidFormat(
+                "Invalid RIFF/WAVE header".to_string(),
+            ));
+        }
+
+        let mut offset = 12;
+        let mut data_start = None;
+        let mut data_len = 0;
+        let mut bits_per_sample = 16u16;
+
+        while offset + 8 <= bytes.len() {
+            let chunk_id = &bytes[offset..offset + 4];
+            let chunk_size = u32::from_le_bytes([
+                bytes[offset + 4],
+                bytes[offset + 5],
+                bytes[offset + 6],
+                bytes[offset + 7],
+            ]) as usize;
+            let next_offset = offset + 8 + chunk_size;
+
+            if chunk_id == b"fmt " && offset + 8 + 16 <= bytes.len() {
+                bits_per_sample = u16::from_le_bytes([bytes[offset + 22], bytes[offset + 23]]);
+            } else if chunk_id == b"data" {
+                data_start = Some(offset + 8);
+                data_len = chunk_size.min(bytes.len().saturating_sub(offset + 8));
+                break;
+            }
+
+            offset = next_offset;
+        }
+
+        let start = data_start.ok_or_else(|| {
+            AudioError::InvalidFormat("data chunk not found in WAV".to_string())
+        })?;
+        let data_slice = &bytes[start..start + data_len];
+
+        let mut samples = Vec::new();
+        if bits_per_sample == 16 {
+            let mut i = 0;
+            while i + 2 <= data_slice.len() {
+                let sample_val = i16::from_le_bytes([data_slice[i], data_slice[i + 1]]);
+                samples.push(sample_val as f32 / 32768.0);
+                i += 2;
+            }
+        } else {
+            return Err(AudioError::InvalidFormat(format!(
+                "unsupported bits per sample: {}",
+                bits_per_sample
+            )));
+        }
+
+        Ok(Self::from_samples(samples, config))
+    }
+
+    /// Reads and parses a 16-bit PCM RIFF WAV file from disk.
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+        config: &AudioConfig,
+    ) -> Result<Self, AudioError> {
+        let bytes = std::fs::read(&path)?;
+        let mut source = Self::from_wav_bytes(&bytes, config)?;
+        source.name = format!("WavAudioSource({})", path.as_ref().display());
+        Ok(source)
+    }
 }
 
 impl AudioInputSource for WavAudioSource {
@@ -179,6 +303,10 @@ impl AudioInputSource for WavAudioSource {
 
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.position >= self.samples.len()
     }
 }
 

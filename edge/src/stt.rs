@@ -72,14 +72,44 @@ impl SpeechRecognizer for CommandSpeechRecognizer {
         if samples.is_empty() {
             return Ok(String::new());
         }
+
+        use std::io::Write;
         use std::process::Command;
+        use tempfile::Builder;
+
+        // 1. Encode samples into temporary WAV file
+        let wav_bytes = crate::audio::encode_wav(samples, 16000);
+        let mut temp_file = Builder::new()
+            .prefix("listenledger_stt_")
+            .suffix(".wav")
+            .tempfile()
+            .map_err(|e| SttError::InferenceError(format!("failed to create temp wav file: {}", e)))?;
+
+        temp_file
+            .write_all(&wav_bytes)
+            .map_err(|e| SttError::InferenceError(format!("failed to write temp wav bytes: {}", e)))?;
+        temp_file
+            .flush()
+            .map_err(|e| SttError::InferenceError(format!("failed to flush temp wav: {}", e)))?;
+
+        let temp_path = temp_file.path().to_path_buf();
+
+        // 2. Invoke local STT binary (whisper-cli / whisper.cpp or custom binary)
         let mut cmd = Command::new(&self.binary_path);
         if let Some(ref m) = self.model_path {
-            cmd.arg("--model").arg(m);
+            cmd.arg("-m").arg(m);
         }
-        cmd.arg("--language").arg(&self.language);
+        cmd.arg("-f").arg(&temp_path);
+        cmd.arg("-l").arg(&self.language);
+        cmd.arg("-nt");
 
-        let output = cmd.output().map_err(|e| SttError::InferenceError(e.to_string()))?;
+        let output = cmd
+            .output()
+            .map_err(|e| SttError::InferenceError(e.to_string()))?;
+
+        // 3. Drop/clean up temporary WAV file immediately to enforce raw audio discard policy
+        drop(temp_file);
+
         if !output.status.success() {
             return Err(SttError::InferenceError(format!(
                 "STT command failed (status {}): {}",

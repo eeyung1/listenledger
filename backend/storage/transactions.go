@@ -322,3 +322,32 @@ func floatPointer(value sql.NullFloat64) *float64 {
 	score := value.Float64
 	return &score
 }
+
+// PurgeTranscripts clears the spoken transcript text from historical transactions
+// older than the specified timestamp for a given shop, honoring data retention and privacy policies
+// while preserving financial audit records, ledger amounts, and inventory movements.
+func (s *Store) PurgeTranscripts(ctx context.Context, shopID string, olderThan time.Time) (int64, error) {
+	if shopID == "" {
+		return 0, errors.New("storage: PurgeTranscripts requires a shop_id")
+	}
+	if olderThan.IsZero() {
+		return 0, errors.New("storage: PurgeTranscripts requires a valid olderThan timestamp")
+	}
+
+	const query = `UPDATE transactions
+                      SET transcript = ''
+                    WHERE shop_id = ?
+                      AND occurred_at < ?
+                      AND transcript != ''`
+
+	res, err := s.db.ExecContext(ctx, s.rebind(query), shopID, formatTime(olderThan))
+	if err != nil {
+		return 0, fmt.Errorf("storage: purge transcripts: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("storage: purge transcripts: rows affected: %w", err)
+	}
+	return affected, nil
+}

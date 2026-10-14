@@ -292,8 +292,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Add frontend tests for totals, review actions, forms, duplicate events and stale snapshots.
 - [x] Add a microphone/fixture-driven end-to-end test covering sale, review, restock and offline retry.
 - [x] Configure GitHub Actions for Go formatting/vet/race tests/build and frontend typecheck/build.
-- [x] Add Rust tests to CI.
-- [ ] Add Rust formatting/clippy gates and reproducible dependency locking.
+- [x] Add Rust formatting/clippy gates and reproducible dependency locking.
 - [x] Add a root task runner for build, test and local development.
 - [x] Document dependencies, configuration, migrations and test fixtures; maintain README/TODO as changes land.
 - [ ] Configure required checks when CI exists, without claiming absent checks have passed.
@@ -323,7 +322,7 @@ User-approved workflow: **create branch → push branch → wait for configured 
 - [x] Add suitable request limits/rate limits to capture and authentication endpoints.
 - [x] Manage secrets through deployment configuration and keep credentials/transcripts out of unnecessary logs.
 - [ ] Reconcile owner/staff notices with actual listening, pause and raw-audio behavior before enabling real capture.
-- [ ] Verify and implement the documented retention, access, export and deletion procedures.
+- [x] Verify and implement the documented retention, access, export and deletion procedures.
 - [ ] Validate operational recovery instructions against real microphone, model-load, disk-full and network-outage behavior.
 
 **Acceptance:** restart preserves data; backup restoration is demonstrated; operators can identify and recover from capture or storage failures.
