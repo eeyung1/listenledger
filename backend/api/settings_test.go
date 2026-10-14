@@ -130,4 +130,3 @@ func TestPurgeTranscripts_InvalidTimestamp(t *testing.T) {
 		t.Errorf("expected 400 Bad Request, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
-

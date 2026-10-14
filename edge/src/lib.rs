@@ -323,7 +323,8 @@ mod tests {
     #[test]
     fn test_configurable_boundary_and_multiline_extraction() {
         use super::extractor::{
-            detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig, TransactionType,
+            detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig,
+            TransactionType,
         };
 
         let custom_config = BoundaryConfig {
@@ -332,11 +333,15 @@ mod tests {
         };
 
         // Boundary detection with custom phrases
-        let (t_type, phrase) = detect_boundary_with_config("Three Milk, two thousand naira. All done.", &custom_config);
+        let (t_type, phrase) = detect_boundary_with_config(
+            "Three Milk, two thousand naira. All done.",
+            &custom_config,
+        );
         assert_eq!(t_type, Some(TransactionType::Sale));
         assert_eq!(phrase, Some("all done".to_string()));
 
-        let (t_type, phrase) = detect_boundary_with_config("Ten packs of water. Delivery confirmed.", &custom_config);
+        let (t_type, phrase) =
+            detect_boundary_with_config("Ten packs of water. Delivery confirmed.", &custom_config);
         assert_eq!(t_type, Some(TransactionType::Restock));
         assert_eq!(phrase, Some("delivery confirmed".to_string()));
 
@@ -419,4 +424,3 @@ mod tests {
         assert!(file_src.is_exhausted());
     }
 }
-

@@ -83,11 +83,13 @@ impl SpeechRecognizer for CommandSpeechRecognizer {
             .prefix("listenledger_stt_")
             .suffix(".wav")
             .tempfile()
-            .map_err(|e| SttError::InferenceError(format!("failed to create temp wav file: {}", e)))?;
+            .map_err(|e| {
+                SttError::InferenceError(format!("failed to create temp wav file: {}", e))
+            })?;
 
-        temp_file
-            .write_all(&wav_bytes)
-            .map_err(|e| SttError::InferenceError(format!("failed to write temp wav bytes: {}", e)))?;
+        temp_file.write_all(&wav_bytes).map_err(|e| {
+            SttError::InferenceError(format!("failed to write temp wav bytes: {}", e))
+        })?;
         temp_file
             .flush()
             .map_err(|e| SttError::InferenceError(format!("failed to flush temp wav: {}", e)))?;
