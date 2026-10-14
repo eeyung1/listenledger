@@ -20,7 +20,10 @@ fn main() {
     let (metrics, results) = run_acoustic_benchmark(&scenarios, &config, &boundary_config);
 
     println!("\nScenario Results:");
-    println!("{:<30} {:<10} {:<15} {:<12}", "Scenario", "Result", "Captured Type", "Duration (us)");
+    println!(
+        "{:<30} {:<10} {:<15} {:<12}",
+        "Scenario", "Result", "Captured Type", "Duration (us)"
+    );
     println!("{:-<70}", "");
     for r in results {
         let status = if r.passed { "PASS" } else { "FAIL" };
@@ -32,12 +35,24 @@ fn main() {
     }
 
     println!("\nAggregate Pipeline Performance:");
-    println!("  - Scenarios Passed:        {}/{}", metrics.passed_scenarios, metrics.total_scenarios);
+    println!(
+        "  - Scenarios Passed:        {}/{}",
+        metrics.passed_scenarios, metrics.total_scenarios
+    );
     println!("  - False Positive Captures: {}", metrics.false_captures);
     println!("  - Missed Captures:         {}", metrics.missed_captures);
-    println!("  - Total Audio Frames:      {}", metrics.total_frames_processed);
-    println!("  - Avg Frame Latency:       {:.2} us", metrics.avg_frame_processing_micros);
-    println!("  - Max Frame Latency:       {} us", metrics.max_frame_processing_micros);
+    println!(
+        "  - Total Audio Frames:      {}",
+        metrics.total_frames_processed
+    );
+    println!(
+        "  - Avg Frame Latency:       {:.2} us",
+        metrics.avg_frame_processing_micros
+    );
+    println!(
+        "  - Max Frame Latency:       {} us",
+        metrics.max_frame_processing_micros
+    );
 
     if metrics.passed_scenarios == metrics.total_scenarios && metrics.false_captures == 0 {
         println!("\nAll edge acoustic pipeline gates PASSED.");

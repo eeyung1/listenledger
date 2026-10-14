@@ -1,7 +1,12 @@
 //! Acoustic simulation fixtures and pipeline latency benchmarking for ListenLedger Edge.
 
-use crate::audio::{encode_wav, AudioConfig, AudioInputSource, CaptureSession, CaptureSessionState, WavAudioSource};
-use crate::extractor::{detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig, ExtractedLine, TransactionType};
+use crate::audio::{
+    encode_wav, AudioConfig, AudioInputSource, CaptureSession, CaptureSessionState, WavAudioSource,
+};
+use crate::extractor::{
+    detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig, ExtractedLine,
+    TransactionType,
+};
 use crate::stt::{MockSpeechRecognizer, SpeechRecognizer};
 use std::time::Instant;
 
@@ -30,7 +35,12 @@ pub struct AcousticBenchmarkMetrics {
 }
 
 /// Generates a synthetic sinusoidal tone encoded in 16-bit mono RIFF WAV.
-pub fn generate_tone_wav(duration_ms: u64, freq_hz: f32, amplitude: f32, sample_rate: u32) -> Vec<u8> {
+pub fn generate_tone_wav(
+    duration_ms: u64,
+    freq_hz: f32,
+    amplitude: f32,
+    sample_rate: u32,
+) -> Vec<u8> {
     let num_samples = (sample_rate as u64 * duration_ms / 1000) as usize;
     let mut samples = Vec::with_capacity(num_samples);
     let angular_freq = 2.0 * std::f32::consts::PI * freq_hz / sample_rate as f32;
@@ -91,7 +101,8 @@ pub fn standard_acoustic_scenarios() -> Vec<AcousticScenario> {
             name: "CleanRestock_Indomie".to_string(),
             description: "Restock announcement concluding with 'Stock received'".to_string(),
             wav_bytes: generate_speech_burst_wav(2000, 300, 0.28, 16000),
-            simulated_transcript: "Stock received: five cartons of Indomie, stock received.".to_string(),
+            simulated_transcript: "Stock received: five cartons of Indomie, stock received."
+                .to_string(),
             expected_boundary: Some(TransactionType::Restock),
             should_capture: true,
             expected_min_lines: 1,
@@ -100,7 +111,8 @@ pub fn standard_acoustic_scenarios() -> Vec<AcousticScenario> {
             name: "CasualChatter_NoClosingPhrase".to_string(),
             description: "Neighborly greeting without commercial boundary phrase".to_string(),
             wav_bytes: generate_speech_burst_wav(1200, 600, 0.15, 16000),
-            simulated_transcript: "Good morning how is your family today? Everything is well.".to_string(),
+            simulated_transcript: "Good morning how is your family today? Everything is well."
+                .to_string(),
             expected_boundary: None,
             should_capture: false,
             expected_min_lines: 0,
@@ -144,8 +156,8 @@ pub fn run_acoustic_benchmark(
     let mut passed_count = 0;
 
     for sc in scenarios {
-        let mut source = WavAudioSource::from_wav_bytes(&sc.wav_bytes, config)
-            .expect("valid wav audio bytes");
+        let mut source =
+            WavAudioSource::from_wav_bytes(&sc.wav_bytes, config).expect("valid wav audio bytes");
         let mut session = CaptureSession::new(config.clone());
         let stt = MockSpeechRecognizer::new(&sc.simulated_transcript);
 
@@ -172,9 +184,11 @@ pub fn run_acoustic_benchmark(
                 boundary_detected = true;
                 let samples = session.drain_audio_for_transcription();
                 if let Ok(transcript) = stt.transcribe(&samples) {
-                    let (b_type, b_phrase) = detect_boundary_with_config(&transcript, boundary_config);
+                    let (b_type, b_phrase) =
+                        detect_boundary_with_config(&transcript, boundary_config);
                     captured_type = b_type;
-                    extracted_lines = extract_lines_from_transcript(&transcript, b_phrase.as_deref());
+                    extracted_lines =
+                        extract_lines_from_transcript(&transcript, b_phrase.as_deref());
                 }
                 break;
             }
