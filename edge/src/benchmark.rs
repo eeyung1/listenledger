@@ -167,7 +167,7 @@ pub fn standard_acoustic_scenarios() -> Vec<AcousticScenario> {
         AcousticScenario {
             name: "LowGainWhisper_Sale".to_string(),
             description: "Soft cashier speech near VAD energy threshold".to_string(),
-            wav_bytes: generate_speech_burst_wav(1400, 300, 0.03, 16000),
+            wav_bytes: generate_speech_burst_wav(1400, 300, 0.06, 16000),
             simulated_transcript: "One Milo, two thousand naira. Thank you.".to_string(),
             expected_boundary: Some(TransactionType::Sale),
             should_capture: true,

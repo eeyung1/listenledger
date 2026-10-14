@@ -466,6 +466,15 @@ mod tests {
         assert!(noisy_res.boundary_detected);
         assert_eq!(noisy_res.captured_type, Some(TransactionType::Sale));
 
+        // Verify whisper sale scenario passes above VAD threshold
+        let whisper_res = results
+            .iter()
+            .find(|r| r.scenario_name == "LowGainWhisper_Sale")
+            .expect("whisper sale res");
+        assert!(whisper_res.passed);
+        assert!(whisper_res.boundary_detected);
+        assert_eq!(whisper_res.captured_type, Some(TransactionType::Sale));
+
         // Verify casual chatter scenario has zero captures
         let chatter_res = results
             .iter()
