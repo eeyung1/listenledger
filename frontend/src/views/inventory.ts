@@ -707,12 +707,22 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
    * can replace its row without refetching the catalogue.
    */
   function applyProduct(product: Product): void {
+    const isArchived = Boolean(product.archived_at);
+    const matchesStatus =
+      currentTab === "all" ||
+      (currentTab === "active" && !isArchived) ||
+      (currentTab === "archived" && isArchived);
+
     const index = products.findIndex((existing) => existing.id === product.id);
-    if (index === -1) {
+    if (index !== -1) {
+      if (matchesStatus) {
+        products[index] = product;
+      } else {
+        products.splice(index, 1);
+      }
+    } else if (matchesStatus) {
       products.push(product);
       products.sort((a, b) => a.name.localeCompare(b.name));
-    } else {
-      products[index] = product;
     }
     render();
   }

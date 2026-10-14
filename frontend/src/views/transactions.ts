@@ -31,6 +31,7 @@ import {
   type Unit,
 } from "../api.js";
 import {
+  applyFilteredTransactionToList,
   applyTransactionToList,
   cell,
   clear,
@@ -57,12 +58,14 @@ interface Filters {
 
 export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanup {
   let transactions: Transaction[] = [];
+  let heldTransactions: Transaction[] = [];
   let disposed = false;
   const abortController = new AbortController();
   const signal = abortController.signal;
   let pageOffset = 0;
   const pageSize = 50;
   let totalCount = 0;
+  let pendingNewCount = 0;
 
   const filters: Filters = { type: "", status: "", receipt_id: "" };
 
@@ -122,7 +125,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       errorMsg.hidden = true;
       try {
         const updated = await confirmTransaction(transaction.id);
-        applyTransaction(updated, false);
+        removeHeldTransaction(updated.id);
+        applyLedgerTransaction(updated, false);
       } catch (err: unknown) {
         confirmBtn.disabled = false;
         editBtn.disabled = false;
@@ -149,7 +153,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       errorMsg.hidden = true;
       try {
         const updated = await rejectTransaction(transaction.id, notes.trim() || undefined);
-        applyTransaction(updated, false);
+        removeHeldTransaction(updated.id);
+        applyLedgerTransaction(updated, false);
       } catch (err: unknown) {
         confirmBtn.disabled = false;
         editBtn.disabled = false;
@@ -265,7 +270,11 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       } else {
         const start = pageOffset + 1;
         const end = pageOffset + transactions.length;
-        setText(pageInfo, `Showing ${start}–${end} of ${totalCount}`);
+        if (pendingNewCount > 0 && pageOffset > 0) {
+          setText(pageInfo, `Showing ${start}–${end} of ${totalCount} (${pendingNewCount} newer)`);
+        } else {
+          setText(pageInfo, `Showing ${start}–${end} of ${totalCount}`);
+        }
       }
     }
   }
@@ -274,15 +283,22 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     if (reviewQueue === null) return;
     clear(reviewQueue);
 
-    const held = transactions.filter((transaction) => transaction.status === "review_required");
-    setText(reviewCount, String(held.length));
+    setText(reviewCount, String(heldTransactions.length));
 
-    if (held.length === 0) {
+    if (heldTransactions.length === 0) {
       reviewQueue.append(el("li", "review-list__empty", "Nothing waiting on you."));
       return;
     }
-    for (const transaction of held) {
+    for (const transaction of heldTransactions) {
       reviewQueue.append(reviewCard(transaction));
+    }
+  }
+
+  function removeHeldTransaction(id: string): void {
+    const idx = heldTransactions.findIndex((t) => t.id === id);
+    if (idx !== -1) {
+      heldTransactions.splice(idx, 1);
+      renderReviewQueue();
     }
   }
 
@@ -299,11 +315,33 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       clearBtn.addEventListener("click", () => {
         filters.receipt_id = "";
         pageOffset = 0;
+        pendingNewCount = 0;
         void refetch();
       });
       bannerCell.append(clearBtn);
       bannerRow.append(bannerCell);
       ledgerBody.append(bannerRow);
+    }
+
+    if (pendingNewCount > 0 && pageOffset > 0) {
+      const pendingRow = el("tr", "table__row");
+      const pendingCell = cell("table__cell");
+      pendingCell.colSpan = 8;
+      const text = el(
+        "span",
+        "",
+        `${pendingNewCount} newer transaction${pendingNewCount > 1 ? "s" : ""} received while browsing history. `,
+      );
+      const jumpBtn = el("button", "button button--primary button--sm", "Jump to Latest");
+      jumpBtn.style.marginLeft = "0.75rem";
+      jumpBtn.addEventListener("click", () => {
+        pageOffset = 0;
+        pendingNewCount = 0;
+        void refetch();
+      });
+      pendingCell.append(text, jumpBtn);
+      pendingRow.append(pendingCell);
+      ledgerBody.append(pendingRow);
     }
 
     if (transactions.length === 0) {
@@ -328,23 +366,38 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   async function refetch(): Promise<void> {
     try {
       updateExportUrl();
-      const snapshot = await fetchTransactions(
-        shopId,
-        pageSize,
-        {
-          offset: pageOffset,
-          type: filters.type || undefined,
-          status: filters.status || undefined,
-          receipt_id: filters.receipt_id || undefined,
-        },
-        signal,
-      );
+      const [ledgerSnapshot, reviewSnapshot] = await Promise.all([
+        fetchTransactions(
+          shopId,
+          pageSize,
+          {
+            offset: pageOffset,
+            type: filters.type || undefined,
+            status: filters.status || undefined,
+            receipt_id: filters.receipt_id || undefined,
+          },
+          signal,
+        ),
+        fetchTransactions(
+          shopId,
+          50,
+          {
+            status: "review_required",
+          },
+          signal,
+        ),
+      ]);
       if (disposed || signal.aborted) return;
-      transactions = [...snapshot.transactions];
+      transactions = [...ledgerSnapshot.transactions];
       sortTransactions(transactions);
-      totalCount = snapshot.total ?? snapshot.count;
-      if (typeof snapshot.last_seq === "number") {
-        getSocket()?.syncSequence(snapshot.last_seq);
+      totalCount = ledgerSnapshot.total ?? ledgerSnapshot.count;
+
+      heldTransactions = [...reviewSnapshot.transactions];
+      sortTransactions(heldTransactions);
+      pendingNewCount = 0;
+
+      if (typeof ledgerSnapshot.last_seq === "number") {
+        getSocket()?.syncSequence(ledgerSnapshot.last_seq);
       }
       render();
     } catch (error) {
@@ -501,7 +554,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
           notes: notesInput.value.trim() || undefined,
         };
         const updated = await confirmTransaction(transaction.id, corrections);
-        applyTransaction(updated, false);
+        removeHeldTransaction(updated.id);
+        applyLedgerTransaction(updated, false);
         closeModal();
         void refetch();
       } catch (err: unknown) {
@@ -755,44 +809,74 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     });
   }
 
-  /** Inserts or replaces a transaction, keeping the list newest-first and bounded. */
-  function applyTransaction(transaction: Transaction, isNew: boolean): void {
-    const res = applyTransactionToList(transactions, transaction, isNew, MAX_TRANSACTION_LIMIT);
+  /** Inserts, updates, or filters transactions for the active ledger view. */
+  function applyLedgerTransaction(transaction: Transaction, isNew: boolean): void {
+    const res = applyFilteredTransactionToList(
+      transactions,
+      transaction,
+      isNew,
+      filters,
+      pageOffset,
+      pageSize,
+    );
     totalCount += res.totalIncrement;
-    render();
+    if (totalCount < 0) totalCount = 0;
+    if (pageOffset > 0 && isNew && res.totalIncrement > 0) {
+      pendingNewCount += 1;
+    }
+    renderLedger();
+    updatePaginationControls();
   }
 
-  const onTransaction = (event: Event): void => {
+  const onTransactionReceived = (event: Event): void => {
     const detail = (event as CustomEvent<{ data: Transaction }>).detail;
-    applyTransaction(detail.data, true);
+    applyLedgerTransaction(detail.data, true);
+  };
+
+  const onTransactionReviewRequired = (event: Event): void => {
+    const detail = (event as CustomEvent<{ data: Transaction }>).detail;
+    const txn = detail.data;
+    applyTransactionToList(heldTransactions, txn, true, MAX_TRANSACTION_LIMIT);
+    renderReviewQueue();
+    applyLedgerTransaction(txn, true);
   };
 
   const onTransactionUpdated = (event: Event): void => {
     const detail = (event as CustomEvent<{ data: Transaction }>).detail;
-    applyTransaction(detail.data, false);
+    const txn = detail.data;
+    if (txn.status !== "review_required") {
+      removeHeldTransaction(txn.id);
+    } else {
+      applyTransactionToList(heldTransactions, txn, false, MAX_TRANSACTION_LIMIT);
+      renderReviewQueue();
+    }
+    applyLedgerTransaction(txn, false);
   };
 
   const onTypeFilter = (): void => {
     filters.type = typeFilter?.value ?? "";
     pageOffset = 0;
+    pendingNewCount = 0;
     void refetch();
   };
 
   const onStatusFilter = (): void => {
     filters.status = statusFilter?.value ?? "";
     pageOffset = 0;
+    pendingNewCount = 0;
     void refetch();
   };
 
   const onPrevPage = (): void => {
     if (pageOffset > 0) {
       pageOffset = Math.max(0, pageOffset - pageSize);
+      if (pageOffset === 0) pendingNewCount = 0;
       void refetch();
     }
   };
 
   const onNextPage = (): void => {
-    if (pageOffset + pageSize < totalCount) {
+    if (pageOffset + transactions.length < totalCount) {
       pageOffset += pageSize;
       void refetch();
     }
@@ -809,8 +893,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     showManualEntryModal();
   };
 
-  window.addEventListener("ll:transaction-received", onTransaction);
-  window.addEventListener("ll:transaction-review-required", onTransaction);
+  window.addEventListener("ll:transaction-received", onTransactionReceived);
+  window.addEventListener("ll:transaction-review-required", onTransactionReviewRequired);
   window.addEventListener("ll:transaction-updated", onTransactionUpdated);
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   typeFilter?.addEventListener("change", onTypeFilter);
@@ -824,8 +908,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   return () => {
     disposed = true;
     abortController.abort();
-    window.removeEventListener("ll:transaction-received", onTransaction);
-    window.removeEventListener("ll:transaction-review-required", onTransaction);
+    window.removeEventListener("ll:transaction-received", onTransactionReceived);
+    window.removeEventListener("ll:transaction-review-required", onTransactionReviewRequired);
     window.removeEventListener("ll:transaction-updated", onTransactionUpdated);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     typeFilter?.removeEventListener("change", onTypeFilter);

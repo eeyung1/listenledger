@@ -296,3 +296,101 @@ export function applyTransactionToList(
 
   return { isDuplicate, totalIncrement };
 }
+
+export interface TransactionFilters {
+  readonly type?: string;
+  readonly status?: string;
+  readonly receipt_id?: string;
+  readonly from?: string;
+  readonly to?: string;
+}
+
+/**
+ * Checks whether a transaction satisfies active client-side filters.
+ * An empty string or undefined filter matches all values.
+ */
+export function matchesTransactionFilters(
+  transaction: Transaction,
+  filters: TransactionFilters,
+): boolean {
+  if (filters.type !== undefined && filters.type !== "" && transaction.type !== filters.type) {
+    return false;
+  }
+  if (filters.status !== undefined && filters.status !== "" && transaction.status !== filters.status) {
+    return false;
+  }
+  if (filters.receipt_id !== undefined && filters.receipt_id !== "") {
+    if (transaction.receipt_id !== filters.receipt_id) {
+      return false;
+    }
+  }
+  if (filters.from !== undefined && filters.from !== "") {
+    const fromTime = new Date(filters.from).getTime();
+    if (!Number.isNaN(fromTime) && new Date(transaction.occurred_at).getTime() < fromTime) {
+      return false;
+    }
+  }
+  if (filters.to !== undefined && filters.to !== "") {
+    const toTime = new Date(filters.to).getTime();
+    if (!Number.isNaN(toTime) && new Date(transaction.occurred_at).getTime() > toTime) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export interface FilteredApplyResult {
+  readonly action: "inserted" | "updated" | "removed" | "ignored";
+  readonly totalIncrement: number;
+}
+
+/**
+ * Inserts, updates, or removes a transaction in an existing list according to active
+ * filter conditions and pagination offset:
+ * - If an existing transaction is updated and still matches filters, it is updated in-place.
+ * - If an existing transaction is updated but no longer matches filters (e.g. reviewed/confirmed),
+ *   it is removed from the filtered list and decrements the filter total.
+ * - If a new transaction does not match active filters, it is ignored (0 total increment).
+ * - If a new transaction matches active filters:
+ *   - On pageOffset === 0 (newest page): it is inserted, deterministically sorted, and clamped to limit.
+ *   - On pageOffset > 0 (subsequent pages): it increments totalIncrement by 1 without disrupting the current page slice.
+ */
+export function applyFilteredTransactionToList(
+  list: Transaction[],
+  transaction: Transaction,
+  isNew: boolean,
+  filters: TransactionFilters,
+  pageOffset: number = 0,
+  limit?: number,
+): FilteredApplyResult {
+  const matches = matchesTransactionFilters(transaction, filters);
+  const index = list.findIndex((existing) => existing.id === transaction.id);
+
+  if (index !== -1) {
+    if (matches) {
+      list[index] = transaction;
+      sortTransactions(list);
+      return { action: "updated", totalIncrement: 0 };
+    } else {
+      list.splice(index, 1);
+      return { action: "removed", totalIncrement: -1 };
+    }
+  }
+
+  if (!matches) {
+    return { action: "ignored", totalIncrement: 0 };
+  }
+
+  // Matches active filters but user is looking at older paginated history
+  if (pageOffset > 0) {
+    return { action: "ignored", totalIncrement: isNew ? 1 : 0 };
+  }
+
+  // Matches active filters on the newest page
+  list.push(transaction);
+  sortTransactions(list);
+  if (limit !== undefined && list.length > limit) {
+    list.length = limit;
+  }
+  return { action: "inserted", totalIncrement: isNew ? 1 : 0 };
+}
