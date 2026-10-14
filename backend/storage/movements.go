@@ -57,7 +57,7 @@ func (s *Store) ReverseTransaction(
 
 	// 1. Fetch original transaction
 	query := `SELECT ` + transactionColumns + ` FROM transactions WHERE shop_id = ? AND id = ?`
-	orig, err := scanTransaction(tx.QueryRowContext(ctx, query, shopID, transactionID))
+	orig, err := scanTransaction(tx.QueryRowContext(ctx, s.rebind(query), shopID, transactionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ReverseResult{}, ErrNotFound
 	}
@@ -74,6 +74,11 @@ func (s *Store) ReverseTransaction(
 
 	// 2. Compute inverse stock delta if product is associated
 	if orig.ProductID != "" {
+		if s.Dialect().IsPostgres() {
+			var dummy string
+			_ = tx.QueryRowContext(ctx, s.rebind(`SELECT id FROM products WHERE shop_id = ? AND id = ? FOR UPDATE`), shopID, orig.ProductID).Scan(&dummy)
+		}
+
 		p, err := s.getProduct(ctx, tx, `SELECT `+productColumns+` FROM products WHERE shop_id = ? AND id = ?`, shopID, orig.ProductID)
 		if err != nil {
 			return ReverseResult{}, err
@@ -99,7 +104,7 @@ func (s *Store) ReverseTransaction(
 		p.Quantity += productDelta
 
 		_, err = tx.ExecContext(ctx,
-			`UPDATE products SET quantity = ?, updated_at = ? WHERE shop_id = ? AND id = ?`,
+			s.rebind(`UPDATE products SET quantity = ?, updated_at = ? WHERE shop_id = ? AND id = ?`),
 			p.Quantity, formatTime(time.Now()), shopID, p.ID)
 		if err != nil {
 			return ReverseResult{}, fmt.Errorf("storage: update product stock for reversal: %w", err)
@@ -111,7 +116,7 @@ func (s *Store) ReverseTransaction(
 	// 3. Mark original transaction as cancelled
 	now := time.Now().UTC()
 	_, err = tx.ExecContext(ctx,
-		`UPDATE transactions SET status = 'cancelled' WHERE shop_id = ? AND id = ?`,
+		s.rebind(`UPDATE transactions SET status = 'cancelled' WHERE shop_id = ? AND id = ?`),
 		shopID, orig.ID)
 	if err != nil {
 		return ReverseResult{}, fmt.Errorf("storage: cancel original transaction: %w", err)
@@ -140,14 +145,14 @@ func (s *Store) ReverseTransaction(
 		Transcript:  fmt.Sprintf("VOID [%s]: %s", orig.ID, reason),
 	}
 
-	if err := insertTransaction(ctx, tx, reversalTxn); err != nil {
+	if err := s.insertTransaction(ctx, tx, reversalTxn); err != nil {
 		return ReverseResult{}, fmt.Errorf("storage: insert reversal transaction: %w", err)
 	}
 
 	// 5. Insert inverse stock movement row
 	if orig.ProductID != "" && productDelta != 0 {
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO stock_movements(transaction_id, shop_id, product_id, delta, created_at) VALUES(?, ?, ?, ?, ?)`,
+			s.rebind(`INSERT INTO stock_movements(transaction_id, shop_id, product_id, delta, created_at) VALUES(?, ?, ?, ?, ?)`),
 			reversalID, shopID, orig.ProductID, productDelta, formatTime(now))
 		if err != nil {
 			return ReverseResult{}, fmt.Errorf("storage: insert reversal stock movement: %w", err)
@@ -184,13 +189,13 @@ func (s *Store) GetProductMovements(
 
 	var total int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM stock_movements WHERE shop_id = ? AND product_id = ?`,
+		s.rebind(`SELECT COUNT(*) FROM stock_movements WHERE shop_id = ? AND product_id = ?`),
 		shopID, productID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage: count product movements: %w", err)
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, s.rebind(`
 		SELECT sm.transaction_id, sm.shop_id, sm.product_id, sm.delta, sm.created_at,
 		       t.type, t.status, t.quantity, t.unit, t.product_name, COALESCE(t.transcript, '')
 		FROM stock_movements sm
@@ -198,7 +203,7 @@ func (s *Store) GetProductMovements(
 		WHERE sm.shop_id = ? AND sm.product_id = ?
 		ORDER BY sm.created_at DESC
 		LIMIT ? OFFSET ?
-	`, shopID, productID, limit, offset)
+	`), shopID, productID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage: query product movements: %w", err)
 	}
@@ -272,6 +277,11 @@ func (s *Store) AdjustProductStock(
 	}
 	defer tx.Rollback()
 
+	if s.Dialect().IsPostgres() {
+		var dummy string
+		_ = tx.QueryRowContext(ctx, s.rebind(`SELECT id FROM products WHERE shop_id = ? AND id = ? FOR UPDATE`), shopID, productID).Scan(&dummy)
+	}
+
 	p, err := s.getProduct(ctx, tx, `SELECT `+productColumns+` FROM products WHERE shop_id = ? AND id = ?`, shopID, productID)
 	if err != nil {
 		return models.Product{}, models.Transaction{}, err
@@ -285,7 +295,7 @@ func (s *Store) AdjustProductStock(
 	p.Quantity = newQty
 
 	_, err = tx.ExecContext(ctx,
-		`UPDATE products SET quantity = ?, updated_at = ? WHERE shop_id = ? AND id = ?`,
+		s.rebind(`UPDATE products SET quantity = ?, updated_at = ? WHERE shop_id = ? AND id = ?`),
 		p.Quantity, formatTime(time.Now()), shopID, p.ID)
 	if err != nil {
 		return models.Product{}, models.Transaction{}, fmt.Errorf("storage: update product stock: %w", err)
@@ -320,12 +330,12 @@ func (s *Store) AdjustProductStock(
 		Transcript:  fmt.Sprintf("STOCK AUDIT (%+d %s): %s", delta, p.BaseUnit, reason),
 	}
 
-	if err := insertTransaction(ctx, tx, adjTxn); err != nil {
+	if err := s.insertTransaction(ctx, tx, adjTxn); err != nil {
 		return models.Product{}, models.Transaction{}, fmt.Errorf("storage: insert audit transaction: %w", err)
 	}
 
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO stock_movements(transaction_id, shop_id, product_id, delta, created_at) VALUES(?, ?, ?, ?, ?)`,
+		s.rebind(`INSERT INTO stock_movements(transaction_id, shop_id, product_id, delta, created_at) VALUES(?, ?, ?, ?, ?)`),
 		adjID, shopID, p.ID, delta, formatTime(now))
 	if err != nil {
 		return models.Product{}, models.Transaction{}, fmt.Errorf("storage: insert stock movement: %w", err)

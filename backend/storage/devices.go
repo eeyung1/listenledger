@@ -26,7 +26,7 @@ func (s *Store) PairDevice(ctx context.Context, d Device) error {
 
 	query := `INSERT INTO devices (id, shop_id, name, token_hash, paired_at, revoked_at)
 		VALUES (?, ?, ?, ?, ?, NULL)`
-	_, err := s.db.ExecContext(ctx, query, d.ID, d.ShopID, d.Name, d.TokenHash, formatTime(d.PairedAt))
+	_, err := s.db.ExecContext(ctx, s.rebind(query), d.ID, d.ShopID, d.Name, d.TokenHash, formatTime(d.PairedAt))
 	if err != nil {
 		return fmt.Errorf("storage: pair device: %w", err)
 	}
@@ -43,7 +43,7 @@ func (s *Store) GetDeviceByTokenHash(ctx context.Context, tokenHash string) (Dev
 	var pairedAtStr string
 	var revokedAtStr sql.NullString
 
-	err := s.db.QueryRowContext(ctx, query, tokenHash).Scan(
+	err := s.db.QueryRowContext(ctx, s.rebind(query), tokenHash).Scan(
 		&d.ID, &d.ShopID, &d.Name, &d.TokenHash, &pairedAtStr, &revokedAtStr,
 	)
 	if err != nil {
@@ -76,7 +76,7 @@ func (s *Store) RevokeDevice(ctx context.Context, shopID, deviceID string, revok
 		SET revoked_at = ?
 		WHERE shop_id = ? AND id = ? AND revoked_at IS NULL`
 
-	res, err := s.db.ExecContext(ctx, query, formatTime(revokedAt), shopID, deviceID)
+	res, err := s.db.ExecContext(ctx, s.rebind(query), formatTime(revokedAt), shopID, deviceID)
 	if err != nil {
 		return fmt.Errorf("storage: revoke device: %w", err)
 	}
@@ -97,7 +97,7 @@ func (s *Store) ListDevices(ctx context.Context, shopID string) ([]Device, error
 		WHERE shop_id = ?
 		ORDER BY paired_at ASC`
 
-	rows, err := s.db.QueryContext(ctx, query, shopID)
+	rows, err := s.db.QueryContext(ctx, s.rebind(query), shopID)
 	if err != nil {
 		return nil, fmt.Errorf("storage: list devices: %w", err)
 	}
@@ -143,7 +143,7 @@ func (s *Store) GetDeviceByID(ctx context.Context, shopID, deviceID string) (Dev
 	var pairedAtStr string
 	var revokedAtStr sql.NullString
 
-	err := s.db.QueryRowContext(ctx, query, shopID, deviceID).Scan(
+	err := s.db.QueryRowContext(ctx, s.rebind(query), shopID, deviceID).Scan(
 		&d.ID, &d.ShopID, &d.Name, &d.TokenHash, &pairedAtStr, &revokedAtStr,
 	)
 	if err != nil {
@@ -180,7 +180,7 @@ func (s *Store) RotateDeviceToken(ctx context.Context, shopID, deviceID, newToke
 		SET token_hash = ?, paired_at = ?, revoked_at = NULL
 		WHERE shop_id = ? AND id = ?`
 
-	res, err := s.db.ExecContext(ctx, query, newTokenHash, formatTime(rotatedAt), shopID, deviceID)
+	res, err := s.db.ExecContext(ctx, s.rebind(query), newTokenHash, formatTime(rotatedAt), shopID, deviceID)
 	if err != nil {
 		return Device{}, fmt.Errorf("storage: rotate device token: %w", err)
 	}

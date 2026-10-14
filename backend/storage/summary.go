@@ -31,7 +31,7 @@ func (s *Store) GetDailySummary(ctx context.Context, shopID string, startUTC, en
 
 	// 1. Fetch shop currency. Default to NGN if unconfigured.
 	var currency string
-	err := s.db.QueryRowContext(ctx, `SELECT currency FROM shops WHERE id = ?`, shopID).Scan(&currency)
+	err := s.db.QueryRowContext(ctx, s.rebind(`SELECT currency FROM shops WHERE id = ?`), shopID).Scan(&currency)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return DailySummary{}, fmt.Errorf("storage: get shop currency: %w", err)
 	}
@@ -42,7 +42,7 @@ func (s *Store) GetDailySummary(ctx context.Context, shopID string, startUTC, en
 	// 2. Compute confirmed sales total and count within the today window.
 	var salesSum int64
 	var salesCount int
-	err = s.db.QueryRowContext(ctx, `
+	err = s.db.QueryRowContext(ctx, s.rebind(`
 		SELECT COALESCE(SUM(amount_amount), 0), COUNT(id)
 		FROM transactions
 		WHERE shop_id = ?
@@ -50,31 +50,31 @@ func (s *Store) GetDailySummary(ctx context.Context, shopID string, startUTC, en
 		  AND status = 'confirmed'
 		  AND occurred_at >= ?
 		  AND occurred_at < ?
-	`, shopID, formatTime(startUTC), formatTime(endUTC)).Scan(&salesSum, &salesCount)
+	`), shopID, formatTime(startUTC), formatTime(endUTC)).Scan(&salesSum, &salesCount)
 	if err != nil {
 		return DailySummary{}, fmt.Errorf("storage: query sales summary: %w", err)
 	}
 
 	// 3. Count held transactions awaiting human review.
 	var pendingReviews int
-	err = s.db.QueryRowContext(ctx, `
+	err = s.db.QueryRowContext(ctx, s.rebind(`
 		SELECT COUNT(id)
 		FROM transactions
 		WHERE shop_id = ?
 		  AND status = 'review_required'
-	`, shopID).Scan(&pendingReviews)
+	`), shopID).Scan(&pendingReviews)
 	if err != nil {
 		return DailySummary{}, fmt.Errorf("storage: query review count: %w", err)
 	}
 
 	// 4. Count products at or below their reorder threshold.
 	var lowStockCount int
-	err = s.db.QueryRowContext(ctx, `
+	err = s.db.QueryRowContext(ctx, s.rebind(`
 		SELECT COUNT(id)
 		FROM products
 		WHERE shop_id = ?
 		  AND quantity <= low_stock_threshold
-	`, shopID).Scan(&lowStockCount)
+	`), shopID).Scan(&lowStockCount)
 	if err != nil {
 		return DailySummary{}, fmt.Errorf("storage: query low stock count: %w", err)
 	}

@@ -14,6 +14,7 @@ import (
 	"flag"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -51,7 +52,7 @@ func run() error {
 
 	frontendDefault := "../frontend"
 	flag.StringVar(&cfg.addr, "addr", ":8080", "host:port to listen on")
-	flag.StringVar(&cfg.dbPath, "db", "listenledger.db", "path to the SQLite database file")
+	flag.StringVar(&cfg.dbPath, "db", "", "path to the SQLite database file or PostgreSQL connection URL (defaults to DATABASE_URL env or listenledger.db)")
 	flag.StringVar(&cfg.frontendDir, "frontend", frontendDefault,
 		"directory containing index.html and the built SPA")
 	flag.BoolVar(&cfg.devMode, "dev", false,
@@ -60,12 +61,40 @@ func run() error {
 		"comma-separated browser origins permitted to open a WebSocket (empty = same-origin only)")
 	flag.Parse()
 
+	// Environment variable fallback for hosting platforms (Render, Supabase, Cloud Run, etc.)
+	if cfg.dbPath == "" {
+		if envDB := os.Getenv("DATABASE_URL"); envDB != "" {
+			cfg.dbPath = envDB
+		} else {
+			cfg.dbPath = "listenledger.db"
+		}
+	}
+
+	if port := os.Getenv("PORT"); port != "" && cfg.addr == ":8080" {
+		if !strings.HasPrefix(port, ":") {
+			cfg.addr = ":" + port
+		} else {
+			cfg.addr = port
+		}
+	}
+
 	cfg.allowedOrigins = splitList(*origins)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
 	return serve(logger, cfg)
+}
+
+func redactDSN(dsn string) string {
+	if !strings.Contains(dsn, "@") {
+		return dsn
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "[redacted-dsn]"
+	}
+	return u.Redacted()
 }
 
 func serve(logger *slog.Logger, cfg config) error {
@@ -90,7 +119,7 @@ func serve(logger *slog.Logger, cfg config) error {
 			logger.Error("closing store", "error", err)
 		}
 	}()
-	logger.Info("storage ready", "db", cfg.dbPath)
+	logger.Info("storage ready", "dialect", store.Dialect(), "target", redactDSN(cfg.dbPath))
 
 	hub := ws.NewHub(logger)
 	go hub.Run()

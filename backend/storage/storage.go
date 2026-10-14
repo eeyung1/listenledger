@@ -27,6 +27,9 @@ import (
 	"strings"
 	"time"
 
+	// PostgreSQL driver via pgx stdlib
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	// CGO SQLite driver. Requires CGO_ENABLED=1 and a C toolchain; see
 	// TODO.md for the pure-Go alternative if that becomes a problem for
 	// cross-compiling the orchestrator.
@@ -35,6 +38,9 @@ import (
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
+
+//go:embed migrations_pg/*.sql
+var migrationPgFS embed.FS
 
 // timeLayout is the on-disk timestamp format: UTC, fixed width, always nine
 // fractional digits.
@@ -55,17 +61,41 @@ var ErrInsufficientStock = errors.New("storage: adjustment would make stock nega
 
 // Store is the persistence handle.
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect Dialect
 }
 
-// Open connects to the SQLite database at path, applies pragmas, and runs any
-// outstanding migrations.
+// Dialect returns the active database engine dialect.
+func (s *Store) Dialect() Dialect {
+	if s == nil || s.dialect == "" {
+		return DialectSQLite
+	}
+	return s.dialect
+}
+
+// rebind converts '?' positional placeholders to the active dialect's format ($1, $2, ... for Postgres).
+func (s *Store) rebind(query string) string {
+	return rebindQuery(s.Dialect(), query)
+}
+
+// Open connects to either SQLite or PostgreSQL depending on the DSN format:
+// If dsn starts with "postgres://" or "postgresql://", it opens a PostgreSQL connection.
+// Otherwise, it opens a SQLite connection at path.
 //
 // Use ":memory:" for a shared in-memory database in tests.
-func Open(path string) (*Store, error) {
+func Open(dsn string) (*Store, error) {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		return OpenPostgres(dsn)
+	}
+	return OpenSQLite(dsn)
+}
+
+// OpenSQLite connects to the SQLite database at path, applies pragmas, and runs any
+// outstanding SQLite migrations.
+func OpenSQLite(path string) (*Store, error) {
 	db, err := sql.Open("sqlite3", buildDSN(path))
 	if err != nil {
-		return nil, fmt.Errorf("storage: open %s: %w", path, err)
+		return nil, fmt.Errorf("storage: open sqlite %s: %w", path, err)
 	}
 
 	// SQLite allows one writer at a time. A small pool with a busy timeout
@@ -81,10 +111,40 @@ func Open(path string) (*Store, error) {
 
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("storage: ping %s: %w", path, err)
+		return nil, fmt.Errorf("storage: ping sqlite %s: %w", path, err)
 	}
 
-	store := &Store{db: db}
+	store := &Store{db: db, dialect: DialectSQLite}
+	if err := store.migrate(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+// OpenPostgres connects to PostgreSQL using the provided connection string (URL),
+// configures production-grade connection pooling, and runs any outstanding PostgreSQL migrations.
+func OpenPostgres(connStr string) (*Store, error) {
+	db, err := sql.Open("pgx", connStr)
+	if err != nil {
+		return nil, fmt.Errorf("storage: open postgres: %w", err)
+	}
+
+	// Production-grade connection pooling per DATABASE_MIGRATION.md §1
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("storage: ping postgres: %w", err)
+	}
+
+	store := &Store{db: db, dialect: DialectPostgres}
 	if err := store.migrate(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -129,10 +189,9 @@ func (s *Store) DeleteShopData(ctx context.Context, shopID string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	for _, table := range []string{"stock_movements", "ledger_requests", "transactions", "products"} {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM `+table+` WHERE shop_id = ?`, shopID,
-		); err != nil {
+	for _, table := range []string{"review_decisions", "stock_movements", "ledger_requests", "transactions", "products"} {
+		query := s.rebind(`DELETE FROM ` + table + ` WHERE shop_id = ?`)
+		if _, err := tx.ExecContext(ctx, query, shopID); err != nil {
 			return fmt.Errorf("storage: delete %s for shop %s: %w", table, shopID, err)
 		}
 	}
@@ -194,7 +253,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 
-	names, err := fs.Glob(migrationFS, "migrations/*.sql")
+	targetFS := migrationFS
+	globPattern := "migrations/*.sql"
+	if s.Dialect().IsPostgres() {
+		targetFS = migrationPgFS
+		globPattern = "migrations_pg/*.sql"
+	}
+
+	names, err := fs.Glob(targetFS, globPattern)
 	if err != nil {
 		return fmt.Errorf("storage: list migrations: %w", err)
 	}
@@ -210,7 +276,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			continue
 		}
 
-		body, err := migrationFS.ReadFile(name)
+		body, err := targetFS.ReadFile(name)
 		if err != nil {
 			return fmt.Errorf("storage: read migration %s: %w", name, err)
 		}
@@ -243,8 +309,6 @@ func (s *Store) appliedVersions(ctx context.Context) (map[int]bool, error) {
 }
 
 // applyMigration runs one migration and records it, in a single transaction.
-// SQLite makes DDL transactional, so a failure part-way leaves no partial
-// schema behind.
 func (s *Store) applyMigration(ctx context.Context, version int, body string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -255,10 +319,8 @@ func (s *Store) applyMigration(ctx context.Context, version int, body string) er
 	if _, err := tx.ExecContext(ctx, body); err != nil {
 		return fmt.Errorf("storage: apply migration %d: %w", version, err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
-		version, formatTime(time.Now()),
-	); err != nil {
+	recordQuery := s.rebind(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`)
+	if _, err := tx.ExecContext(ctx, recordQuery, version, formatTime(time.Now())); err != nil {
 		return fmt.Errorf("storage: record migration %d: %w", version, err)
 	}
 
@@ -316,6 +378,9 @@ func nullFloat(value *float64) any {
 
 // Backup creates a clean, atomic snapshot of the database at destPath.
 func (s *Store) Backup(ctx context.Context, destPath string) error {
+	if s.Dialect().IsPostgres() {
+		return errors.New("storage: Backup via VACUUM INTO is SQLite-specific; for PostgreSQL use pg_dump or managed Supabase backups")
+	}
 	if destPath == "" {
 		return errors.New("storage: Backup requires a destination path")
 	}
@@ -327,8 +392,15 @@ func (s *Store) Backup(ctx context.Context, destPath string) error {
 	return nil
 }
 
-// VerifyIntegrity runs PRAGMA integrity_check on the database.
+// VerifyIntegrity checks the health and integrity of the database.
 func (s *Store) VerifyIntegrity(ctx context.Context) error {
+	if s.Dialect().IsPostgres() {
+		var result int
+		if err := s.db.QueryRowContext(ctx, "SELECT 1").Scan(&result); err != nil {
+			return fmt.Errorf("storage: postgres integrity check failed: %w", err)
+		}
+		return nil
+	}
 	var result string
 	if err := s.db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&result); err != nil {
 		return fmt.Errorf("storage: integrity check failed: %w", err)

@@ -82,7 +82,7 @@ func (s *Store) InsertProduct(ctx context.Context, product models.Product) error
 			created_at, updated_at, archived_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-	_, err = s.db.ExecContext(ctx, query,
+	_, err = s.db.ExecContext(ctx, s.rebind(query),
 		product.ID, product.ShopID, product.Name, product.SKU,
 		aliases, product.Price.Amount, product.Price.Currency,
 		product.Quantity, string(product.BaseUnit), packaging,
@@ -120,7 +120,7 @@ func (s *Store) UpdateProduct(ctx context.Context, product models.Product) (mode
 		       low_stock_threshold = ?, updated_at = ?
 		 WHERE shop_id = ? AND id = ?`
 
-	result, err := s.db.ExecContext(ctx, query,
+	result, err := s.db.ExecContext(ctx, s.rebind(query),
 		product.Name, product.SKU, aliases, product.Price.Amount,
 		product.Price.Currency, string(product.BaseUnit), packaging,
 		product.LowStockThreshold, formatTime(time.Now()),
@@ -166,12 +166,17 @@ func (s *Store) AdjustStock(ctx context.Context, shopID, productID string, delta
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if s.Dialect().IsPostgres() {
+		var dummy string
+		_ = tx.QueryRowContext(ctx, s.rebind(`SELECT id FROM products WHERE shop_id = ? AND id = ? FOR UPDATE`), shopID, productID).Scan(&dummy)
+	}
+
 	const update = `
 		UPDATE products
 		   SET quantity = quantity + ?, updated_at = ?
 		 WHERE shop_id = ? AND id = ? AND quantity + ? >= 0`
 
-	result, err := tx.ExecContext(ctx, update, delta, formatTime(time.Now()), shopID, productID, delta)
+	result, err := tx.ExecContext(ctx, s.rebind(update), delta, formatTime(time.Now()), shopID, productID, delta)
 	if err != nil {
 		return models.Product{}, fmt.Errorf("storage: adjust stock for %s: %w", productID, err)
 	}
@@ -185,7 +190,7 @@ func (s *Store) AdjustStock(ctx context.Context, shopID, productID string, delta
 		// been negative. They need different handling, so tell them apart.
 		var exists bool
 		err := tx.QueryRowContext(ctx,
-			`SELECT EXISTS (SELECT 1 FROM products WHERE shop_id = ? AND id = ?)`,
+			s.rebind(`SELECT EXISTS (SELECT 1 FROM products WHERE shop_id = ? AND id = ?)`),
 			shopID, productID,
 		).Scan(&exists)
 		if err != nil {
@@ -251,7 +256,7 @@ func (s *Store) AdjustStockPackaging(ctx context.Context, shopID, productID stri
 }
 
 func (s *Store) queryProducts(ctx context.Context, q querier, query string, args ...any) ([]models.Product, error) {
-	rows, err := q.QueryContext(ctx, query, args...)
+	rows, err := q.QueryContext(ctx, s.rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("storage: query products: %w", err)
 	}
@@ -273,7 +278,7 @@ func (s *Store) queryProducts(ctx context.Context, q querier, query string, args
 }
 
 func (s *Store) getProduct(ctx context.Context, q querier, query string, args ...any) (models.Product, error) {
-	product, err := scanProduct(q.QueryRowContext(ctx, query, args...))
+	product, err := scanProduct(q.QueryRowContext(ctx, s.rebind(query), args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Product{}, ErrNotFound
 	}
@@ -326,7 +331,7 @@ func (s *Store) ArchiveProduct(ctx context.Context, shopID, productID string) (m
 
 	now := formatTime(time.Now().UTC())
 	const query = `UPDATE products SET archived_at = ?, updated_at = ? WHERE shop_id = ? AND id = ? AND archived_at IS NULL`
-	res, err := s.db.ExecContext(ctx, query, now, now, shopID, productID)
+	res, err := s.db.ExecContext(ctx, s.rebind(query), now, now, shopID, productID)
 	if err != nil {
 		return models.Product{}, fmt.Errorf("storage: archive product %s: %w", productID, err)
 	}
@@ -348,7 +353,7 @@ func (s *Store) UnarchiveProduct(ctx context.Context, shopID, productID string) 
 
 	now := formatTime(time.Now().UTC())
 	const query = `UPDATE products SET archived_at = NULL, updated_at = ? WHERE shop_id = ? AND id = ? AND archived_at IS NOT NULL`
-	res, err := s.db.ExecContext(ctx, query, now, shopID, productID)
+	res, err := s.db.ExecContext(ctx, s.rebind(query), now, shopID, productID)
 	if err != nil {
 		return models.Product{}, fmt.Errorf("storage: unarchive product %s: %w", productID, err)
 	}
