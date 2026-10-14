@@ -239,24 +239,24 @@ func Transfer(ctx context.Context, src, dst *Store, dryRun bool) (Reconciliation
 		sr := ShopReconciliation{ShopID: shopID}
 
 		// Product counts
-		_ = src.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM products WHERE shop_id = ?`, shopID).Scan(&sr.SrcProductCount)
+		_ = src.db.QueryRowContext(ctx, src.rebind(`SELECT COUNT(*) FROM products WHERE shop_id = ?`), shopID).Scan(&sr.SrcProductCount)
 		_ = tx.QueryRowContext(ctx, dst.rebind(`SELECT COUNT(*) FROM products WHERE shop_id = ?`), shopID).Scan(&sr.DstProductCount)
 		sr.ProductCountMatch = (sr.SrcProductCount == sr.DstProductCount)
 
 		// Stock sums
-		_ = src.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(quantity), 0) FROM products WHERE shop_id = ?`, shopID).Scan(&sr.SrcStockSum)
+		_ = src.db.QueryRowContext(ctx, src.rebind(`SELECT COALESCE(SUM(quantity), 0) FROM products WHERE shop_id = ?`), shopID).Scan(&sr.SrcStockSum)
 		_ = tx.QueryRowContext(ctx, dst.rebind(`SELECT COALESCE(SUM(quantity), 0) FROM products WHERE shop_id = ?`), shopID).Scan(&sr.DstStockSum)
 		sr.StockSumMatch = (sr.SrcStockSum == sr.DstStockSum)
 
 		// Sales revenue
 		const salesQuery = `SELECT COALESCE(SUM(amount_amount), 0) FROM transactions WHERE shop_id = ? AND type = 'sale' AND status = 'confirmed'`
-		_ = src.db.QueryRowContext(ctx, salesQuery, shopID).Scan(&sr.SrcSalesRevenue)
+		_ = src.db.QueryRowContext(ctx, src.rebind(salesQuery), shopID).Scan(&sr.SrcSalesRevenue)
 		_ = tx.QueryRowContext(ctx, dst.rebind(salesQuery), shopID).Scan(&sr.DstSalesRevenue)
 		sr.SalesRevenueMatch = (sr.SrcSalesRevenue == sr.DstSalesRevenue)
 
 		// Pending reviews
 		const reviewsQuery = `SELECT COUNT(*) FROM transactions WHERE shop_id = ? AND status = 'review_required'`
-		_ = src.db.QueryRowContext(ctx, reviewsQuery, shopID).Scan(&sr.SrcPendingReviews)
+		_ = src.db.QueryRowContext(ctx, src.rebind(reviewsQuery), shopID).Scan(&sr.SrcPendingReviews)
 		_ = tx.QueryRowContext(ctx, dst.rebind(reviewsQuery), shopID).Scan(&sr.DstPendingReviews)
 		sr.PendingReviewsMatch = (sr.SrcPendingReviews == sr.DstPendingReviews)
 
