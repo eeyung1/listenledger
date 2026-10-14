@@ -348,7 +348,7 @@ These are end-to-end acceptance gates, not counts of existing endpoints.
 - [x] A paired microphone records real spoken sales and multi-line restocks.
 - [ ] Confirmed movements and receipt groups stay correct through failures and retries; uncertain captures remain harmless.
 - [ ] Review/correction, manual fallback and catalogue management work through the UI.
-- [ ] Totals and history remain correct through filtered live updates, delayed snapshots and reconnects.
+- [x] Totals and history remain correct through filtered live updates, delayed snapshots and reconnects.
 - [ ] Deployment isolation, device revocation, data persistence and clean restore are verified.
 - [ ] Genuine pilot results meet agreed targets with traceable evidence.
 
