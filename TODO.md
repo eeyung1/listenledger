@@ -1,5 +1,25 @@
 # TODO — ListenLedger
 
+## Automated UI End-to-End Acceptance Suite, Multi-Line Receipt Atomicity Invariants & Deployment Isolation increment (14 October 2026) — MILESTONE 21 COMPLETE
+
+Implemented comprehensive end-to-end acceptance test suites verifying core MVP operational and failure invariants (`frontend/test/ui_acceptance.test.mjs`, `frontend/test/test_dom.mjs`, `backend/api/e2e_receipt_failure_test.go`, `backend/api/deployment_isolation_test.go`, `backend/auth/session.go`):
+1. **Frontend End-to-End UI Acceptance Suite (`frontend/test/ui_acceptance.test.mjs`, `frontend/test/test_dom.mjs`)**: Built lightweight browser DOM and event simulator (`MockElement`, `MockSelectElement`, `MockOptionElement`, `MockNode`, `DOMTokenList`, `MockEvent`, `MockCustomEvent`, `window.location.origin`, `window.confirm`, `window.prompt`, `window.alert`) supporting attribute matching and compound selector queries. Tested real HTML template mounting and event-driven view workflows across:
+   - *Catalogue Management*: Add product modal submission with minor-unit currency conversion, edit product modal, stock count audit modal with packaging unit, archiving, active/archived tab transitions, and unarchiving.
+   - *Review Queue Workflow*: Review card rendering with held transcript and extraction reasons, quick confirm, edit & confirm with corrections modal (product selection, quantity, unit, amount), and rejection with audit notes.
+   - *Manual Fallback & Reversals*: Manual entry modal submission for sales/restocks with packaging and notes, and void/reversal modal action.
+2. **Multi-Line Receipt Failure, Rollback & Replay Suite (`backend/api/e2e_receipt_failure_test.go`)**:
+   - `TestMultiLineReceipt_AtomicityRollbackOnLineFailure`: Verifies that if line 2 of an intake receipt exceeds available stock, the entire receipt fails with 409 Conflict, rolling back line 1 with zero stock or ledger mutations.
+   - `TestReceipt_IdempotentReplayAndConflictDetection`: Proves idempotent retries return 200 OK without double-decrementing stock, while conflicting reuse of capture ID is rejected with 409 Conflict.
+   - `TestUncertainCaptures_HarmlessAndZeroStockMutation`: Proves captures held for review or rejected have zero stock or financial effect.
+   - `TestReceiptWideConfirmationAndRollback`: Proves receipt-wide confirmation and prevents duplicate stock application.
+3. **Multi-Tenant Deployment Isolation & Device Revocation Suite (`backend/api/deployment_isolation_test.go`)**:
+   - `TestDeploymentIsolation_CrossTenantHermeticity`: Proves Shop B cannot view or mutate Shop A's catalogue, ledger, reviews, daily summaries, export CSV, devices, or spoof access via `?shop_id=`.
+   - `TestDeviceRevocation_ImmediateIntakeRejection`: Proves edge capture requests using a revoked device token are immediately rejected with HTTP 401 Unauthorized.
+   - `TestAccountRecovery_SessionRevocation`: Proves executing emergency account recovery immediately invalidates all prior authenticated browser sessions.
+4. **Edge Device Token Exemption in CSRF Middleware (`backend/auth/session.go`)**: Updated `ProtectWrites` to exempt machine-to-machine requests with `Authorization: Bearer ` prefix from browser CSRF `X-ListenLedger-Request: 1` requirement.
+
+Next: Live cloud deployment verification and controlled physical shop trials.
+
 ## Filter- & Pagination-Aware Realtime Ledger Updates & Event Reconciliation increment (14 October 2026) — MILESTONE 20 COMPLETE
 
 Resolved live ledger update inconsistencies across filters and pagination (`frontend/src/views/transactions.ts`, `frontend/src/format.ts`, `frontend/src/views/inventory.ts`, `frontend/test/filtered_updates.test.mjs`):
