@@ -103,12 +103,12 @@ pub fn generate_noisy_speech_burst_wav(
             + (2.0 * std::f32::consts::PI * 800.0 * t).sin() * 0.3
             + (2.0 * std::f32::consts::PI * 2500.0 * t).sin() * 0.2)
             * speech_amp;
-        let noise = ((i as f32 * 12.9898).sin() * 43758.5453).fract() * noise_amp;
+        let noise = ((i as f32 * 12.9898).sin() * 43_758.547).fract() * noise_amp;
         samples.push(speech + noise);
     }
 
     for i in 0..silence_samples {
-        let noise = ((i as f32 * 12.9898).sin() * 43758.5453).fract() * (noise_amp * 0.5);
+        let noise = ((i as f32 * 12.9898).sin() * 43_758.547).fract() * (noise_amp * 0.5);
         samples.push(noise);
     }
     encode_wav(&samples, sample_rate)
