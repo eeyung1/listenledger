@@ -181,14 +181,16 @@ pub fn run_acoustic_benchmark(
             }
 
             if state == CaptureSessionState::BoundaryDetected {
-                boundary_detected = true;
                 let samples = session.drain_audio_for_transcription();
                 if let Ok(transcript) = stt.transcribe(&samples) {
                     let (b_type, b_phrase) =
                         detect_boundary_with_config(&transcript, boundary_config);
-                    captured_type = b_type;
-                    extracted_lines =
-                        extract_lines_from_transcript(&transcript, b_phrase.as_deref());
+                    if b_type.is_some() {
+                        boundary_detected = true;
+                        captured_type = b_type;
+                        extracted_lines =
+                            extract_lines_from_transcript(&transcript, b_phrase.as_deref());
+                    }
                 }
                 break;
             }
