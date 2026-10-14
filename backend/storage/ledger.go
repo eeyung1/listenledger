@@ -256,6 +256,11 @@ func (s *Store) ResolveReview(
 	}
 	defer tx.Rollback()
 
+	if s.Dialect().IsPostgres() {
+		var dummy string
+		_ = tx.QueryRowContext(ctx, s.rebind(`SELECT id FROM transactions WHERE shop_id = ? AND id = ? FOR UPDATE`), shopID, transactionID).Scan(&dummy)
+	}
+
 	t, err := scanTransaction(tx.QueryRowContext(ctx, s.rebind(`SELECT `+transactionColumns+` FROM transactions WHERE shop_id=? AND id=?`), shopID, transactionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return LedgerResult{}, ErrNotFound
@@ -278,8 +283,16 @@ func (s *Store) ResolveReview(
 
 	if action == ReviewActionReject {
 		t.Status = models.StatusRejected
-		if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE transactions SET status=? WHERE shop_id=? AND id=?`), string(models.StatusRejected), shopID, transactionID); err != nil {
+		res, err := tx.ExecContext(ctx, s.rebind(`UPDATE transactions SET status=? WHERE shop_id=? AND id=? AND status=?`), string(models.StatusRejected), shopID, transactionID, string(models.StatusReviewRequired))
+		if err != nil {
 			return LedgerResult{}, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return LedgerResult{}, err
+		}
+		if affected == 0 {
+			return LedgerResult{}, ErrConflict
 		}
 
 		now := time.Now().UTC()
@@ -382,9 +395,17 @@ func (s *Store) ResolveReview(
 	}
 
 	t.Status = models.StatusConfirmed
-	if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE transactions SET status=?, product_id=?, product_name=?, quantity=?, unit=?, amount_amount=?, amount_currency=? WHERE shop_id=? AND id=?`),
-		string(models.StatusConfirmed), t.ProductID, t.ProductName, t.Quantity, string(t.Unit), t.Amount.Amount, t.Amount.Currency, shopID, t.ID); err != nil {
+	res, err := tx.ExecContext(ctx, s.rebind(`UPDATE transactions SET status=?, product_id=?, product_name=?, quantity=?, unit=?, amount_amount=?, amount_currency=? WHERE shop_id=? AND id=? AND status=?`),
+		string(models.StatusConfirmed), t.ProductID, t.ProductName, t.Quantity, string(t.Unit), t.Amount.Amount, t.Amount.Currency, shopID, t.ID, string(models.StatusReviewRequired))
+	if err != nil {
 		return LedgerResult{}, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return LedgerResult{}, err
+	}
+	if affected == 0 {
+		return LedgerResult{}, ErrConflict
 	}
 
 	decisionType := DecisionConfirmed

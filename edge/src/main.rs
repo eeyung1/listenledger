@@ -20,10 +20,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let backend_url = env::var("LISTENLEDGER_BACKEND_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
-    let device_token = env::var("LISTENLEDGER_DEVICE_TOKEN")
-        .unwrap_or_else(|_| "dev_test_token".to_string());
-    let device_id = env::var("LISTENLEDGER_DEVICE_ID")
-        .unwrap_or_else(|_| "dev_edge_runner".to_string());
+    let device_token =
+        env::var("LISTENLEDGER_DEVICE_TOKEN").unwrap_or_else(|_| "dev_test_token".to_string());
+    let device_id =
+        env::var("LISTENLEDGER_DEVICE_ID").unwrap_or_else(|_| "dev_edge_runner".to_string());
     let queue_path = env::var("LISTENLEDGER_QUEUE_FILE")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("captures_queue.jsonl"));
@@ -157,7 +157,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn flush_offline_queue(client: &CaptureClient, queue: &mut DurableQueue) {
     while let Some(pending) = queue.peek() {
-        println!("Flushing pending capture {} from queue...", pending.capture_id);
+        println!(
+            "Flushing pending capture {} from queue...",
+            pending.capture_id
+        );
         match client.submit_capture(pending).await {
             Ok(ack) => {
                 println!("Backend acknowledged capture: {}", ack);
