@@ -31,6 +31,12 @@ func TestPilotTrialEvaluation(t *testing.T) {
 	if metrics.QuantityAccuracy < gates.MinQuantityAccuracy {
 		t.Errorf("Quantity accuracy %.1f%% below gate %.1f%%", metrics.QuantityAccuracy, gates.MinQuantityAccuracy)
 	}
+	if metrics.UnitAccuracy < gates.MinUnitAccuracy {
+		t.Errorf("Unit accuracy %.1f%% below gate %.1f%%", metrics.UnitAccuracy, gates.MinUnitAccuracy)
+	}
+	if metrics.AmountAccuracy < gates.MinAmountAccuracy {
+		t.Errorf("Amount accuracy %.1f%% below gate %.1f%%", metrics.AmountAccuracy, gates.MinAmountAccuracy)
+	}
 	if metrics.FalseCaptureRate > gates.MaxFalseCaptureRate {
 		t.Errorf("False capture rate %.1f%% above gate %.1f%%", metrics.FalseCaptureRate, gates.MaxFalseCaptureRate)
 	}
@@ -39,6 +45,9 @@ func TestPilotTrialEvaluation(t *testing.T) {
 	}
 	if metrics.CorrectionRate > gates.MaxCorrectionRate {
 		t.Errorf("Correction rate %.1f%% above gate %.1f%%", metrics.CorrectionRate, gates.MaxCorrectionRate)
+	}
+	if metrics.ProtocolComplianceRate < gates.MinProtocolComplianceRate {
+		t.Errorf("Protocol compliance rate %.1f%% below gate %.1f%%", metrics.ProtocolComplianceRate, gates.MinProtocolComplianceRate)
 	}
 	if metrics.StockDiscrepancyCount != 0 {
 		t.Errorf("Inventory reconciliation failed: %d discrepancies found", metrics.StockDiscrepancyCount)

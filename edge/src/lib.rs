@@ -4,6 +4,7 @@
 //! transaction boundary detection, offline queue persistence, and authenticated delivery.
 
 pub mod audio;
+pub mod benchmark;
 pub mod client;
 pub mod extractor;
 pub mod health;
@@ -424,5 +425,46 @@ mod tests {
         let frame = file_src.read_frame().expect("read frame");
         assert!(frame.is_some());
         assert!(file_src.is_exhausted());
+    }
+
+    #[test]
+    fn test_acoustic_pipeline_benchmark() {
+        use super::audio::AudioConfig;
+        use super::benchmark::{run_acoustic_benchmark, standard_acoustic_scenarios};
+        use super::extractor::BoundaryConfig;
+
+        let config = AudioConfig::default();
+        let boundary_config = BoundaryConfig::default();
+        let scenarios = standard_acoustic_scenarios();
+        assert_eq!(scenarios.len(), 4);
+
+        let (metrics, results) = run_acoustic_benchmark(&scenarios, &config, &boundary_config);
+        assert_eq!(metrics.total_scenarios, 4);
+        assert_eq!(metrics.passed_scenarios, 4);
+        assert_eq!(metrics.false_captures, 0);
+        assert_eq!(metrics.missed_captures, 0);
+        assert!(metrics.total_frames_processed > 0);
+        assert_eq!(results.len(), 4);
+
+        // Verify clean sale scenario
+        let sale_res = results
+            .iter()
+            .find(|r| r.scenario_name == "CleanSale_Milo")
+            .expect("sale res");
+        assert!(sale_res.passed);
+        assert!(sale_res.boundary_detected);
+        assert_eq!(sale_res.captured_type, Some(TransactionType::Sale));
+        assert!(!sale_res.extracted_lines.is_empty());
+        assert_eq!(sale_res.extracted_lines[0].product_name, "Milo");
+
+        // Verify casual chatter scenario has zero captures
+        let chatter_res = results
+            .iter()
+            .find(|r| r.scenario_name == "CasualChatter_NoClosingPhrase")
+            .expect("chatter res");
+        assert!(chatter_res.passed);
+        assert!(!chatter_res.boundary_detected);
+        assert_eq!(chatter_res.captured_type, None);
+        assert!(chatter_res.extracted_lines.is_empty());
     }
 }
