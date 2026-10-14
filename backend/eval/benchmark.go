@@ -30,9 +30,12 @@ type TargetGates struct {
 	MinFullTransactionAccuracy float64 // e.g. 90.0%
 	MinSKUAccuracy             float64 // e.g. 95.0%
 	MinQuantityAccuracy        float64 // e.g. 95.0%
+	MinUnitAccuracy            float64 // e.g. 95.0%
+	MinAmountAccuracy          float64 // e.g. 95.0%
 	MaxFalseCaptureRate        float64 // e.g. 3.0%
 	MaxMissedTransactionRate   float64 // e.g. 5.0%
 	MaxCorrectionRate          float64 // e.g. 10.0%
+	MinProtocolComplianceRate  float64 // e.g. 85.0%
 	MaxP95LatencyMs            float64 // e.g. 2000ms
 }
 
@@ -41,9 +44,12 @@ var DefaultTargetGates = TargetGates{
 	MinFullTransactionAccuracy: 90.0,
 	MinSKUAccuracy:             95.0,
 	MinQuantityAccuracy:        95.0,
+	MinUnitAccuracy:            95.0,
+	MinAmountAccuracy:          95.0,
 	MaxFalseCaptureRate:        3.0,
 	MaxMissedTransactionRate:   5.0,
 	MaxCorrectionRate:          10.0,
+	MinProtocolComplianceRate:  85.0,
 	MaxP95LatencyMs:            1500.0,
 }
 
@@ -423,6 +429,7 @@ func BenchmarkScenarios() []Scenario {
 type TrialMetrics struct {
 	TotalInteractions        int
 	LegitimateCommercial     int
+	NonCommercialCount       int
 	CapturedCount            int
 	MissedCount              int
 	FalseCaptureCount        int
@@ -434,6 +441,8 @@ type TrialMetrics struct {
 	FullTransactionAcc       float64
 	SKUAccuracy              float64
 	QuantityAccuracy         float64
+	UnitAccuracy             float64
+	AmountAccuracy           float64
 	MissedTransactionRate    float64
 	FalseCaptureRate         float64
 	CorrectionRate           float64

@@ -4,7 +4,7 @@
 
 **Evaluation Mode**: Synthetic In-Memory Backend Integration Suite (`backend/eval`)  
 **Target Scenario Profile**: Mama Tolu Provisions Simulation (Simulated Shop ID: shop_pilot_01)  
-**Execution Timestamp**: 2026-10-14 11:50:01 UTC  
+**Execution Timestamp**: 2026-10-14 12:55:04 UTC  
 **Tested Storage**: SQLite / PostgreSQL Dual-Dialect Engine  
 
 ---
@@ -15,11 +15,14 @@
 |---|---|---|---|
 | **Full Transaction Accuracy** | &ge; 90.0% | **100.0%** | **PASS** |
 | **SKU / Product Recognition** | &ge; 95.0% | **100.0%** | **PASS** |
-| **Quantity & Unit Recognition** | &ge; 95.0% | **100.0%** | **PASS** |
+| **Quantity Recognition** | &ge; 95.0% | **100.0%** | **PASS** |
+| **Unit Recognition** | &ge; 95.0% | **100.0%** | **PASS** |
+| **Amount Recognition** | &ge; 95.0% | **100.0%** | **PASS** |
 | **False Capture Rate** | &le; 3.0% | **0.0%** | **PASS** |
 | **Missed Transaction Rate** | &le; 5.0% | **0.0%** | **PASS** |
 | **Owner Correction Rate** | &le; 10.0% | **6.2%** | **PASS** |
-| **Processing Latency (p95)** | &le; 1500 ms | **6.46 ms** | **PASS** |
+| **Staff Protocol Compliance** | &ge; 85.0% | **88.9%** | **PASS** |
+| **Processing Latency (p95)** | &le; 1500 ms | **8.75 ms** | **PASS** |
 | **Inventory Reconciliation** | 0 discrepancies | **0 discrepancies** | **PASS** |
 | **Revenue Reconciliation** | 0 discrepancy | **&#8358;0 discrepancy** | **PASS** |
 
@@ -29,24 +32,26 @@
 
 - **Total Spoken Interactions**: 20
 - **Legitimate Commercial Transactions**: 18
+- **Negative / Non-Commercial Chatter Tested**: 2
 - **Captured Transactions**: 17
 - **Auto-Confirmed Movements**: 15
 - **Held for Review (Weak/Ambiguous)**: 2
 - **Owner Manual Confirmations / Corrections**: 1
 - **Owner Rejections (Disputed Chatter)**: 1
 - **Duplicate Retries Replayed (Idempotent)**: 1
-- **Background Non-Commercial Speech Ignored**: 2 (0 false positive captures)
-- **Staff Protocol Compliance Rate**: 100.0%
+- **False Captures (Non-Commercial Auto-Confirmed)**: 0 (0.0%)
+- **Missed Commercial Captures**: 0 (0.0%)
+- **Staff Protocol Compliance Rate**: 88.9%
 
 ---
 
 ## 3. End-to-End Latency Profile
 
-- **p50 Latency**: 3.40 ms
-- **p90 Latency**: 5.39 ms
-- **p95 Latency**: 6.46 ms
-- **p99 Latency**: 6.46 ms
-- **Total Test Execution Duration**: 97ms
+- **p50 Latency**: 3.27 ms
+- **p90 Latency**: 8.43 ms
+- **p95 Latency**: 8.75 ms
+- **p99 Latency**: 8.75 ms
+- **Total Test Execution Duration**: 147ms
 
 ---
 

@@ -16,6 +16,7 @@ import (
 	"github.com/eeyung1/listenledger-backend/api"
 	"github.com/eeyung1/listenledger-backend/models"
 	"github.com/eeyung1/listenledger-backend/storage"
+	"github.com/eeyung1/listenledger-backend/validate"
 )
 
 // Runner coordinates execution of the pilot trial benchmark suite.
@@ -116,22 +117,82 @@ func (r *Runner) Run(ctx context.Context) (*TrialMetrics, error) {
 	var latencies []float64
 
 	var (
-		correctSKUs   int
-		correctQtys   int
-		fullAccurate  int
-		totalCaptured int
+		correctSKUs    int
+		correctQtys    int
+		correctUnits   int
+		correctAmounts int
+		fullAccurate   int
+		compliantCount int
 	)
 
 	occurredAtMap := make(map[string]string)
 
 	for _, sc := range scenarios {
-		// Non-commercial background chatter test
+		// Non-commercial background chatter test (negative cases)
 		if !sc.ShouldCapture {
-			// Speech with no closing phrase or commercial intent is dropped by edge
+			metrics.NonCommercialCount++
+
+			// 1. Verify edge boundary detection: non-commercial speech must not trigger closing phrases
+			_, _, boundaryFound := validate.DetectBoundary(sc.Transcript, "Thank you", "Stock received")
+			if boundaryFound {
+				metrics.FalseCaptureCount++
+				r.Logger.Warn("unexpected boundary detection on non-commercial chatter", "scenario", sc.ID)
+			}
+
+			// 2. Adversarial intake test: verify submission without boundary never auto-confirms
+			advBody := map[string]any{
+				"capture_id":      "adv_" + sc.ID,
+				"occurred_at":     time.Now().UTC().Format(time.RFC3339),
+				"transcript":      sc.Transcript,
+				"closing_phrase":  sc.ClosingPhrase,
+				"extracted_lines": sc.Lines,
+			}
+			bodyBytes, _ := json.Marshal(advBody)
+			req := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewReader(bodyBytes))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+r.Token)
+			req.Header.Set("Idempotency-Key", "idem_adv_"+sc.ID)
+			rec := httptest.NewRecorder()
+			r.Handler.ServeHTTP(rec, req)
+
+			// If any transaction was returned, verify it is held for review, NEVER confirmed
+			if rec.Code == http.StatusOK || rec.Code == http.StatusCreated {
+				var advRes struct {
+					Transactions []models.Transaction `json:"transactions"`
+				}
+				if err := json.NewDecoder(rec.Body).Decode(&advRes); err == nil {
+					for _, txn := range advRes.Transactions {
+						if txn.Status == models.StatusConfirmed {
+							metrics.FalseCaptureCount++
+							r.Logger.Warn("false capture auto-confirmed on non-commercial chatter", "scenario", sc.ID, "txn_id", txn.ID)
+						}
+					}
+				}
+			}
 			continue
 		}
 
 		metrics.LegitimateCommercial++
+
+		// Test edge boundary detection for legitimate commercial speech
+		_, _, boundaryFound := validate.DetectBoundary(sc.Transcript, "Thank you", "Stock received")
+		if !boundaryFound && sc.ClosingPhrase != "" {
+			metrics.MissedCount++
+			r.Logger.Warn("edge boundary detector missed closing phrase", "scenario", sc.ID)
+		}
+
+		// Evaluate protocol compliance
+		isCompliant := sc.ClosingPhrase != "" &&
+			boundaryFound &&
+			len(sc.Lines) > 0 &&
+			sc.Lines[0].ProductName != "" &&
+			sc.Lines[0].Quantity > 0 &&
+			sc.Lines[0].Unit != "" &&
+			!sc.IsDisputed &&
+			(sc.ExpectedType != models.TypeSale || sc.ExpectedAmountKobo > 0)
+		if isCompliant {
+			compliantCount++
+		}
 
 		// Commercial interaction
 		t0 := time.Now()
@@ -194,7 +255,6 @@ func (r *Runner) Run(ctx context.Context) (*TrialMetrics, error) {
 		}
 		txn := captureRes.Transactions[0]
 
-		totalCaptured++
 		metrics.CapturedCount++
 
 		if sc.ShouldConfirm {
@@ -206,13 +266,22 @@ func (r *Runner) Run(ctx context.Context) (*TrialMetrics, error) {
 			// Accuracy checks
 			skuMatch := txn.ProductID == sc.ExpectedProductID
 			qtyMatch := txn.Quantity == sc.ExpectedQty
+			unitMatch := txn.Unit == sc.ExpectedUnit
+			amountMatch := txn.Amount.Amount == sc.ExpectedAmountKobo
+
 			if skuMatch {
 				correctSKUs++
 			}
 			if qtyMatch {
 				correctQtys++
 			}
-			if skuMatch && qtyMatch {
+			if unitMatch {
+				correctUnits++
+			}
+			if amountMatch {
+				correctAmounts++
+			}
+			if skuMatch && qtyMatch && unitMatch && amountMatch {
 				fullAccurate++
 			}
 
@@ -292,11 +361,17 @@ func (r *Runner) Run(ctx context.Context) (*TrialMetrics, error) {
 		metrics.FullTransactionAcc = (float64(fullAccurate) / float64(metrics.ConfirmedCount)) * 100.0
 		metrics.SKUAccuracy = (float64(correctSKUs) / float64(metrics.ConfirmedCount)) * 100.0
 		metrics.QuantityAccuracy = (float64(correctQtys) / float64(metrics.ConfirmedCount)) * 100.0
+		metrics.UnitAccuracy = (float64(correctUnits) / float64(metrics.ConfirmedCount)) * 100.0
+		metrics.AmountAccuracy = (float64(correctAmounts) / float64(metrics.ConfirmedCount)) * 100.0
 		metrics.CorrectionRate = (float64(metrics.OwnerCorrections) / float64(metrics.ConfirmedCount+metrics.OwnerCorrections)) * 100.0
-		metrics.MissedTransactionRate = (float64(metrics.MissedCount) / float64(metrics.LegitimateCommercial)) * 100.0
 	}
-	metrics.FalseCaptureRate = 0.0 // Zero false captures across background chatter
-	metrics.ProtocolComplianceRate = 100.0
+	if metrics.LegitimateCommercial > 0 {
+		metrics.MissedTransactionRate = (float64(metrics.MissedCount) / float64(metrics.LegitimateCommercial)) * 100.0
+		metrics.ProtocolComplianceRate = (float64(compliantCount) / float64(metrics.LegitimateCommercial)) * 100.0
+	}
+	if metrics.NonCommercialCount > 0 {
+		metrics.FalseCaptureRate = (float64(metrics.FalseCaptureCount) / float64(metrics.NonCommercialCount)) * 100.0
+	}
 
 	// Calculate Latency Percentiles
 	if len(latencies) > 0 {
@@ -344,10 +419,13 @@ func GenerateMarkdownReport(m *TrialMetrics, gates TargetGates) string {
 |---|---|---|---|
 | **Full Transaction Accuracy** | &ge; %.1f%% | **%.1f%%** | %s |
 | **SKU / Product Recognition** | &ge; %.1f%% | **%.1f%%** | %s |
-| **Quantity & Unit Recognition** | &ge; %.1f%% | **%.1f%%** | %s |
+| **Quantity Recognition** | &ge; %.1f%% | **%.1f%%** | %s |
+| **Unit Recognition** | &ge; %.1f%% | **%.1f%%** | %s |
+| **Amount Recognition** | &ge; %.1f%% | **%.1f%%** | %s |
 | **False Capture Rate** | &le; %.1f%% | **%.1f%%** | %s |
 | **Missed Transaction Rate** | &le; %.1f%% | **%.1f%%** | %s |
 | **Owner Correction Rate** | &le; %.1f%% | **%.1f%%** | %s |
+| **Staff Protocol Compliance** | &ge; %.1f%% | **%.1f%%** | %s |
 | **Processing Latency (p95)** | &le; %.0f ms | **%.2f ms** | %s |
 | **Inventory Reconciliation** | 0 discrepancies | **%d discrepancies** | %s |
 | **Revenue Reconciliation** | 0 discrepancy | **&#8358;%d discrepancy** | %s |
@@ -358,13 +436,15 @@ func GenerateMarkdownReport(m *TrialMetrics, gates TargetGates) string {
 
 - **Total Spoken Interactions**: %d
 - **Legitimate Commercial Transactions**: %d
+- **Negative / Non-Commercial Chatter Tested**: %d
 - **Captured Transactions**: %d
 - **Auto-Confirmed Movements**: %d
 - **Held for Review (Weak/Ambiguous)**: %d
 - **Owner Manual Confirmations / Corrections**: %d
 - **Owner Rejections (Disputed Chatter)**: %d
 - **Duplicate Retries Replayed (Idempotent)**: %d
-- **Background Non-Commercial Speech Ignored**: 2 (0 false positive captures)
+- **False Captures (Non-Commercial Auto-Confirmed)**: %d (%.1f%%)
+- **Missed Commercial Captures**: %d (%.1f%%)
 - **Staff Protocol Compliance Rate**: %.1f%%
 
 ---
@@ -399,20 +479,26 @@ All synthetic benchmark gates have been satisfied with zero discrepancies. The b
 		gates.MinFullTransactionAccuracy, m.FullTransactionAcc, passFail(m.FullTransactionAcc >= gates.MinFullTransactionAccuracy),
 		gates.MinSKUAccuracy, m.SKUAccuracy, passFail(m.SKUAccuracy >= gates.MinSKUAccuracy),
 		gates.MinQuantityAccuracy, m.QuantityAccuracy, passFail(m.QuantityAccuracy >= gates.MinQuantityAccuracy),
+		gates.MinUnitAccuracy, m.UnitAccuracy, passFail(m.UnitAccuracy >= gates.MinUnitAccuracy),
+		gates.MinAmountAccuracy, m.AmountAccuracy, passFail(m.AmountAccuracy >= gates.MinAmountAccuracy),
 		gates.MaxFalseCaptureRate, m.FalseCaptureRate, passFail(m.FalseCaptureRate <= gates.MaxFalseCaptureRate),
 		gates.MaxMissedTransactionRate, m.MissedTransactionRate, passFail(m.MissedTransactionRate <= gates.MaxMissedTransactionRate),
 		gates.MaxCorrectionRate, m.CorrectionRate, passFail(m.CorrectionRate <= gates.MaxCorrectionRate),
+		gates.MinProtocolComplianceRate, m.ProtocolComplianceRate, passFail(m.ProtocolComplianceRate >= gates.MinProtocolComplianceRate),
 		gates.MaxP95LatencyMs, m.P95LatencyMs, passFail(m.P95LatencyMs <= gates.MaxP95LatencyMs),
 		m.StockDiscrepancyCount, passFail(m.StockDiscrepancyCount == 0),
 		m.RevenueDiscrepancyAmount, passFail(m.RevenueDiscrepancyAmount == 0),
 		m.TotalInteractions,
 		m.LegitimateCommercial,
+		m.NonCommercialCount,
 		m.CapturedCount,
 		m.ConfirmedCount,
 		m.ReviewCount,
 		m.OwnerCorrections,
 		m.OwnerRejections,
 		m.DuplicateReplays,
+		m.FalseCaptureCount, m.FalseCaptureRate,
+		m.MissedCount, m.MissedTransactionRate,
 		m.ProtocolComplianceRate,
 		m.P50LatencyMs,
 		m.P90LatencyMs,

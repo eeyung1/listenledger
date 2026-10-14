@@ -332,7 +332,7 @@ User-approved workflow: **create branch → push branch → wait for configured 
 - [x] Add a scripted backend integration benchmark, report generator and proposed target gates.
 - [x] Write a draft staff-training guide.
 - [x] Relabel/correct `TRIAL_REPORT.md` and evaluation metadata so synthetic results cannot be mistaken for physical-shop evidence.
-- [ ] Measure false captures, misses, amount/unit accuracy and protocol compliance rather than assigning constants or skipping negative cases.
+- [x] Measure false captures, misses, amount/unit accuracy and protocol compliance rather than assigning constants or skipping negative cases.
 - [ ] Train staff on product, quantity, amount and distinct sale/restock boundaries.
 - [ ] Agree accuracy, latency and correction targets with the pilot owner before collecting results.
 - [ ] Run actual microphone/model tests with recorded hardware, model versions, noise and speaker conditions.
