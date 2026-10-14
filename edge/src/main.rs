@@ -8,7 +8,7 @@ use listenledger_edge::extractor::{
     detect_boundary_with_config, extract_lines_from_transcript, BoundaryConfig, CapturePayload,
 };
 use listenledger_edge::queue::DurableQueue;
-use listenledger_edge::stt::{CommandSpeechRecognizer, MockSpeechRecognizer, SpeechRecognizer};
+use listenledger_edge::stt::SpeechRecognizer;
 use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
