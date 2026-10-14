@@ -271,3 +271,88 @@ func TestResolveReview(t *testing.T) {
 	}
 	stock(t, s, 42) // unchanged!
 }
+
+func TestRecordReceiptMovementsAtomicity(t *testing.T) {
+	s, _ := ledgerFixture(t)
+	ctx := context.Background()
+
+	// Initial stock is 20
+	stock(t, s, 20)
+
+	// 1. Successful multi-line receipt: restock 1 carton (+12) and sell 2 packs (-2)
+	line1 := movement("m_line1")
+	line1.Type = models.TypeRestock
+	line1.Quantity = 1
+	line1.Unit = models.UnitCarton
+
+	line2 := movement("m_line2")
+	line2.Type = models.TypeSale
+	line2.Quantity = 2
+	line2.Unit = models.UnitPack
+
+	results, err := s.RecordReceiptMovements(ctx,
+		[]models.Transaction{line1, line2},
+		[]string{"rcpt_k1", "rcpt_k2"},
+		[]string{"hash_k1", "hash_k2"},
+	)
+	if err != nil {
+		t.Fatalf("RecordReceiptMovements failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	// 20 + 12 - 2 = 30
+	stock(t, s, 30)
+
+	// 2. Replay of receipt
+	replayResults, err := s.RecordReceiptMovements(ctx,
+		[]models.Transaction{line1, line2},
+		[]string{"rcpt_k1", "rcpt_k2"},
+		[]string{"hash_k1", "hash_k2"},
+	)
+	if err != nil {
+		t.Fatalf("replay failed: %v", err)
+	}
+	if !replayResults[0].Replayed || !replayResults[1].Replayed {
+		t.Fatalf("expected both lines replayed: %+v", replayResults)
+	}
+	stock(t, s, 30) // Stock remains 30
+
+	// 3. Multi-line receipt where line 2 fails (insufficient stock) -> MUST ROLL BACK LINE 1
+	failLine1 := movement("fail_line1")
+	failLine1.Type = models.TypeRestock
+	failLine1.Quantity = 2
+	failLine1.Unit = models.UnitCarton // would add +24 if committed
+
+	failLine2 := movement("fail_line2")
+	failLine2.Type = models.TypeSale
+	failLine2.Quantity = 500
+	failLine2.Unit = models.UnitPack // 500 packs is > stock, fails!
+
+	_, err = s.RecordReceiptMovements(ctx,
+		[]models.Transaction{failLine1, failLine2},
+		[]string{"fail_k1", "fail_k2"},
+		[]string{"fail_h1", "fail_h2"},
+	)
+	if !errors.Is(err, ErrInsufficientStock) {
+		t.Fatalf("expected ErrInsufficientStock, got: %v", err)
+	}
+
+	// Stock MUST NOT have changed: still 30!
+	stock(t, s, 30)
+
+	// failLine1 MUST NOT exist in transactions
+	_, err = s.GetTransactionByID(ctx, "a", "fail_line1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected fail_line1 not found, got err: %v", err)
+	}
+
+	// 4. Input validation
+	if _, err := s.RecordReceiptMovements(ctx, []models.Transaction{line1}, []string{"k1", "k2"}, []string{"h1"}); !errors.Is(err, ErrInvalidMovement) {
+		t.Fatalf("expected ErrInvalidMovement for mismatched slice lengths, got: %v", err)
+	}
+	resEmpty, err := s.RecordReceiptMovements(ctx, nil, nil, nil)
+	if err != nil || resEmpty != nil {
+		t.Fatalf("expected nil, nil for empty movements, got: %v, %v", resEmpty, err)
+	}
+}

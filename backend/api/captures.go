@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/eeyung1/listenledger-backend/models"
 	"github.com/eeyung1/listenledger-backend/storage"
@@ -130,8 +129,11 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 		idempotencyBase = req.CaptureID
 	}
 
-	var storedTransactions []models.Transaction
-	allReplayed := len(validationRes.Lines) > 0
+	var (
+		txns         []models.Transaction
+		keys         []string
+		fingerprints []string
+	)
 
 	for i, line := range validationRes.Lines {
 		line.Transaction.ReceiptID = req.CaptureID
@@ -141,26 +143,73 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 			key = key[:128]
 		}
 
-		hashTxn := line.Transaction
-		hashTxn.ID = ""
-		hashTxn.CreatedAt = time.Time{}
-		canonical, _ := json.Marshal(hashTxn)
+		rawName := strings.TrimSpace(line.RawAnchor.ProductName)
+		if rawName == "" {
+			rawName = strings.TrimSpace(line.Transaction.ProductName)
+		}
+		rawQty := line.RawAnchor.Quantity
+		if rawQty <= 0 {
+			rawQty = line.Transaction.Quantity
+		}
+		rawUnit := string(line.RawAnchor.Unit)
+		if rawUnit == "" {
+			rawUnit = string(line.Transaction.Unit)
+		}
+		rawAmount := line.Transaction.Amount.Amount
+		rawCurrency := line.Transaction.Amount.Currency
+		if line.RawAnchor.Amount != nil {
+			rawAmount = line.RawAnchor.Amount.Amount
+			if line.RawAnchor.Amount.Currency != "" {
+				rawCurrency = line.RawAnchor.Amount.Currency
+			}
+		}
+
+		anchorFP := struct {
+			CaptureID   string `json:"capture_id"`
+			Index       int    `json:"index"`
+			Type        string `json:"type"`
+			ProductName string `json:"product_name"`
+			Quantity    int    `json:"quantity"`
+			Unit        string `json:"unit"`
+			Amount      int64  `json:"amount"`
+			Currency    string `json:"currency"`
+		}{
+			CaptureID:   req.CaptureID,
+			Index:       i,
+			Type:        string(validationRes.Type),
+			ProductName: rawName,
+			Quantity:    rawQty,
+			Unit:        rawUnit,
+			Amount:      rawAmount,
+			Currency:    rawCurrency,
+		}
+
+		canonical, _ := json.Marshal(anchorFP)
 		sum := sha256.Sum256(canonical)
 		hashStr := hex.EncodeToString(sum[:])
 
-		result, err := s.store.RecordMovement(r.Context(), line.Transaction, key, hashStr)
-		if err != nil {
-			switch {
-			case errors.Is(err, storage.ErrConflict), errors.Is(err, storage.ErrInsufficientStock):
-				writeError(w, http.StatusConflict, err.Error())
-			case errors.Is(err, storage.ErrNotFound), errors.Is(err, models.ErrPackaging), errors.Is(err, storage.ErrCurrency), errors.Is(err, storage.ErrInvalidMovement):
-				writeError(w, http.StatusBadRequest, err.Error())
-			default:
-				s.fail(w, r, "record capture movement", err)
-			}
-			return
-		}
+		txns = append(txns, line.Transaction)
+		keys = append(keys, key)
+		fingerprints = append(fingerprints, hashStr)
+	}
 
+	results, err := s.store.RecordReceiptMovements(r.Context(), txns, keys, fingerprints)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrConflict), errors.Is(err, storage.ErrInsufficientStock):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, storage.ErrNotFound), errors.Is(err, models.ErrPackaging), errors.Is(err, storage.ErrCurrency), errors.Is(err, storage.ErrInvalidMovement):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			s.fail(w, r, "record capture receipt movements", err)
+		}
+		return
+	}
+
+	var storedTransactions []models.Transaction
+	allReplayed := len(results) > 0
+
+	for _, result := range results {
 		stored := result.Transaction
 		storedTransactions = append(storedTransactions, stored)
 

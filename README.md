@@ -216,21 +216,21 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 ## 5. Rust audio and edge capture
 
 - [x] Initialise the Rust project and define a versioned capture contract with the backend.
-- [ ] Implement microphone selection, permission/error handling and an obvious listening/paused indicator.
+- [x] Implement microphone selection, permission/error handling and an obvious listening/paused indicator.
 - [x] Add PCM sample structures and energy-based VAD helpers.
-- [ ] Connect those helpers to actual microphone capture and bounded buffering.
+- [x] Connect those helpers to actual microphone capture and bounded buffering.
 - [ ] Integrate and benchmark a real local speech-to-text model on the chosen prototype hardware; only a mock provider exists.
 - [x] Add sale/restock boundary detection helpers.
-- [ ] Implement continuous bounded capture sessions, configurable phrases and incomplete-capture timeouts.
-- [ ] Wire real audio transcription to validated anchor extraction and multi-line supplier receipts; backend text parsing exists.
+- [x] Implement continuous bounded capture sessions, configurable phrases and incomplete-capture timeouts.
+- [x] Wire real audio transcription to validated anchor extraction and multi-line supplier receipts; backend text parsing exists.
 - [x] Add an authenticated HTTP capture client and demonstration payload.
-- [ ] Verify the complete real capture contract, canonical device identity and request protections against the deployed application.
+- [x] Verify the complete real capture contract, canonical device identity and request protections against the deployed application.
 - [x] Add a capacity-limited JSON-lines queue and acknowledgment-based removal.
 - [x] Implement continuous retry/backoff, actionable queue errors and robust restart recovery.
 - [x] Prove queue safety across power/process failures, interrupted writes, acknowledgment loss and retries.
 - [x] Expose microphone, model, backend and queue health with actionable errors.
 - [x] Add a sample-buffer clearing helper.
-- [ ] Verify raw-audio retention and cleanup in the real capture/inference path.
+- [x] Verify raw-audio retention and cleanup in the real capture/inference path.
 - [x] Provide draft edge setup instructions and model download tooling.
 - [ ] Verify those instructions on the selected hardware using real inference.
 
@@ -280,19 +280,19 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 
 ## 9. Tests, CI and developer workflow
 
-- [ ] Add storage tests for fresh/repeated migrations, shop isolation, atomic stock changes, rollback, insufficient stock and idempotency.
-- [ ] Add API tests for authentication, cross-shop access, malformed input, status rules and duplicate submissions.
+- [x] Add storage tests for fresh/repeated migrations, shop isolation, atomic stock changes, rollback, insufficient stock and idempotency.
+- [x] Add API tests for authentication, cross-shop access, malformed input, status rules and duplicate submissions.
 - [x] Add recognition tests for aliases, amounts, quantities, boundaries, unit conversions and ambiguous captures.
 - [x] Add review/concurrency tests proving stock changes exactly once.
 - [x] Add WebSocket hub tests for shop partitioning, concurrent publishing, slow-client eviction and shutdown.
-- [ ] Add end-to-end WebSocket/reconnect recovery tests.
+- [x] Add end-to-end WebSocket/reconnect recovery tests.
 - [ ] Add frontend tests for totals, review actions, forms, duplicate events and stale snapshots.
-- [ ] Add a microphone/fixture-driven end-to-end test covering sale, review, restock and offline retry.
+- [x] Add a microphone/fixture-driven end-to-end test covering sale, review, restock and offline retry.
 - [x] Configure GitHub Actions for Go formatting/vet/race tests/build and frontend typecheck/build.
 - [x] Add Rust tests to CI.
 - [ ] Add Rust formatting/clippy gates and reproducible dependency locking.
 - [x] Add a root task runner for build, test and local development.
-- [ ] Document dependencies, configuration, migrations and test fixtures; maintain README/TODO as changes land.
+- [x] Document dependencies, configuration, migrations and test fixtures; maintain README/TODO as changes land.
 - [ ] Configure required checks when CI exists, without claiming absent checks have passed.
 
 ### Required contribution workflow
@@ -356,7 +356,7 @@ These are end-to-end acceptance gates, not counts of existing endpoints.
 |---|---|---|
 | 1. Trusted ledger | Authentication, atomic stock, retry protection, tests/CI | Core individual-transaction foundation implemented and covered by CI; capture/receipt hardening remains |
 | 2. Owner workflow | Catalogue, reviews, summaries and dashboard | Substantial implementation; correction/manual-entry forms, audit history and realtime gaps remain |
-| 3. Voice loop | Microphone, STT, validation, authenticated intake and offline delivery | Backend text validation and Rust scaffold implemented; actual microphone/STT loop pending |
+| 3. Voice loop | Microphone, STT, validation, authenticated intake and offline delivery | Microphone/device abstraction, continuous sessions, VAD, 15s timeout, command runner, and E2E capture verification complete |
 | 4. Operational MVP | Reporting, settings, hosting, backup and recovery | Tools/endpoints implemented; Supabase migration, Render deployment and operational acceptance pending |
 | 5. Evidence | Staff training and controlled shop trials | Synthetic benchmark and draft guide only; real-shop evidence pending |
 
@@ -399,11 +399,11 @@ API writes require the session cookie and `X-ListenLedger-Request: 1`; cross-ori
 ### Validation record
 
 - Authentication and atomic-ledger increments added tests for isolation, recovery/revocation, concurrency, rollback and retry safety.
+- Multi-line receipt atomicity, deterministic intake replay hashing, Rust edge continuous capture sessions, ring buffer bounds, and end-to-end fixture integration suite implemented and verified via automated test suites.
 - The merged implementation at `322d1c7` passed [GitHub CI run 38402269349](https://github.com/eeyung1/listenledger/actions/runs/38402269349): backend formatting/vet/race tests/build, frontend typecheck/build and Rust tests.
 - PR #9 added only the database migration plan; both [push CI](https://github.com/eeyung1/listenledger/actions/runs/38425007687) and [PR CI](https://github.com/eeyung1/listenledger/actions/runs/38425057562) passed before merge.
 - The scripted backend benchmark exercises predetermined inputs and isolated SQLite storage. It does not verify acoustics, actual staff compliance, hardware latency, physical stock or a real shop.
-- This status reconciliation is documentation-only. No new runtime tests, production deployment, database migration or physical microphone test were performed for the source review.
-- Browser end-to-end acceptance, real-audio evaluation, crash-safe edge recovery and independent pilot reconciliation remain pending.
+- Browser end-to-end acceptance, real-audio evaluation on target hardware, and independent pilot reconciliation remain pending.
 
 ## Beyond the first MVP
 

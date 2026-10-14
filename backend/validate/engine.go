@@ -39,6 +39,7 @@ type ValidatedLine struct {
 	Transaction   models.Transaction
 	ReviewReasons []string
 	MatchedBy     string
+	RawAnchor     CaptureLineInput
 }
 
 // ValidationResult summarizes the recognition and validation outcome across all lines.
@@ -277,6 +278,7 @@ func (e *Engine) Validate(
 			Transaction:   txn,
 			ReviewReasons: reviewReasons,
 			MatchedBy:     match.MatchedBy,
+			RawAnchor:     line,
 		})
 	}
 
