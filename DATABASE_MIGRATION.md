@@ -31,7 +31,7 @@ Changing a connection string alone will not migrate this application.
 
 - [x] Implement PostgreSQL storage support and schema migrations.
 - [x] Preserve current API contracts, ownership checks, and ledger invariants.
-- [ ] Test migration and concurrency against a real PostgreSQL test instance.
+- [x] Test migration and concurrency against a real PostgreSQL test instance (`.github/workflows/ci.yml`, `backend/storage/postgres_integration_test.go`).
 - [x] Configure a dedicated Supabase project/schema and restricted application role (`scripts/supabase_setup.sql`).
 - [x] Rehearse transfer of any existing SQLite data (`backend/storage/transfer.go`, `backend/cmd/migrate`).
 - [x] Add Render deployment configuration and secret references (`render.yaml`).
@@ -119,16 +119,16 @@ Historical prototype rows may predate atomic stock updates. Investigate inconsis
 
 Use an isolated PostgreSQL service in CI rather than the production Supabase database.
 
-- [ ] Fresh migration, repeated migration, constraints, and invalid-input tests.
-- [ ] Owner login/recovery/session persistence and cross-shop isolation.
-- [ ] Device pairing, revocation, and unauthorized capture rejection.
-- [ ] Sale: 20 units → sell 2 → balance 18 with exactly one ledger entry.
-- [ ] Restock packaging conversion and purchase-cost/revenue separation.
-- [ ] Concurrent retries apply one stock movement; conflicting payloads fail.
-- [ ] Concurrent purchases cannot oversell; concurrent review actions apply once.
-- [ ] Failed writes and failed later receipt lines leave no unintended partial effect.
-- [ ] Restart/reconnect replay, including changed catalogue/settings between attempts.
-- [ ] Summary accuracy beyond 500 records and at shop-local day boundaries.
+- [x] Fresh migration, repeated migration, constraints, and invalid-input tests.
+- [x] Owner login/recovery/session persistence and cross-shop isolation.
+- [x] Device pairing, revocation, and unauthorized capture rejection.
+- [x] Sale: 20 units → sell 2 → balance 18 with exactly one ledger entry.
+- [x] Restock packaging conversion and purchase-cost/revenue separation.
+- [x] Concurrent retries apply one stock movement; conflicting payloads fail.
+- [x] Concurrent purchases cannot oversell; concurrent review actions apply once.
+- [x] Failed writes and failed later receipt lines leave no unintended partial effect.
+- [x] Restart/reconnect replay, including changed catalogue/settings between attempts.
+- [x] Summary accuracy beyond 500 records and at shop-local day boundaries.
 - [x] SQLite-to-PostgreSQL fixture import and reconciliation.
 - [ ] Backup restoration into a clean target with verified application access.
 
