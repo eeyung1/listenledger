@@ -27,10 +27,7 @@ impl ClientError {
 
     /// Determines whether the failure is an authentication/credential rejection.
     pub fn is_auth_error(&self) -> bool {
-        match self {
-            ClientError::ServerError(401 | 403, _) => true,
-            _ => false,
-        }
+        matches!(self, ClientError::ServerError(401 | 403, _))
     }
 }
 

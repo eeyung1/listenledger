@@ -99,7 +99,7 @@ pub fn extract_lines_from_transcript(
     }
 
     let sentences: Vec<&str> = cleaned
-        .split(|c| c == '.' || c == ';' || c == '\n')
+        .split(['.', ';', '\n'])
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect();
