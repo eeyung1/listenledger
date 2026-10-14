@@ -113,7 +113,19 @@ cd edge
 ./scripts/download_model.sh tiny.en
 ```
 
-### 3.4 Device Pairing
+### 3.4 Speech Model Runner & Real-Time Factor (RTF) Benchmarking
+Verify local quantized inference and evaluate Real-Time Factor ($RTF \le 1.0$) on prototype hardware:
+```sh
+cd edge
+# Run verification diagnostic on recorded counter audio:
+./scripts/stt_runner.py -m models/ggml-tiny.en.bin -f /tmp/test_mic.wav --benchmark
+```
+Verify pipeline scenarios across standard clean, noisy, and negative chatter conditions:
+```sh
+cargo run --bin benchmark
+```
+
+### 3.5 Device Pairing
 1. In the ListenLedger dashboard, navigate to **Settings → Paired Capture Devices**.
 2. Enter the device name (e.g. `Counter 1 Jabra Mic`) and click **Pair New Device**.
 3. Securely copy the generated bearer token.

@@ -66,7 +66,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
       btn.classList.toggle("is-active", isActive);
       btn.setAttribute("aria-selected", isActive ? "true" : "false");
     });
-    render();
+    void refetch();
   }
 
   tabButtons.forEach((btn) => {
@@ -671,7 +671,14 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
 
   async function refetch(): Promise<void> {
     try {
-      const snapshot = await fetchInventory(shopId, signal);
+      const snapshot = await fetchInventory(
+        shopId,
+        {
+          q: query.trim() || undefined,
+          status: currentTab !== "all" ? currentTab : undefined,
+        },
+        signal,
+      );
       if (disposed || signal.aborted) return;
       if (snapshot.last_seq !== undefined) {
         getSocket()?.syncSequence(snapshot.last_seq);
@@ -720,9 +727,14 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     applyProduct(detail.data);
   };
 
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   const onSearch = (): void => {
     query = searchInput?.value ?? "";
     render();
+    if (searchDebounceTimer !== undefined) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      void refetch();
+    }, 250);
   };
 
   const onAddClick = (): void => {

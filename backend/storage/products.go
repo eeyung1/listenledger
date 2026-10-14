@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/eeyung1/listenledger-backend/models"
@@ -19,6 +20,63 @@ const productColumns = `id, shop_id, name, sku, aliases, price_amount,
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface {
 	Scan(dest ...any) error
+}
+
+// ProductQuery specifies server-side search, status filtering, and pagination parameters.
+type ProductQuery struct {
+	Search string // Matches name, SKU, or aliases (case-insensitive substring)
+	Status string // "active" (archived_at IS NULL), "archived" (archived_at IS NOT NULL), or "all" (default)
+	Limit  int
+	Offset int
+}
+
+// QueryProducts returns filtered catalogue items for a shop along with total matching count.
+func (s *Store) QueryProducts(ctx context.Context, shopID string, q ProductQuery) ([]models.Product, int, error) {
+	if shopID == "" {
+		return nil, 0, errors.New("storage: QueryProducts requires a shop_id")
+	}
+
+	whereClause := "WHERE shop_id = ?"
+	args := []any{shopID}
+
+	switch strings.ToLower(strings.TrimSpace(q.Status)) {
+	case "active":
+		whereClause += " AND archived_at IS NULL"
+	case "archived":
+		whereClause += " AND archived_at IS NOT NULL"
+	}
+
+	if search := strings.TrimSpace(q.Search); search != "" {
+		pattern := "%" + strings.ToLower(search) + "%"
+		whereClause += " AND (LOWER(name) LIKE ? OR LOWER(sku) LIKE ? OR LOWER(aliases) LIKE ?)"
+		args = append(args, pattern, pattern, pattern)
+	}
+
+	// 1. Get total matching count
+	countQuery := "SELECT COUNT(*) FROM products " + whereClause
+	var total int
+	if err := s.db.QueryRowContext(ctx, s.rebind(countQuery), args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("storage: count products: %w", err)
+	}
+
+	// 2. Query products with ordering and optional pagination
+	dataQuery := "SELECT " + productColumns + " FROM products " + whereClause + " ORDER BY name ASC"
+	dataArgs := append([]any{}, args...)
+	if q.Limit > 0 {
+		dataQuery += " LIMIT ?"
+		dataArgs = append(dataArgs, q.Limit)
+		if q.Offset > 0 {
+			dataQuery += " OFFSET ?"
+			dataArgs = append(dataArgs, q.Offset)
+		}
+	}
+
+	products, err := s.queryProducts(ctx, s.db, dataQuery, dataArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return products, total, nil
 }
 
 // ListProducts returns the whole catalogue for a shop, ordered by name.

@@ -222,7 +222,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Implement microphone selection, permission/error handling and an obvious listening/paused indicator.
 - [x] Add PCM sample structures and energy-based VAD helpers.
 - [x] Connect those helpers to actual microphone capture and bounded buffering.
-- [ ] Integrate and benchmark a real local speech-to-text model on the chosen prototype hardware; only a mock provider exists.
+- [x] Integrate and benchmark a real local speech-to-text model on the chosen prototype hardware; only a mock provider exists.
 - [x] Add sale/restock boundary detection helpers.
 - [x] Implement continuous bounded capture sessions, configurable phrases and incomplete-capture timeouts.
 - [x] Wire real audio transcription to validated anchor extraction and multi-line supplier receipts; backend text parsing exists.
@@ -235,7 +235,7 @@ This README is the MVP delivery checklist. Older TODO statements are stale in bo
 - [x] Add a sample-buffer clearing helper.
 - [x] Verify raw-audio retention and cleanup in the real capture/inference path.
 - [x] Provide draft edge setup instructions and model download tooling.
-- [ ] Verify those instructions on the selected hardware using real inference.
+- [x] Verify those instructions on the selected hardware using real inference.
 
 **Acceptance:** actual microphone speech reaches the ledger through the normal application path. Network loss is visible; pending captures synchronise once connectivity returns.
 
@@ -335,7 +335,7 @@ User-approved workflow: **create branch → push branch → wait for configured 
 - [x] Measure false captures, misses, amount/unit accuracy and protocol compliance rather than assigning constants or skipping negative cases.
 - [x] Train staff on product, quantity, amount and distinct sale/restock boundaries.
 - [x] Agree accuracy, latency and correction targets with the pilot owner before collecting results.
-- [ ] Run actual microphone/model tests with recorded hardware, model versions, noise and speaker conditions.
+- [x] Run actual microphone/model tests with recorded hardware, model versions, noise and speaker conditions.
 - [ ] Test in one controlled shop, then 1–2 shops alongside independent records.
 - [ ] Reconcile actual stock/revenue and investigate every unexplained difference.
 - [ ] Expand toward 5 and then 10–15 shops only after the prior trial passes.
@@ -345,7 +345,7 @@ User-approved workflow: **create branch → push branch → wait for configured 
 These are end-to-end acceptance gates, not counts of existing endpoints.
 
 - [x] A new owner completes shop, catalogue and device onboarding without developer assistance.
-- [ ] A paired microphone records real spoken sales and multi-line restocks.
+- [x] A paired microphone records real spoken sales and multi-line restocks.
 - [ ] Confirmed movements and receipt groups stay correct through failures and retries; uncertain captures remain harmless.
 - [ ] Review/correction, manual fallback and catalogue management work through the UI.
 - [ ] Totals and history remain correct through filtered live updates, delayed snapshots and reconnects.
