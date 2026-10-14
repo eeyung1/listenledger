@@ -85,6 +85,35 @@ pub fn generate_speech_burst_wav(
     encode_wav(&samples, sample_rate)
 }
 
+/// Generates a speech burst superimposed with ambient background noise.
+pub fn generate_noisy_speech_burst_wav(
+    burst_ms: u64,
+    silence_ms: u64,
+    speech_amp: f32,
+    noise_amp: f32,
+    sample_rate: u32,
+) -> Vec<u8> {
+    let burst_samples = (sample_rate as u64 * burst_ms / 1000) as usize;
+    let silence_samples = (sample_rate as u64 * silence_ms / 1000) as usize;
+    let mut samples = Vec::with_capacity(burst_samples + silence_samples);
+
+    for i in 0..burst_samples {
+        let t = i as f32 / sample_rate as f32;
+        let speech = ((2.0 * std::f32::consts::PI * 300.0 * t).sin() * 0.5
+            + (2.0 * std::f32::consts::PI * 800.0 * t).sin() * 0.3
+            + (2.0 * std::f32::consts::PI * 2500.0 * t).sin() * 0.2)
+            * speech_amp;
+        let noise = ((i as f32 * 12.9898).sin() * 43758.5453).fract() * noise_amp;
+        samples.push(speech + noise);
+    }
+
+    for i in 0..silence_samples {
+        let noise = ((i as f32 * 12.9898).sin() * 43758.5453).fract() * (noise_amp * 0.5);
+        samples.push(noise);
+    }
+    encode_wav(&samples, sample_rate)
+}
+
 /// Returns standard acoustic test scenarios covering sales, restocks, and non-commercial speech.
 pub fn standard_acoustic_scenarios() -> Vec<AcousticScenario> {
     vec![
@@ -122,6 +151,33 @@ pub fn standard_acoustic_scenarios() -> Vec<AcousticScenario> {
             description: "Sub-threshold background noise in empty shop".to_string(),
             wav_bytes: generate_silence_wav(1000, 16000),
             simulated_transcript: "".to_string(),
+            expected_boundary: None,
+            should_capture: false,
+            expected_min_lines: 0,
+        },
+        AcousticScenario {
+            name: "NoisySale_MarketBanter".to_string(),
+            description: "Sale dialogue under ambient market background noise".to_string(),
+            wav_bytes: generate_noisy_speech_burst_wav(1800, 300, 0.25, 0.008, 16000),
+            simulated_transcript: "Two Peak Milk, seven thousand naira. Thank you.".to_string(),
+            expected_boundary: Some(TransactionType::Sale),
+            should_capture: true,
+            expected_min_lines: 1,
+        },
+        AcousticScenario {
+            name: "LowGainWhisper_Sale".to_string(),
+            description: "Soft cashier speech near VAD energy threshold".to_string(),
+            wav_bytes: generate_speech_burst_wav(1400, 300, 0.03, 16000),
+            simulated_transcript: "One Milo, two thousand naira. Thank you.".to_string(),
+            expected_boundary: Some(TransactionType::Sale),
+            should_capture: true,
+            expected_min_lines: 1,
+        },
+        AcousticScenario {
+            name: "HeavyTrafficChatter_Negative".to_string(),
+            description: "Non-commercial chatter in street traffic ambient noise".to_string(),
+            wav_bytes: generate_noisy_speech_burst_wav(1500, 500, 0.08, 0.009, 16000),
+            simulated_transcript: "Good afternoon ma, the road was very busy today.".to_string(),
             expected_boundary: None,
             should_capture: false,
             expected_min_lines: 0,

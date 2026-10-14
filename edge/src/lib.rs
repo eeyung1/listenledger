@@ -436,15 +436,15 @@ mod tests {
         let config = AudioConfig::default();
         let boundary_config = BoundaryConfig::default();
         let scenarios = standard_acoustic_scenarios();
-        assert_eq!(scenarios.len(), 4);
+        assert_eq!(scenarios.len(), 7);
 
         let (metrics, results) = run_acoustic_benchmark(&scenarios, &config, &boundary_config);
-        assert_eq!(metrics.total_scenarios, 4);
-        assert_eq!(metrics.passed_scenarios, 4);
+        assert_eq!(metrics.total_scenarios, 7);
+        assert_eq!(metrics.passed_scenarios, 7);
         assert_eq!(metrics.false_captures, 0);
         assert_eq!(metrics.missed_captures, 0);
         assert!(metrics.total_frames_processed > 0);
-        assert_eq!(results.len(), 4);
+        assert_eq!(results.len(), 7);
 
         // Verify clean sale scenario
         let sale_res = results
@@ -457,6 +457,15 @@ mod tests {
         assert!(!sale_res.extracted_lines.is_empty());
         assert_eq!(sale_res.extracted_lines[0].product_name, "Milo");
 
+        // Verify noisy sale scenario passes under market banter
+        let noisy_res = results
+            .iter()
+            .find(|r| r.scenario_name == "NoisySale_MarketBanter")
+            .expect("noisy sale res");
+        assert!(noisy_res.passed);
+        assert!(noisy_res.boundary_detected);
+        assert_eq!(noisy_res.captured_type, Some(TransactionType::Sale));
+
         // Verify casual chatter scenario has zero captures
         let chatter_res = results
             .iter()
@@ -466,5 +475,15 @@ mod tests {
         assert!(!chatter_res.boundary_detected);
         assert_eq!(chatter_res.captured_type, None);
         assert!(chatter_res.extracted_lines.is_empty());
+
+        // Verify heavy traffic chatter negative control has zero captures
+        let traffic_res = results
+            .iter()
+            .find(|r| r.scenario_name == "HeavyTrafficChatter_Negative")
+            .expect("traffic res");
+        assert!(traffic_res.passed);
+        assert!(!traffic_res.boundary_detected);
+        assert_eq!(traffic_res.captured_type, None);
+        assert!(traffic_res.extracted_lines.is_empty());
     }
 }

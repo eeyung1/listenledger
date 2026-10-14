@@ -183,6 +183,7 @@ type inventoryResponse struct {
 	ShopID   string           `json:"shop_id"`
 	Products []models.Product `json:"products"`
 	Count    int              `json:"count"`
+	Total    int              `json:"total"`
 	// LowStockCount is computed here rather than by the client so the
 	// reorder rule lives in exactly one place (models.Product.IsLowStock).
 	LowStockCount int       `json:"low_stock_count"`

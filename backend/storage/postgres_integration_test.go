@@ -1126,3 +1126,69 @@ func TestPostgres_BackupAndRestoreVerification(t *testing.T) {
 		t.Errorf("expected restored sales revenue 900000, got %d", summary.TodaySalesAmount.Amount)
 	}
 }
+
+func TestPostgres_QueryProducts(t *testing.T) {
+	s := openTestPostgres(t)
+	ctx := context.Background()
+
+	shopID := "shop_pg_query"
+	seedPostgresShop(t, s, shopID, "own_pg_query")
+
+	now := time.Now().UTC()
+	archivedAt := now.Add(-2 * time.Hour)
+
+	prod1 := models.Product{
+		ID:       "prd_pg_indomie_70g",
+		ShopID:   shopID,
+		Name:     "Indomie Instant Noodles 70g",
+		SKU:      "INDO-70G",
+		Aliases:  []string{"Indomie", "Noodles"},
+		Price:    models.Money{Amount: 18000, Currency: "NGN"},
+		Quantity: 100,
+		BaseUnit: models.UnitPack,
+	}
+	prod2 := models.Product{
+		ID:         "prd_pg_indomie_old",
+		ShopID:     shopID,
+		Name:       "Indomie Chicken Discontinued",
+		SKU:        "INDO-OLD",
+		Aliases:    []string{"Old Indomie"},
+		Price:      models.Money{Amount: 15000, Currency: "NGN"},
+		Quantity:   0,
+		BaseUnit:   models.UnitPack,
+		ArchivedAt: &archivedAt,
+	}
+	if err := s.InsertProduct(ctx, prod1); err != nil {
+		t.Fatalf("insert prod1: %v", err)
+	}
+	if err := s.InsertProduct(ctx, prod2); err != nil {
+		t.Fatalf("insert prod2: %v", err)
+	}
+
+	// 1. Filter active
+	active, total, err := s.QueryProducts(ctx, shopID, ProductQuery{Status: "active"})
+	if err != nil {
+		t.Fatalf("query active: %v", err)
+	}
+	if total != 1 || len(active) != 1 || active[0].ID != "prd_pg_indomie_70g" {
+		t.Errorf("expected 1 active product prd_pg_indomie_70g, got %+v", active)
+	}
+
+	// 2. Filter archived
+	archived, total, err := s.QueryProducts(ctx, shopID, ProductQuery{Status: "archived"})
+	if err != nil {
+		t.Fatalf("query archived: %v", err)
+	}
+	if total != 1 || len(archived) != 1 || archived[0].ID != "prd_pg_indomie_old" {
+		t.Errorf("expected 1 archived product prd_pg_indomie_old, got %+v", archived)
+	}
+
+	// 3. Search query
+	searchRes, total, err := s.QueryProducts(ctx, shopID, ProductQuery{Search: "Noodles"})
+	if err != nil {
+		t.Fatalf("search noodles: %v", err)
+	}
+	if total != 1 || len(searchRes) != 1 || searchRes[0].ID != "prd_pg_indomie_70g" {
+		t.Errorf("expected 1 match for Noodles alias, got %+v", searchRes)
+	}
+}

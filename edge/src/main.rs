@@ -51,24 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let boundary_config = BoundaryConfig::default();
     let mut session = CaptureSession::new(audio_config.clone());
 
-    // STT Recognizer selection (dynamic model binary / mock)
-    let stt: Box<dyn SpeechRecognizer> = if let Ok(binary) = env::var("LISTENLEDGER_STT_BINARY") {
-        let mut recognizer = CommandSpeechRecognizer::new(binary);
-        if let Ok(model) = env::var("LISTENLEDGER_STT_MODEL") {
-            recognizer = recognizer.with_model(model);
-        }
-        if let Ok(lang) = env::var("LISTENLEDGER_STT_LANGUAGE") {
-            recognizer = recognizer.with_language(lang);
-        }
-        println!(
-            "Using CommandSpeechRecognizer: binary={}, model={:?}, lang={}",
-            recognizer.binary_path, recognizer.model_path, recognizer.language
-        );
-        Box::new(recognizer)
-    } else {
-        println!("No LISTENLEDGER_STT_BINARY set; using MockSpeechRecognizer");
-        Box::new(MockSpeechRecognizer::default())
-    };
+    // STT Recognizer selection (local model runner / whisper CLI / mock)
+    let stt: Box<dyn SpeechRecognizer> = listenledger_edge::stt::default_local_recognizer();
+    println!("Speech-to-Text recognizer initialized.");
 
     // Audio input source selection
     let audio_source_env =

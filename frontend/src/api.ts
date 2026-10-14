@@ -106,6 +106,7 @@ export interface InventorySnapshot {
   readonly shop_id: string;
   readonly products: readonly Product[];
   readonly count: number;
+  readonly total?: number | undefined;
   readonly low_stock_count: number;
   readonly last_seq?: number | undefined;
   readonly generated_at: string;
@@ -248,9 +249,35 @@ export function getExportTransactionsUrl(shopId: string, query?: TransactionQuer
   return `/api/transactions/export?${params.toString()}`;
 }
 
-/** GET /api/inventory — the whole catalogue for a shop. */
-export function fetchInventory(shopId: string, signal?: AbortSignal): Promise<InventorySnapshot> {
-  return getJSON<InventorySnapshot>("/api/inventory", { shop_id: shopId }, signal);
+export interface InventoryQuery {
+  readonly q?: string | undefined;
+  readonly status?: "active" | "archived" | "all" | undefined;
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+}
+
+/** GET /api/inventory — query the catalogue for a shop with optional search, status filtering, and pagination. */
+export function fetchInventory(
+  shopId: string,
+  queryOrSignal?: InventoryQuery | AbortSignal,
+  maybeSignal?: AbortSignal,
+): Promise<InventorySnapshot> {
+  let query: InventoryQuery | undefined;
+  let signal: AbortSignal | undefined;
+  if (queryOrSignal instanceof AbortSignal) {
+    signal = queryOrSignal;
+  } else {
+    query = queryOrSignal;
+    signal = maybeSignal;
+  }
+
+  const params: Record<string, string> = { shop_id: shopId };
+  if (query?.q !== undefined && query.q !== "") params["q"] = query.q;
+  if (query?.status !== undefined && query.status !== "all") params["status"] = query.status;
+  if (query?.limit !== undefined && query.limit > 0) params["limit"] = String(query.limit);
+  if (query?.offset !== undefined && query.offset >= 0) params["offset"] = String(query.offset);
+
+  return getJSON<InventorySnapshot>("/api/inventory", params, signal);
 }
 
 /** GET /api/summary — authoritative daily aggregates for the shop. */

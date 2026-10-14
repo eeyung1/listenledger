@@ -39,6 +39,40 @@ impl SpeechRecognizer for MockSpeechRecognizer {
     }
 }
 
+/// Returns the default local speech recognizer:
+/// 1. If `LISTENLEDGER_STT_BINARY` env var is set, use it.
+/// 2. If `scripts/stt_runner.py` exists relative to workspace/edge, use it.
+/// 3. Otherwise, fallback to `MockSpeechRecognizer`.
+pub fn default_local_recognizer() -> Box<dyn SpeechRecognizer> {
+    if let Ok(binary) = std::env::var("LISTENLEDGER_STT_BINARY") {
+        let mut recognizer = CommandSpeechRecognizer::new(binary);
+        if let Ok(model) = std::env::var("LISTENLEDGER_STT_MODEL") {
+            recognizer = recognizer.with_model(model);
+        }
+        if let Ok(lang) = std::env::var("LISTENLEDGER_STT_LANGUAGE") {
+            recognizer = recognizer.with_language(lang);
+        }
+        return Box::new(recognizer);
+    }
+
+    let candidates = [
+        "scripts/stt_runner.py",
+        "edge/scripts/stt_runner.py",
+        "../edge/scripts/stt_runner.py",
+    ];
+    for path in &candidates {
+        if std::path::Path::new(path).exists() {
+            let mut recognizer = CommandSpeechRecognizer::new(*path);
+            if let Ok(model) = std::env::var("LISTENLEDGER_STT_MODEL") {
+                recognizer = recognizer.with_model(model);
+            }
+            return Box::new(recognizer);
+        }
+    }
+
+    Box::new(MockSpeechRecognizer::default())
+}
+
 /// Process-driven speech recognizer executing a local CLI binary or whisper runtime.
 #[derive(Debug, Clone)]
 pub struct CommandSpeechRecognizer {
