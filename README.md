@@ -16,7 +16,7 @@ Source reviewed on **13 October 2026**, at implementation commit `322d1c7`. The 
 
 **Verified CI:** the implementation at `322d1c7` passed backend formatting/vet/race tests/build, frontend typecheck/build, and Rust tests in [CI run 38402269349](https://github.com/eeyung1/listenledger/actions/runs/38402269349). These checks do not establish browser end-to-end usability, crash-safe offline capture, microphone recognition, or real-shop accuracy.
 
-**Hosting/database:** SQLite remains the runtime database. [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md) documents the planned move to Supabase PostgreSQL with Render hosting. The plan is merged; the migration and deployment have not been performed by that change.
+**Hosting/database:** Dual-dialect storage supports both SQLite and PostgreSQL (via `jackc/pgx/v5` stdlib with embedded migrations, dialect rebinding, and row-level locking). [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md) documents the planned move to Supabase PostgreSQL with Render hosting.
 
 “Implemented” means source code exists. Validation is tracked separately below; it does not imply the full real-shop acceptance workflow has passed.
 
@@ -63,7 +63,7 @@ Source reviewed on **13 October 2026**, at implementation commit `322d1c7`. The 
 - [x] Frontend automated test suite covering KPI calculations, review queue action dispatches, and connection resync deduplication (`frontend/test/`).
 - [x] Catalogue CSV/JSON import API, downloadable CSV template and frontend import form.
 - [x] Scripted backend evaluation harness (`backend/eval/`); it is not a physical-shop trial.
-- [x] SQLite-to-Supabase migration plan merged in PR #9; implementation remains pending.
+- [x] Dual-dialect database storage engine (SQLite & PostgreSQL) with embedded migrations, pgx connection pooling, query rebinding, row-level locking, and DATABASE_URL support.
 
 #### Backend and persistence
 

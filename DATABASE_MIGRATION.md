@@ -29,8 +29,8 @@ Changing a connection string alone will not migrate this application.
 
 ## Scope and delivery rules
 
-- [ ] Implement PostgreSQL storage support and schema migrations.
-- [ ] Preserve current API contracts, ownership checks, and ledger invariants.
+- [x] Implement PostgreSQL storage support and schema migrations.
+- [x] Preserve current API contracts, ownership checks, and ledger invariants.
 - [ ] Test migration and concurrency against a real PostgreSQL test instance.
 - [ ] Configure a dedicated Supabase project/schema and restricted application role.
 - [ ] Rehearse transfer of any existing SQLite data.

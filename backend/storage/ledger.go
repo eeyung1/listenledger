@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/eeyung1/listenledger-backend/models"
@@ -86,8 +87,30 @@ func (s *Store) RecordReceiptMovements(ctx context.Context, transactions []model
 	}
 	defer tx.Rollback()
 
+	// Under PostgreSQL, lock involved products in deterministic key order to prevent deadlocks
+	// and ensure serializable stock decrements/increments across concurrent requests.
+	if s.Dialect().IsPostgres() {
+		uniqueProductIDs := make(map[string]bool)
+		for _, t := range transactions {
+			if t.ProductID != "" {
+				uniqueProductIDs[t.ProductID] = true
+			}
+		}
+		if len(uniqueProductIDs) > 0 {
+			sortedIDs := make([]string, 0, len(uniqueProductIDs))
+			for pid := range uniqueProductIDs {
+				sortedIDs = append(sortedIDs, pid)
+			}
+			sort.Strings(sortedIDs)
+			for _, pid := range sortedIDs {
+				var dummy string
+				_ = tx.QueryRowContext(ctx, s.rebind(`SELECT id FROM products WHERE shop_id = ? AND id = ? FOR UPDATE`), shopID, pid).Scan(&dummy)
+			}
+		}
+	}
+
 	var currency string
-	if err = tx.QueryRowContext(ctx, `SELECT currency FROM shops WHERE id=?`, shopID).Scan(&currency); err != nil {
+	if err = tx.QueryRowContext(ctx, s.rebind(`SELECT currency FROM shops WHERE id=?`), shopID).Scan(&currency); err != nil {
 		return nil, err
 	}
 
@@ -99,12 +122,12 @@ func (s *Store) RecordReceiptMovements(ctx context.Context, transactions []model
 		fingerprint := fingerprints[i]
 
 		var previousHash, id string
-		err = tx.QueryRowContext(ctx, `SELECT payload_hash,transaction_id FROM ledger_requests WHERE shop_id=? AND request_key=?`, shopID, key).Scan(&previousHash, &id)
+		err = tx.QueryRowContext(ctx, s.rebind(`SELECT payload_hash,transaction_id FROM ledger_requests WHERE shop_id=? AND request_key=?`), shopID, key).Scan(&previousHash, &id)
 		if err == nil {
 			if previousHash != fingerprint {
 				return nil, ErrConflict
 			}
-			previous, err := scanTransaction(tx.QueryRowContext(ctx, `SELECT `+transactionColumns+` FROM transactions WHERE shop_id=? AND id=?`, shopID, id))
+			previous, err := scanTransaction(tx.QueryRowContext(ctx, s.rebind(`SELECT `+transactionColumns+` FROM transactions WHERE shop_id=? AND id=?`), shopID, id))
 			if err != nil {
 				return nil, err
 			}
@@ -155,7 +178,7 @@ func (s *Store) RecordReceiptMovements(ctx context.Context, transactions []model
 				return nil, ErrInvalidMovement
 			}
 			product.Quantity += delta
-			if _, err = tx.ExecContext(ctx, `UPDATE products SET quantity=?,updated_at=? WHERE shop_id=? AND id=?`, product.Quantity, formatTime(time.Now()), shopID, t.ProductID); err != nil {
+			if _, err = tx.ExecContext(ctx, s.rebind(`UPDATE products SET quantity=?,updated_at=? WHERE shop_id=? AND id=?`), product.Quantity, formatTime(time.Now()), shopID, t.ProductID); err != nil {
 				return nil, err
 			}
 		}
@@ -166,15 +189,15 @@ func (s *Store) RecordReceiptMovements(ctx context.Context, transactions []model
 		if t.CreatedAt.IsZero() {
 			t.CreatedAt = time.Now().UTC()
 		}
-		if err = insertTransaction(ctx, tx, t); err != nil {
+		if err = s.insertTransaction(ctx, tx, t); err != nil {
 			return nil, err
 		}
 		if delta != 0 {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO stock_movements(transaction_id,shop_id,product_id,delta,created_at) VALUES(?,?,?,?,?)`, t.ID, shopID, t.ProductID, delta, formatTime(t.CreatedAt)); err != nil {
+			if _, err = tx.ExecContext(ctx, s.rebind(`INSERT INTO stock_movements(transaction_id,shop_id,product_id,delta,created_at) VALUES(?,?,?,?,?)`), t.ID, shopID, t.ProductID, delta, formatTime(t.CreatedAt)); err != nil {
 				return nil, err
 			}
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO ledger_requests(shop_id,request_key,payload_hash,transaction_id) VALUES(?,?,?,?)`, shopID, key, fingerprint, t.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, s.rebind(`INSERT INTO ledger_requests(shop_id,request_key,payload_hash,transaction_id) VALUES(?,?,?,?)`), shopID, key, fingerprint, t.ID); err != nil {
 			return nil, err
 		}
 
@@ -233,7 +256,7 @@ func (s *Store) ResolveReview(
 	}
 	defer tx.Rollback()
 
-	t, err := scanTransaction(tx.QueryRowContext(ctx, `SELECT `+transactionColumns+` FROM transactions WHERE shop_id=? AND id=?`, shopID, transactionID))
+	t, err := scanTransaction(tx.QueryRowContext(ctx, s.rebind(`SELECT `+transactionColumns+` FROM transactions WHERE shop_id=? AND id=?`), shopID, transactionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return LedgerResult{}, ErrNotFound
 	}
@@ -255,7 +278,7 @@ func (s *Store) ResolveReview(
 
 	if action == ReviewActionReject {
 		t.Status = models.StatusRejected
-		if _, err := tx.ExecContext(ctx, `UPDATE transactions SET status=? WHERE shop_id=? AND id=?`, string(models.StatusRejected), shopID, transactionID); err != nil {
+		if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE transactions SET status=? WHERE shop_id=? AND id=?`), string(models.StatusRejected), shopID, transactionID); err != nil {
 			return LedgerResult{}, err
 		}
 
@@ -272,7 +295,7 @@ func (s *Store) ResolveReview(
 			Notes:          notes,
 		}
 		origJSON, _ := json.Marshal(decision.OriginalValues)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO review_decisions(id, shop_id, transaction_id, decision, decided_by, decided_at, original_values, corrected_values, notes) VALUES(?,?,?,?,?,?,?,?,?)`,
+		if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO review_decisions(id, shop_id, transaction_id, decision, decided_by, decided_at, original_values, corrected_values, notes) VALUES(?,?,?,?,?,?,?,?,?)`),
 			decision.ID, shopID, transactionID, string(decision.Decision), decision.DecidedBy, formatTime(now), string(origJSON), "{}", decision.Notes); err != nil {
 			return LedgerResult{}, err
 		}
@@ -312,8 +335,13 @@ func (s *Store) ResolveReview(
 		return LedgerResult{}, errors.New("product is required to confirm transaction")
 	}
 
+	if s.Dialect().IsPostgres() {
+		var dummy string
+		_ = tx.QueryRowContext(ctx, s.rebind(`SELECT id FROM products WHERE shop_id = ? AND id = ? FOR UPDATE`), shopID, t.ProductID).Scan(&dummy)
+	}
+
 	var currency string
-	if err := tx.QueryRowContext(ctx, `SELECT currency FROM shops WHERE id=?`, shopID).Scan(&currency); err != nil {
+	if err := tx.QueryRowContext(ctx, s.rebind(`SELECT currency FROM shops WHERE id=?`), shopID).Scan(&currency); err != nil {
 		return LedgerResult{}, err
 	}
 	if currency != t.Amount.Currency {
@@ -345,16 +373,16 @@ func (s *Store) ResolveReview(
 	p.Quantity += delta
 
 	now := formatTime(time.Now().UTC())
-	if _, err := tx.ExecContext(ctx, `UPDATE products SET quantity=?, updated_at=? WHERE shop_id=? AND id=?`, p.Quantity, now, shopID, t.ProductID); err != nil {
+	if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE products SET quantity=?, updated_at=? WHERE shop_id=? AND id=?`), p.Quantity, now, shopID, t.ProductID); err != nil {
 		return LedgerResult{}, err
 	}
 
-	if _, err := tx.ExecContext(ctx, `INSERT INTO stock_movements(transaction_id, shop_id, product_id, delta, created_at) VALUES(?,?,?,?,?)`, t.ID, shopID, t.ProductID, delta, now); err != nil {
+	if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO stock_movements(transaction_id, shop_id, product_id, delta, created_at) VALUES(?,?,?,?,?)`), t.ID, shopID, t.ProductID, delta, now); err != nil {
 		return LedgerResult{}, err
 	}
 
 	t.Status = models.StatusConfirmed
-	if _, err := tx.ExecContext(ctx, `UPDATE transactions SET status=?, product_id=?, product_name=?, quantity=?, unit=?, amount_amount=?, amount_currency=? WHERE shop_id=? AND id=?`,
+	if _, err := tx.ExecContext(ctx, s.rebind(`UPDATE transactions SET status=?, product_id=?, product_name=?, quantity=?, unit=?, amount_amount=?, amount_currency=? WHERE shop_id=? AND id=?`),
 		string(models.StatusConfirmed), t.ProductID, t.ProductName, t.Quantity, string(t.Unit), t.Amount.Amount, t.Amount.Currency, shopID, t.ID); err != nil {
 		return LedgerResult{}, err
 	}
@@ -383,7 +411,7 @@ func (s *Store) ResolveReview(
 	}
 	origJSON, _ := json.Marshal(decision.OriginalValues)
 	corrJSON, _ := json.Marshal(decision.CorrectedValues)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO review_decisions(id, shop_id, transaction_id, decision, decided_by, decided_at, original_values, corrected_values, notes) VALUES(?,?,?,?,?,?,?,?,?)`,
+	if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO review_decisions(id, shop_id, transaction_id, decision, decided_by, decided_at, original_values, corrected_values, notes) VALUES(?,?,?,?,?,?,?,?,?)`),
 		decision.ID, shopID, transactionID, string(decision.Decision), decision.DecidedBy, formatTime(decidedNow), string(origJSON), string(corrJSON), decision.Notes); err != nil {
 		return LedgerResult{}, err
 	}
@@ -410,7 +438,7 @@ func (s *Store) GetReviewDecision(ctx context.Context, shopID, transactionID str
 		dec                                    ReviewDecision
 		kind, decidedAtRaw, origJSON, corrJSON string
 	)
-	err := s.db.QueryRowContext(ctx, query, shopID, transactionID).Scan(
+	err := s.db.QueryRowContext(ctx, s.rebind(query), shopID, transactionID).Scan(
 		&dec.ID, &dec.ShopID, &dec.TransactionID, &kind, &dec.DecidedBy, &decidedAtRaw, &origJSON, &corrJSON, &dec.Notes,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

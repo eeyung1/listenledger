@@ -43,14 +43,14 @@ const transactionColumns = `id, shop_id, type, product_id, product_name, quantit
 // validation engine concluded, and the review flow later changes only the
 // status. Nothing is lost by holding a low-confidence capture.
 func (s *Store) InsertTransaction(ctx context.Context, transaction models.Transaction) error {
-	return insertTransaction(ctx, s.db, transaction)
+	return s.insertTransaction(ctx, s.db, transaction)
 }
 
 type executor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
-func insertTransaction(ctx context.Context, db executor, transaction models.Transaction) error {
+func (s *Store) insertTransaction(ctx context.Context, db executor, transaction models.Transaction) error {
 	if transaction.ShopID == "" {
 		return errors.New("storage: InsertTransaction requires a shop_id")
 	}
@@ -86,7 +86,7 @@ func insertTransaction(ctx context.Context, db executor, transaction models.Tran
 			status, occurred_at, created_at, transcript, receipt_id
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-	_, err := db.ExecContext(ctx, query,
+	_, err := db.ExecContext(ctx, s.rebind(query),
 		transaction.ID, transaction.ShopID, string(transaction.Type),
 		nullString(transaction.ProductID), transaction.ProductName,
 		transaction.Quantity, string(transaction.Unit),
@@ -150,7 +150,7 @@ func (s *Store) QueryTransactions(ctx context.Context, shopID string, filter Tra
 		args = append(args, formatTime(*filter.To))
 	}
 
-	countQuery := "SELECT COUNT(*) FROM transactions " + whereClause
+	countQuery := s.rebind("SELECT COUNT(*) FROM transactions " + whereClause)
 	var total int
 	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("storage: count transactions: %w", err)
@@ -162,7 +162,7 @@ func (s *Store) QueryTransactions(ctx context.Context, shopID string, filter Tra
 		offset = 0
 	}
 
-	dataQuery := "SELECT " + transactionColumns + " FROM transactions " + whereClause + " ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?"
+	dataQuery := s.rebind("SELECT " + transactionColumns + " FROM transactions " + whereClause + " ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?")
 	dataArgs := append(append([]any{}, args...), limit, offset)
 
 	rows, err := s.db.QueryContext(ctx, dataQuery, dataArgs...)
@@ -203,7 +203,7 @@ func (s *Store) GetTransactionByID(ctx context.Context, shopID, transactionID st
 		  FROM transactions
 		 WHERE shop_id = ? AND id = ?`
 
-	transaction, err := scanTransaction(s.db.QueryRowContext(ctx, query, shopID, transactionID))
+	transaction, err := scanTransaction(s.db.QueryRowContext(ctx, s.rebind(query), shopID, transactionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Transaction{}, ErrNotFound
 	}
@@ -232,7 +232,7 @@ func (s *Store) UpdateTransactionStatus(
 	}
 
 	const query = `UPDATE transactions SET status = ? WHERE shop_id = ? AND id = ?`
-	result, err := s.db.ExecContext(ctx, query, string(status), shopID, transactionID)
+	result, err := s.db.ExecContext(ctx, s.rebind(query), string(status), shopID, transactionID)
 	if err != nil {
 		return models.Transaction{}, fmt.Errorf("storage: update transaction %s: %w", transactionID, err)
 	}
@@ -260,7 +260,7 @@ func (s *Store) CountTransactionsByStatus(
 
 	const query = `SELECT COUNT(*) FROM transactions WHERE shop_id = ? AND status = ?`
 	var count int
-	if err := s.db.QueryRowContext(ctx, query, shopID, string(status)).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, s.rebind(query), shopID, string(status)).Scan(&count); err != nil {
 		return 0, fmt.Errorf("storage: count transactions by status: %w", err)
 	}
 	return count, nil

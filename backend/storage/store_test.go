@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -149,5 +150,44 @@ func TestStore_EmptySliceJSONEncoding(t *testing.T) {
 	data, _ = json.Marshal(movements)
 	if string(data) != "[]" {
 		t.Fatalf("expected '[]', got '%s'", string(data))
+	}
+}
+
+func TestStore_DialectAndDriverRouting(t *testing.T) {
+	// 1. SQLite dialect detection
+	sqliteStore, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open(:memory:) failed: %v", err)
+	}
+	defer sqliteStore.Close()
+
+	if sqliteStore.Dialect() != DialectSQLite {
+		t.Errorf("expected DialectSQLite, got %v", sqliteStore.Dialect())
+	}
+	if !sqliteStore.Dialect().IsSQLite() {
+		t.Errorf("expected IsSQLite() to be true")
+	}
+	if sqliteStore.Dialect().IsPostgres() {
+		t.Errorf("expected IsPostgres() to be false for SQLite")
+	}
+
+	// 2. PostgreSQL DSN routing
+	// Connecting to an unreachable dummy postgres port must return a postgres connection error,
+	// verifying that Open routed to OpenPostgres rather than treating it as a SQLite filename.
+	_, err = Open("postgres://user:pass@127.0.0.1:54329/testdb?sslmode=disable")
+	if err == nil {
+		t.Fatal("expected connection error for nonexistent postgres endpoint, got nil")
+	}
+	if !strings.Contains(err.Error(), "postgres") {
+		t.Errorf("expected error message to mention postgres, got: %v", err)
+	}
+
+	// 3. PostgreSQL postgresql:// prefix
+	_, err = Open("postgresql://user:pass@127.0.0.1:54329/testdb?sslmode=disable")
+	if err == nil {
+		t.Fatal("expected connection error for nonexistent postgres endpoint, got nil")
+	}
+	if !strings.Contains(err.Error(), "postgres") {
+		t.Errorf("expected error message to mention postgres, got: %v", err)
 	}
 }
