@@ -352,7 +352,15 @@ func TestCutover_LivePostgreSQLColdRebootAndDisasterRecovery(t *testing.T) {
 	// Seed cohort and target gates
 	gates := models.TargetGates{
 		MinFullTransactionAccuracy: 95.0,
+		MinSKUAccuracy:             95.0,
+		MinQuantityAccuracy:        95.0,
+		MinUnitAccuracy:            95.0,
+		MinAmountAccuracy:          95.0,
 		MaxFalseCaptureRate:        1.0,
+		MaxMissedTransactionRate:   3.0,
+		MaxCorrectionRate:          8.0,
+		MinProtocolComplianceRate:  90.0,
+		MaxP95LatencyMs:            1200.0,
 	}
 	if _, err := storeA.SetTargetGates(ctx, shopID, gates, "Owner PG"); err != nil {
 		t.Fatalf("set target gates PG: %v", err)
