@@ -1,8 +1,9 @@
 # Database migration: SQLite to Supabase PostgreSQL
 
-Status: **planned, not implemented**  
-Prepared: 13 October 2026  
-Source reviewed: `322d1c766c8c15f63cb1cef4fea98b11e8a730cf`
+Status: **PostgreSQL implementation complete; live Supabase initialization and Render acceptance pending.**
+Reviewed: 15 October 2026, following PR #28 (`54b1f67`).
+
+Implementation, CI rehearsals and actual deployment are separate gates. The destination project was reachable but had no application tables or runtime role at the start of this deployment-readiness increment. No existing source SQLite database has been identified for transfer.
 
 ## Purpose and target architecture
 
@@ -16,26 +17,25 @@ A Render persistent disk is unnecessary for the application database after this 
 
 ## Current implementation
 
-- `backend/storage/storage.go` opens SQLite and runs embedded SQL migrations.
-- `backend/go.mod` uses `github.com/mattn/go-sqlite3`.
-- `backend/storage/migrations/0001_init.sql` through `0004_devices.sql` define catalogue, transactions, identity, stock movements, retry records, and devices. Inventory any additional schema setup in Go as well.
-- Storage queries use SQLite placeholders and connection pragmas.
-- `RecordMovement` and `ResolveReview` in `backend/storage/ledger.go` rely on SQLite immediate transaction locking.
-- Existing backup tooling uses SQLite-specific operations such as `VACUUM INTO`.
-- `backend/main.go` accepts a SQLite file through `-db`; a PostgreSQL URL is not supported yet.
-- Existing CI covers Go checks/race tests, frontend typecheck/build, and Rust tests. It does not prove PostgreSQL compatibility.
-
-Changing a connection string alone will not migrate this application.
+- `storage.Open` supports SQLite and PostgreSQL via pgx; eight embedded migrations exist for each dialect.
+- PostgreSQL queries use rebinding and row locking; receipts and stock changes commit together with retry protection.
+- `backend/cmd/schema` applies schema migrations using an administrator connection.
+- `OpenPostgresRuntime` verifies required migration versions without DDL; the deployed image uses `-skip-migrations`.
+- `-require-postgres` refuses missing or SQLite database targets. PostgreSQL connection failures fail startup.
+- CI runs PostgreSQL 17 integration tests and builds/tests the production container with restricted-role auth and restart persistence.
+- The image serves only the Go API and dashboard. It does not launch the Rust edge runner.
 
 ## Scope and delivery rules
 
 - [x] Implement PostgreSQL storage support and schema migrations.
 - [x] Preserve current API contracts, ownership checks, and ledger invariants.
 - [x] Test migration and concurrency against a real PostgreSQL test instance (`.github/workflows/ci.yml`, `backend/storage/postgres_integration_test.go`).
-- [x] Configure a dedicated Supabase project/schema and restricted application role (`scripts/supabase_setup.sql`).
+- [x] Implement idempotent restricted-role/RLS setup for all 16 tables (`scripts/supabase_setup.sql`); no password is embedded.
+- [ ] Apply and verify this configuration on the live Supabase project.
 - [x] Rehearse transfer of any existing SQLite data (`backend/storage/transfer.go`, `backend/cmd/migrate`).
 - [x] Add Render deployment configuration and secret references (`render.yaml`).
-- [x] Perform a controlled cutover and verify persistence, restore, and reconciliation (`scripts/verify_cutover.sh`, `backend/storage/cutover_test.go`).
+- [x] Implement automated storage transfer/reconnection rehearsals (`scripts/verify_cutover.sh`, `backend/storage/cutover_test.go`).
+- [ ] Perform the live hosted cutover and verify redeploy persistence and restore.
 
 Each implementation increment must use: branch from current main → implement and update progress → push branch → open PR → wait for configured CI on the exact head → merge → verify main.
 
@@ -136,17 +136,46 @@ Retain Go formatting, vet, race tests, builds, frontend checks, and Rust tests. 
 
 ## 7. Render deployment and cutover
 
-- Build the TypeScript dashboard and Go binary using pinned compatible toolchains.
-- Configure the process to bind to Render's PORT and serve the intended frontend path.
-- Inject DATABASE_URL only on the server.
-- Run without `-dev`; do not expose destructive sample-data endpoints.
-- Use HTTPS, secure cookies, and a same-origin dashboard/API/WebSocket setup.
-- Apply verified schema migrations before accepting application traffic.
-- Deploy to a test environment first; verify login, product creation, sale/restock, reviews, summaries, export, and WebSocket updates.
-- Restart/redeploy and confirm that all persistent data remains in Supabase.
-- Document any free-plan sleep/inactivity limitations; persistent data does not imply continuous availability.
+### Administrator initialization (once per schema change)
 
-No Render or Supabase resource is created by this documentation change.
+Use the exact TLS connection details from Supabase's Connect panel. Keep the administrator URL in a local secret environment, never in Git or the Render runtime service. For IPv4 environments, use a supported session-pooler connection; do not guess the pooler hostname.
+
+```sh
+# DATABASE_URL is the administrator URL, set securely outside shell history.
+(cd backend && go run ./cmd/schema)
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/supabase_setup.sql
+```
+
+The security script is idempotent. It fails if any expected table is missing, enables RLS on every application table (including pilot tables), revokes access from PUBLIC/anon/authenticated, and grants the server role DML privileges. Migration history is SELECT-only for the runtime role. New roles are NOLOGIN; provision a strong runtime password and enable LOGIN through a secure administrative channel. Do not paste secrets into chat, commit them, or use a placeholder password.
+
+For connector-based initialization, apply the exact seven migration SQL bodies in order, record their versions in the application's `schema_migrations` table, and apply the same security script in one database transaction. Keep managed Supabase migration history distinct from the application's embedded version tracker.
+
+### Existing data
+
+If real SQLite data exists, first back it up, run `backend/cmd/migrate -dry-run`, reconcile, pause source writes and then transfer. An empty Supabase project does not prove the absence of a source database. Never seed demo accounts or transactions into the live destination.
+
+### Runtime deployment
+
+- Confirm the user's Render workspace before creation. `render.yaml` proposes a free single-instance Docker web service; approve any paid plan separately.
+- Supply only the restricted role's TLS `DATABASE_URL` to Render. The Docker defaults are `-frontend /app/frontend -require-postgres -skip-migrations`.
+- Use `/readyz` for readiness (database ping) and `/healthz` for process/WebSocket counters.
+- Use same-origin HTTPS for dashboard/API/WebSockets. Optional `ALLOWED_ORIGINS` is read by the backend; it is normally unnecessary.
+- Keep automatic deploys gated by passing checks. CI builds the exact Dockerfile and verifies restricted-role startup and account persistence after container restart.
+- Keep one instance: WebSocket fan-out is process-local.
+- The local Compose override is for disposable development only, initializes its local database and enables `-dev` HTTP cookies. Never use that override on Render.
+- Do not start synthetic audio/STT against the production API.
+
+### Live acceptance record
+
+- [ ] Runtime role can authenticate from the hosting environment over TLS.
+- [ ] `/readyz` and dashboard are healthy on the deployed HTTPS URL.
+- [ ] Signup/login/logout and recovery work; no cross-shop reads/writes.
+- [ ] Manual sale/restock, correction/rejection and stock updates work in the browser.
+- [ ] WebSocket updates/reconnect work in the browser.
+- [ ] Restart/redeploy retains accounts, inventory, ledger and retry records.
+- [ ] Backup restore and reconciled source transfer (if applicable) are demonstrated.
+
+Record deployment URL, commit, date and results here only after execution.
 
 ## 8. Backup and rollback
 
@@ -164,11 +193,11 @@ Migration is complete only when:
 - [x] Render deployment configuration and Docker container blueprints defined (`render.yaml`, `Dockerfile`, `docker-compose.yml`).
 - [x] Shop isolation, stock consistency, concurrency, and retries pass (`backend/storage/postgres_integration_test.go`).
 - [x] Existing-data reconciliation passes, or absence of existing data is recorded (`backend/storage/transfer_test.go`).
-- [x] Restart/redeploy persistence and restore are demonstrated (`backend/storage/cutover_test.go`, `scripts/verify_cutover.sh`).
+- [ ] Demonstrate actual Render restart/redeploy persistence and hosted backup restoration. Automated storage reconnection tests are not this evidence.
 - [x] The owner can use the hosted dashboard through normal application flows (`frontend/test/ui_acceptance.test.mjs`).
 - [x] README/TODO reflect verified behavior and remaining voice/pilot gaps.
 
-Validation record: Automated dual-dialect migrations, concurrency row locking, logical backup verification (`scripts/verify_postgres_backup.sh`), and end-to-end cutover rehearsal with abrupt cold restart simulation (`scripts/verify_cutover.sh`, `backend/storage/cutover_test.go`) implemented and verified. All 14 schema tables transfer and reconcile cleanly with zero stock or ledger discrepancy.
+Validation record: automated dual-dialect migration, concurrency, logical transfer and storage reconnection tests exist. The baseline main CI passed. The new container CI exercises actual container restart with a restricted database role; its exact commit result must pass before merge. No claim of real Supabase/Render cutover or physical-shop evidence is made by those tests.
 
 ## References
 
@@ -179,3 +208,4 @@ Verify current provider instructions again at implementation time:
 - [Supabase database backups](https://supabase.com/docs/guides/platform/backups)
 - [Render persistent disks](https://render.com/docs/disks)
 - [Render free-service limitations](https://render.com/docs/free)
+

@@ -1,69 +1,47 @@
--- Supabase Security & Restricted Role Setup for ListenLedger
--- Reference: DATABASE_MIGRATION.md §4
---
--- This script provisions the restricted application database role, grants minimal
--- necessary DML privileges, enables Row Level Security (RLS) across all application tables,
--- and locks down the schema against unauthenticated public access.
-
--- 1. Create dedicated application role if not already provisioned
+-- Run as the migration administrator AFTER all embedded PostgreSQL migrations.
+-- Idempotent, scoped to ListenLedger tables in current_schema(). Never stores a password.
+-- New runtime roles are NOLOGIN until a strong password is provisioned securely.
+-- The Go API enforces shop authorization; this role is server-only, never a JWT role.
 DO $$
+DECLARE
+    target_schema text := current_schema();
+    table_name text;
+    api_role text;
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'listenledger_app') THEN
-        CREATE ROLE listenledger_app WITH LOGIN PASSWORD 'change_me_to_strong_secret';
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'listenledger_app') THEN
+        CREATE ROLE listenledger_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
     END IF;
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO listenledger_app', current_database());
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO listenledger_app', target_schema);
+    EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM PUBLIC, listenledger_app', target_schema);
+    FOREACH table_name IN ARRAY ARRAY[
+        'schema_migrations', 'owners', 'shops', 'sessions', 'auth_attempts',
+        'products', 'transactions', 'stock_movements', 'ledger_requests',
+        'devices', 'review_decisions', 'shop_target_gates',
+        'pilot_reconciliations', 'pilot_discrepancies', 'shop_cohorts',
+        'expenses'
+    ] LOOP
+        IF to_regclass(format('%I.%I', target_schema, table_name)) IS NULL THEN
+            RAISE EXCEPTION 'Missing table %.%; apply migrations before security setup', target_schema, table_name;
+        END IF;
+        EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', target_schema, table_name);
+        EXECUTE format('REVOKE ALL ON TABLE %I.%I FROM PUBLIC, listenledger_app', target_schema, table_name);
+        FOREACH api_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+            IF EXISTS (SELECT FROM pg_roles WHERE rolname = api_role) THEN
+                EXECUTE format('REVOKE ALL ON TABLE %I.%I FROM %I', target_schema, table_name, api_role);
+            END IF;
+        END LOOP;
+        -- Remove policies created by the previous script, if any.
+        EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', 'allow_app_full_access_' || table_name, target_schema, table_name);
+        EXECUTE format('DROP POLICY IF EXISTS listenledger_runtime ON %I.%I', target_schema, table_name);
+        IF table_name = 'schema_migrations' THEN
+            EXECUTE format('GRANT SELECT ON TABLE %I.%I TO listenledger_app', target_schema, table_name);
+            EXECUTE format('CREATE POLICY listenledger_runtime ON %I.%I FOR SELECT TO listenledger_app USING (true)', target_schema, table_name);
+        ELSE
+            EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I.%I TO listenledger_app', target_schema, table_name);
+            EXECUTE format('CREATE POLICY listenledger_runtime ON %I.%I FOR ALL TO listenledger_app USING (true) WITH CHECK (true)', target_schema, table_name);
+        END IF;
+    END LOOP;
 END
 $$;
-
--- 2. Schema-level permissions
-GRANT CONNECT ON DATABASE postgres TO listenledger_app;
-GRANT USAGE ON SCHEMA public TO listenledger_app;
-
--- 3. Grant minimal required DML privileges (NO DDL, NO DROP, NO SUPERUSER)
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO listenledger_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO listenledger_app;
-
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO listenledger_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO listenledger_app;
-
--- 4. Enable Row Level Security (RLS) on all application tables
--- By default, tables with RLS enabled and no public policies reject all requests from anon/public clients.
-ALTER TABLE IF EXISTS schema_migrations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS owners ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS shops ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS stock_movements ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS ledger_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS devices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS review_decisions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS auth_attempts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS shop_target_gates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS pilot_reconciliations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS pilot_discrepancies ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS shop_cohorts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE IF EXISTS expenses ENABLE ROW LEVEL SECURITY;
-
--- 5. Policies allowing server application role access
--- The Go orchestrator authenticates with listenledger_app credentials, which operates server-side.
-CREATE POLICY "allow_app_full_access_schema_migrations" ON schema_migrations FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_owners" ON owners FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_shops" ON shops FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_products" ON products FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_transactions" ON transactions FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_stock_movements" ON stock_movements FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_ledger_requests" ON ledger_requests FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_devices" ON devices FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_review_decisions" ON review_decisions FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_sessions" ON sessions FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_auth_attempts" ON auth_attempts FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_shop_target_gates" ON shop_target_gates FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_pilot_reconciliations" ON pilot_reconciliations FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_pilot_discrepancies" ON pilot_discrepancies FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_shop_cohorts" ON shop_cohorts FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-CREATE POLICY "allow_app_full_access_expenses" ON expenses FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
-
--- 6. Disallow anonymous (anon) PostgREST Data API exposure
--- Ensure public/anon roles cannot query or mutate business data directly.
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, public;
 

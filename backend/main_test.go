@@ -243,3 +243,20 @@ func generateTestCertificate(t *testing.T, dir string) (string, string) {
 
 	return certPath, keyPath
 }
+
+func TestPostgresDeploymentRejectsSQLiteFallback(t *testing.T) {
+	for _, dsn := range []string{"", "listenledger.db", ":memory:"} {
+		if err := validateDatabaseConfig(config{dbPath: dsn, requirePostgres: true}); err == nil {
+			t.Errorf("production accepted non-Postgres target %q", dsn)
+		}
+		if err := validateDatabaseConfig(config{dbPath: dsn, skipMigrations: true}); err == nil {
+			t.Errorf("restricted runtime accepted non-Postgres target %q", dsn)
+		}
+	}
+	if err := validateDatabaseConfig(config{dbPath: "postgres://localhost/ledger", requirePostgres: true, skipMigrations: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateDatabaseConfig(config{dbPath: "local.db"}); err != nil {
+		t.Fatalf("explicit local SQLite use must remain supported: %v", err)
+	}
+}
