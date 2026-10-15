@@ -1365,3 +1365,80 @@ func TestPostgres_AuthLimiterConcurrentAttempts(t *testing.T) {
 		t.Fatalf("expired counter did not reset: allowed=%v err=%v", allowed, err)
 	}
 }
+
+func TestPostgres_CustomerCreditAndDebts(t *testing.T) {
+	s := openTestPostgres(t)
+	ctx := context.Background()
+	shopID := "shop_pg_cust"
+	seedPostgresShop(t, s, shopID, "own_pg_cust")
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	cust := models.Customer{
+		ID:                 "cus_pg_01",
+		ShopID:             shopID,
+		Name:               "Oluwaseun Adeyemi",
+		Phone:              "+2348011112222",
+		Notes:              "Weekly credit provisions customer",
+		OutstandingBalance: models.Money{Amount: 0, Currency: "NGN"},
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if err := s.CreateCustomer(ctx, cust); err != nil {
+		t.Fatalf("create customer PG: %v", err)
+	}
+
+	// 1. Fetch by ID
+	got, err := s.GetCustomerByID(ctx, shopID, cust.ID)
+	if err != nil {
+		t.Fatalf("get customer by id PG: %v", err)
+	}
+	if got.Name != cust.Name {
+		t.Errorf("expected %q, got %q", cust.Name, got.Name)
+	}
+
+	// 2. Record Credit Sale
+	debt, err := s.RecordCustomerDebt(ctx, models.CustomerDebt{
+		ID:          "dbt_pg_01",
+		ShopID:      shopID,
+		CustomerID:  cust.ID,
+		Type:        models.DebtTypeCreditSale,
+		Amount:      models.Money{Amount: 750000, Currency: "NGN"},
+		Description: "Bulk bag of rice on credit",
+		OccurredAt:  now,
+		CreatedBy:   "owner",
+	})
+	if err != nil {
+		t.Fatalf("record credit sale PG: %v", err)
+	}
+	if debt.BalanceAfter.Amount != 750000 {
+		t.Errorf("expected balance after 750000, got %d", debt.BalanceAfter.Amount)
+	}
+
+	// 3. Record Repayment
+	repay, err := s.RecordCustomerDebt(ctx, models.CustomerDebt{
+		ID:          "dbt_pg_02",
+		ShopID:      shopID,
+		CustomerID:  cust.ID,
+		Type:        models.DebtTypeRepayment,
+		Amount:      models.Money{Amount: 250000, Currency: "NGN"},
+		Description: "Cash part-payment",
+		OccurredAt:  now.Add(1 * time.Minute),
+		CreatedBy:   "cashier",
+	})
+	if err != nil {
+		t.Fatalf("record repayment PG: %v", err)
+	}
+	if repay.BalanceAfter.Amount != 500000 {
+		t.Errorf("expected balance after 500000, got %d", repay.BalanceAfter.Amount)
+	}
+
+	// 4. Shop Credit Summary
+	summary, err := s.GetShopCreditSummary(ctx, shopID, now.Add(-1*time.Hour), now.Add(1*time.Hour))
+	if err != nil {
+		t.Fatalf("get shop credit summary PG: %v", err)
+	}
+	if summary.TotalCustomersWithDebt != 1 || summary.TotalOutstandingDebt.Amount != 500000 {
+		t.Errorf("unexpected credit summary PG: %+v", summary)
+	}
+}

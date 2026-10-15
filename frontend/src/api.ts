@@ -219,6 +219,29 @@ async function patchJSON<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function putJSON<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "X-ListenLedger-Request": "1",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    let msg = "";
+    try {
+      const err = await response.json();
+      msg = err.error || err.message;
+    } catch {
+      // ignore non-json errors
+    }
+    throw new ApiError(path, response.status, msg || undefined);
+  }
+  return (await response.json()) as T;
+}
+
 /** GET /api/transactions — the ledger snapshot, newest first. */
 export function fetchTransactions(
   shopId: string,
@@ -1044,9 +1067,147 @@ export async function deleteExpense(id: string): Promise<{ readonly deleted: boo
   return res.json() as Promise<{ readonly deleted: boolean; readonly id: string }>;
 }
 
+export type CustomerDebtType = "credit_sale" | "repayment" | "forgiveness";
 
+export interface Customer {
+  readonly id: string;
+  readonly shop_id: string;
+  readonly name: string;
+  readonly phone: string;
+  readonly notes: string;
+  readonly outstanding_balance: Money;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
 
+export interface CustomerDebt {
+  readonly id: string;
+  readonly shop_id: string;
+  readonly customer_id: string;
+  readonly type: CustomerDebtType;
+  readonly amount: Money;
+  readonly balance_after: Money;
+  readonly description: string;
+  readonly receipt_ref?: string | undefined;
+  readonly occurred_at: string;
+  readonly created_by: string;
+  readonly created_at: string;
+}
 
+export interface CustomerQuery {
+  readonly search?: string | undefined;
+  readonly has_debt?: boolean | undefined;
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+}
 
+export interface CustomersSnapshot {
+  readonly shop_id: string;
+  readonly customers: readonly Customer[];
+  readonly count: number;
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+  readonly generated_at: string;
+}
 
+export interface CustomerDebtsSnapshot {
+  readonly shop_id: string;
+  readonly customer_id: string;
+  readonly debts: readonly CustomerDebt[];
+  readonly count: number;
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+  readonly generated_at: string;
+}
+
+export interface ShopCreditSummary {
+  readonly shop_id: string;
+  readonly currency: string;
+  readonly total_customers_with_debt: number;
+  readonly total_outstanding_debt: Money;
+  readonly today_credit_sales_amount: Money;
+  readonly today_repayments_amount: Money;
+}
+
+export interface CreateCustomerRequest {
+  readonly name: string;
+  readonly phone?: string | undefined;
+  readonly notes?: string | undefined;
+  readonly initial_debt?: { readonly amount: number; readonly currency?: string } | undefined;
+  readonly initial_debt_description?: string | undefined;
+}
+
+export interface UpdateCustomerRequest {
+  readonly name: string;
+  readonly phone?: string | undefined;
+  readonly notes?: string | undefined;
+}
+
+export interface RecordCustomerDebtRequest {
+  readonly type: CustomerDebtType;
+  readonly amount: { readonly amount: number; readonly currency?: string };
+  readonly description: string;
+  readonly receipt_ref?: string | undefined;
+  readonly occurred_at?: string | undefined;
+}
+
+export interface RecordCustomerDebtResponse {
+  readonly debt: CustomerDebt;
+  readonly customer: Customer;
+}
+
+/** GET /api/customers — fetch filtered, paginated customer list */
+export async function fetchCustomers(query?: CustomerQuery, signal?: AbortSignal): Promise<CustomersSnapshot> {
+  const params: Record<string, string> = {};
+  if (query?.search) params.search = query.search;
+  if (query?.has_debt !== undefined) params.has_debt = query.has_debt ? "true" : "false";
+  if (query?.limit !== undefined) params.limit = String(query.limit);
+  if (query?.offset !== undefined) params.offset = String(query.offset);
+
+  return getJSON<CustomersSnapshot>("/api/customers", params, signal);
+}
+
+/** POST /api/customers — register a new customer with optional initial credit */
+export async function createCustomer(data: CreateCustomerRequest): Promise<Customer> {
+  return postJSON<Customer>("/api/customers", data);
+}
+
+/** GET /api/customers/{id} — fetch customer profile */
+export async function fetchCustomer(id: string, signal?: AbortSignal): Promise<Customer> {
+  return getJSON<Customer>(`/api/customers/${encodeURIComponent(id)}`, undefined, signal);
+}
+
+/** PUT /api/customers/{id} — update customer profile */
+export async function updateCustomer(id: string, data: UpdateCustomerRequest): Promise<Customer> {
+  return putJSON<Customer>(`/api/customers/${encodeURIComponent(id)}`, data);
+}
+
+/** GET /api/customers/{id}/debts — fetch customer credit & repayment ledger */
+export async function fetchCustomerDebts(
+  customerId: string,
+  query?: { type?: CustomerDebtType; limit?: number; offset?: number },
+  signal?: AbortSignal,
+): Promise<CustomerDebtsSnapshot> {
+  const params: Record<string, string> = {};
+  if (query?.type) params.type = query.type;
+  if (query?.limit !== undefined) params.limit = String(query.limit);
+  if (query?.offset !== undefined) params.offset = String(query.offset);
+
+  return getJSON<CustomerDebtsSnapshot>(`/api/customers/${encodeURIComponent(customerId)}/debts`, params, signal);
+}
+
+/** POST /api/customers/{id}/debts — record credit sale, repayment, or debt forgiveness */
+export async function recordCustomerDebt(
+  customerId: string,
+  data: RecordCustomerDebtRequest,
+): Promise<RecordCustomerDebtResponse> {
+  return postJSON<RecordCustomerDebtResponse>(`/api/customers/${encodeURIComponent(customerId)}/debts`, data);
+}
+
+/** GET /api/customers/credit-summary — fetch shop credit & debt totals */
+export async function fetchShopCreditSummary(signal?: AbortSignal): Promise<ShopCreditSummary> {
+  return getJSON<ShopCreditSummary>("/api/customers/credit-summary", undefined, signal);
+}
 

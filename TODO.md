@@ -19,6 +19,41 @@ See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md) for the current procedure.
 
 ## Historical implementation notes
 
+## Customer Credit & Debt Ledger (Customer Book / I-Owe-You / "Gbese") Tracking increment (15 October 2026) — MILESTONE 25 COMPLETE
+
+Implemented customer credit and debt ledger ("Customer Book" / I-Owe-You / "Gbese" tracking), accounts receivable analytics, cash repayments, debt forgiveness/discounts, and real-time command centre integration (`backend/models/customer.go`, `backend/models/customer_test.go`, `backend/storage/customers.go`, `backend/storage/customers_test.go`, `backend/storage/migrations/0009_customer_debts.sql`, `backend/storage/migrations_pg/0009_customer_debts.sql`, `backend/api/customers.go`, `backend/api/api.go`, `backend/api/customers_test.go`, `backend/ws/events.go`, `frontend/src/api.ts`, `frontend/src/ws.ts`, `frontend/src/views/customers.ts`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/style.css`, `frontend/test/customers.test.mjs`):
+1. **Domain Models & Invariant Validation (`backend/models/customer.go`, `backend/models/customer_test.go`)**:
+   - `Customer`: identifier (`cus_...`), shop reference, name (1–150 chars), phone ($\le 32$ chars), notes ($\le 500$ chars), and current `outstanding_balance` (`models.Money`).
+   - `CustomerDebtType`: validated enum supporting `credit_sale` (credit sale increasing customer debt), `repayment` (cash repayment decreasing debt), and `forgiveness` (debt write-off/discount decreasing debt).
+   - `CustomerDebt`: identifier (`dbt_...`), shop reference, customer reference, debt type, amount (positive `models.Money`), `balance_after` (snapshot of outstanding balance immediately following adjustment), description ($\le 500$ chars), optional receipt reference, occurred timestamp, and audit trail attributes.
+   - Comprehensive model validation test suite covering empty names, phone constraints, negative/zero amounts, and ISO 4217 currencies.
+2. **Dual-Dialect Migrations & Storage Repository (`backend/storage/migrations/0009_customer_debts.sql`, `backend/storage/migrations_pg/0009_customer_debts.sql`, `backend/storage/customers.go`, `backend/storage/customers_test.go`)**:
+   - Schema creation across SQLite and PostgreSQL for `customers` and `customer_debts` with foreign key cascade to `shops(id)`, customer-to-shop compound indexes (`idx_customers_shop_name`, `idx_customers_shop_balance`), positive debt amount constraints, and chronological movement indexes (`idx_customer_debts_shop_occurred`).
+   - Atomic credit adjustment transaction in `RecordCustomerDebt`: acquires row lock (`SELECT FOR UPDATE` on PostgreSQL), computes `balance_after`, updates `outstanding_amount` on customer record, and records debt ledger item atomically.
+   - `ListCustomers` with name/phone substring search, `has_debt` filter, and pagination.
+   - `GetShopCreditSummary` aggregating total customers with debt, total outstanding debt (accounts receivable), and today's credit sales versus repayments.
+   - Cross-tenant isolation verification ensuring shop accounts never leak across tenant boundaries.
+3. **Disaster Recovery Cutover, Reconnection, Transfer & Supabase RLS Alignment (`backend/storage/transfer.go`, `backend/storage/storage.go`, `backend/storage/cutover_test.go`, `scripts/supabase_setup.sql`)**:
+   - Added `customers` and `customer_debts` to `transferDependencyOrder` (now 17 tables total) and added `CustomerDebtSumMatch` to `ShopReconciliation`.
+   - Included `customer_debts` and `customers` in `DeleteShopData` (children-first cascade).
+   - Cold reboot simulation and disaster recovery transfer rehearsal in `TestCutover_FullLifecycleColdRebootAndDisasterRecovery` verified 100% data retention across all 17 tables with zero drift.
+   - Added `customers` and `customer_debts` to `scripts/supabase_setup.sql` with table-level RLS policies.
+4. **REST API Surface & WebSocket Real-Time Events (`backend/api/customers.go`, `backend/api/api.go`, `backend/api/customers_test.go`, `backend/ws/events.go`, `frontend/src/ws.ts`)**:
+   - `POST /api/customers`: registers customer with optional opening balance, generating sortable ULIDs (`cus_`, `dbt_`) and broadcasting `customer.created` and `customer.debt_recorded`.
+   - `GET /api/customers`: paginated customer list supporting search and debt-only filtering.
+   - `GET /api/customers/{id}` & `PUT /api/customers/{id}`: customer profile retrieval and editing with CSRF and session authentication.
+   - `POST /api/customers/{id}/debts`: records credit sale, cash repayment, or debt forgiveness, broadcasting `customer.debt_recorded`.
+   - `GET /api/customers/{id}/debts`: paginated chronological credit ledger history per customer.
+   - `GET /api/customers/credit-summary`: real-time shop accounts receivable metrics.
+5. **Frontend Client, Interactive Customer Book & Command Centre Suite (`frontend/src/api.ts`, `frontend/src/views/customers.ts`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/style.css`, `frontend/test/customers.test.mjs`)**:
+   - Added TypeScript types and client functions (`createCustomer`, `fetchCustomers`, `updateCustomer`, `fetchCustomer`, `recordCustomerDebt`, `fetchCustomerDebts`, `fetchShopCreditSummary`).
+   - Integrated "Customer Debt" KPI card on Overview dashboard with real-time accounts receivable total and quick-link to credit book.
+   - Added "📖 Customer Credit Book" command centre modal with receivables summary bar, live search, debt filter, and customer table with color-coded balance badges.
+   - Built interactive modals for customer registration, credit sale / cash repayment recording, profile editing, and ledger history view.
+   - Full automated test suite in `frontend/test/customers.test.mjs` (3/3 passing, 42/42 total frontend tests passing).
+
+Next: Field-testing, live deployment verification, and voice ambient capture expansion.
+
 ## Shop Operational Expense Tracking, Real-Time Operating Profitability & Multi-Dialect Expense Ledger increment (15 October 2026) — MILESTONE 24 COMPLETE
 
 Implemented shop operational expense tracking, category breakdown analytics, real-time daily operating net profit computation, and command centre modal workflows (`backend/models/expense.go`, `backend/storage/expenses.go`, `backend/storage/migrations/0008_expenses.sql`, `backend/storage/migrations_pg/0008_expenses.sql`, `backend/api/expenses.go`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/test/expenses.test.mjs`):
