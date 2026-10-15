@@ -174,6 +174,76 @@
       </form>
     </section>
 
+    <!-- Pilot Dual-Entry Reconciliation & Cohort Expansion Panel -->
+    <section class="panel" aria-labelledby="pilot-reconciliation-heading">
+      <div class="panel__header">
+        <h2 class="panel__title" id="pilot-reconciliation-heading">Pilot Dual-Entry Reconciliation & Cohort Progression</h2>
+        <span class="badge" data-hook="cohort-phase-badge">Phase 1: Controlled Trial</span>
+      </div>
+      <p class="panel__hint">
+        Independent dual-entry ledger reconciliation (README §11). Compares paper counter tallies and physical stock counts with ambient captures to audit discrepancies before cohort expansion.
+      </p>
+
+      <!-- Cohort Readiness Checklist Card -->
+      <div class="card cohort-readiness-card" data-hook="cohort-readiness-card">
+        <div class="cohort-readiness-header">
+          <strong>Expansion Readiness Status:</strong>
+          <span class="badge" data-hook="cohort-readiness-badge">Evaluating...</span>
+        </div>
+        <ul class="cohort-checks-list" data-hook="cohort-checks-list"></ul>
+        <div class="cohort-actions">
+          <button type="button" class="button button--secondary button--sm" data-hook="evaluate-cohort-btn">Evaluate Readiness & Promote</button>
+        </div>
+      </div>
+
+      <!-- New Reconciliation Form -->
+      <form class="form reconciliation-form" data-hook="reconciliation-form">
+        <h3 class="form__legend">New Independent Dual-Entry Audit</h3>
+        <div class="form__row">
+          <label class="form__field">
+            Session Start
+            <input type="datetime-local" data-hook="rec-period-start" required />
+          </label>
+          <label class="form__field">
+            Session End
+            <input type="datetime-local" data-hook="rec-period-end" required />
+          </label>
+        </div>
+        <div class="form__row">
+          <label class="form__field">
+            Independent Source
+            <input type="text" placeholder="e.g. Paper Counter Register" data-hook="rec-source" value="Paper Counter Register" required />
+          </label>
+          <label class="form__field">
+            Conducted By
+            <input type="text" placeholder="e.g. Shop Owner & Auditor" data-hook="rec-auditor" value="Shop Owner & Auditor" required />
+          </label>
+        </div>
+        <label class="form__field">
+          Independent Paper Records (JSON)
+          <textarea rows="4" data-hook="rec-records-input" placeholder='[{"occurred_at":"...","sku_or_name":"MILO-500","type":"sale","quantity":1,"unit":"pack","amount":250000}]'></textarea>
+        </label>
+        <label class="form__field">
+          Physical Stock Counts (JSON)
+          <textarea rows="2" data-hook="rec-stock-input" placeholder='[{"sku_or_name":"MILO-500","physical_count":48}]'></textarea>
+        </label>
+        <div class="form__actions">
+          <button type="submit" class="button button--primary" data-hook="run-reconcile-btn">Run Dual-Entry Reconciliation</button>
+          <span class="form__status" data-hook="reconcile-status" hidden></span>
+        </div>
+      </form>
+
+      <!-- Active / Recent Reconciliations List -->
+      <div class="reconciliation-history">
+        <h3 class="form__legend">Reconciliation Sessions & Discrepancy Audits</h3>
+        <ul class="reconciliation-list" data-hook="reconciliation-list">
+          <li class="reconciliation-list__empty" data-hook="reconciliation-list-empty">
+            No reconciliation audits performed yet.
+          </li>
+        </ul>
+      </div>
+    </section>
+
     <!-- Privacy & Hardware Notice -->
     <section class="panel panel--privacy" aria-labelledby="privacy-heading">
       <h2 class="panel__title" id="privacy-heading">Ambient Voice Privacy & Local Processing</h2>

@@ -1,5 +1,31 @@
 # TODO — ListenLedger
 
+## Pilot Dual-Entry Reconciliation Engine, Multi-Shop Cohort Trial Framework & Unexplained Discrepancy Investigation Tooling increment (15 October 2026) — MILESTONE 22 COMPLETE
+
+Implemented independent paper ledger vs. ambient capture dual-entry reconciliation, unexplained discrepancy root-cause tracking, and automated multi-shop cohort expansion gates (`backend/storage/reconciliation.go`, `backend/api/reconciliation.go`, `backend/eval/cohort_test.go`, `frontend/src/views/settings.ts`, `frontend/test/reconciliation.test.mjs`):
+1. **Independent Paper vs Ambient Dual-Entry Reconciliation Engine (`backend/storage/reconciliation.go`, `backend/api/reconciliation.go`, `POST /api/pilot/reconcile`, `GET /api/pilot/reconciliations`, `GET /api/pilot/reconciliations/{id}`)**:
+   - Compares independent paper counter registers and physical stock counts against ambient confirmed transactions over specified trading sessions.
+   - Detects and categorizes line-by-line discrepancies: `missed_capture`, `false_capture`, `price_mismatch`, `quantity_mismatch`, and `stock_variance`.
+   - Evaluates achieved accuracy and error rates against agreed `target_gates` (`min_full_transaction_accuracy`, `max_false_capture_rate`, `max_missed_transaction_rate`, etc.).
+   - Migrated SQLite (`0007_pilot_reconciliation.sql`) and PostgreSQL (`migrations_pg/0007_pilot_reconciliation.sql`) schemas with `pilot_reconciliations`, `pilot_discrepancies`, and `shop_cohorts` tables, constraints, foreign keys, and dual-dialect transfer ordering.
+2. **Unexplained Discrepancy Investigation Tooling (`POST /api/pilot/discrepancies/{id}/investigate`)**:
+   - Enforces attribution of every discrepancy to a verified root cause (`acoustic_noise`, `speech_boundary_miss`, `cashier_protocol_drift`, `customer_cancellation`, `physical_shrinkage`, `supplier_shortage`, or `other`) with detailed auditor findings.
+   - Automatically promotes session status from `discrepant` to `reconciled` once zero unexplained discrepancies remain.
+3. **Multi-Shop Phased Cohort Trial & Expansion Gates (`GET/POST /api/pilot/cohort`, `POST /api/pilot/cohort/evaluate-readiness`)**:
+   - Manages progressive cohort advancement: Phase 1 (Single Controlled Shop: Mama Tolu Provisions) $\to$ Phase 2 (1–2 Shops: Emeka Supermarket) $\to$ Phase 3 (5 Shops) $\to$ Phase 4 (10–15 Scaled Shops).
+   - Blocks cohort promotion until all pre-conditions are satisfied: formally agreed target gates, certified cashier boundary training drill, and zero unexplained discrepancies across all active trial sessions.
+4. **Backend Test Suites with Race Detection (`backend/api/reconciliation_test.go`, `backend/eval/cohort_test.go`)**:
+   - `TestPilotReconciliation_PerfectMatchAndGatePass`: 100% match between paper ledger, physical stock counts, and ambient captures.
+   - `TestPilotReconciliation_DiscrepancyDetectionAndInvestigationWorkflow`: Line discrepancy detection and investigation workflow leading to 100% reconciled status.
+   - `TestPilotCohort_ReadinessEvaluationAndPhaseProgression`: Phased progression gate evaluation blocking expansion until all criteria are met.
+   - `TestPilotReconciliation_CrossTenantIsolation`: Multi-tenant isolation for trial records and cohorts.
+   - `TestMultiShopCohortTrial_PhasedProgressionAndExpansionGates`: Full phased multi-shop progression simulation in Mama Tolu Provisions and Emeka Supermarket.
+5. **Frontend UI & Acceptance Test Suite (`frontend/src/api.ts`, `frontend/src/components/settings.html`, `frontend/src/views/settings.ts`, `frontend/test/reconciliation.test.mjs`)**:
+   - Integrated Pilot Dual-Entry Reconciliation & Cohort Progression panel into Settings view with live checklist, dual-entry form, audit history list, interactive discrepancy resolution prompt, and promotion controls.
+   - Added automated frontend test suite (`frontend/test/reconciliation.test.mjs`, 3/3 passing, 32/32 total frontend tests passing).
+
+Next: Cloud infrastructure provisioning, Supabase deployment, and live Render hosting.
+
 ## Automated UI End-to-End Acceptance Suite, Multi-Line Receipt Atomicity Invariants & Deployment Isolation increment (14 October 2026) — MILESTONE 21 COMPLETE
 
 Implemented comprehensive end-to-end acceptance test suites verifying core MVP operational and failure invariants (`frontend/test/ui_acceptance.test.mjs`, `frontend/test/test_dom.mjs`, `backend/api/e2e_receipt_failure_test.go`, `backend/api/deployment_isolation_test.go`, `backend/auth/session.go`):

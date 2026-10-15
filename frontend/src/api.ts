@@ -807,6 +807,161 @@ export async function runTrainingDrill(body: DrillRequest): Promise<DrillRespons
   return postJSON<DrillResponse>("/api/onboarding/drill", body);
 }
 
+export interface IndependentRecordInput {
+  readonly occurred_at: string;
+  readonly sku_or_name: string;
+  readonly type: "sale" | "restock";
+  readonly quantity: number;
+  readonly unit: string;
+  readonly amount: number; // in minor units
+}
+
+export interface PhysicalStockCountInput {
+  readonly sku_or_name: string;
+  readonly physical_count: number;
+}
+
+export interface ReconcileRequest {
+  readonly period_start: string;
+  readonly period_end: string;
+  readonly independent_source: string;
+  readonly independent_records: readonly IndependentRecordInput[];
+  readonly physical_stock_counts: readonly PhysicalStockCountInput[];
+  readonly notes?: string | undefined;
+  readonly conducted_by?: string | undefined;
+}
+
+export interface PilotDiscrepancy {
+  readonly id: string;
+  readonly reconciliation_id: string;
+  readonly shop_id: string;
+  readonly discrepancy_type: "missed_capture" | "false_capture" | "price_mismatch" | "quantity_mismatch" | "stock_variance";
+  readonly product_id?: string | undefined;
+  readonly product_name: string;
+  readonly expected_quantity: number;
+  readonly actual_quantity: number;
+  readonly expected_amount: number;
+  readonly actual_amount: number;
+  readonly transaction_id?: string | undefined;
+  readonly investigation_status: "unexplained" | "investigated" | "resolved";
+  readonly root_cause: string;
+  readonly investigation_notes: string;
+  readonly investigated_at?: string | undefined;
+  readonly investigated_by?: string | undefined;
+}
+
+export interface PilotReconciliation {
+  readonly id: string;
+  readonly shop_id: string;
+  readonly status: "in_progress" | "completed" | "discrepant" | "reconciled";
+  readonly period_start: string;
+  readonly period_end: string;
+  readonly independent_source: string;
+  readonly total_independent_records: number;
+  readonly total_captured_transactions: number;
+  readonly matched_records: number;
+  readonly missed_captures: number;
+  readonly false_captures: number;
+  readonly price_discrepancies: number;
+  readonly quantity_discrepancies: number;
+  readonly total_independent_revenue: number;
+  readonly total_captured_revenue: number;
+  readonly revenue_discrepancy: number;
+  readonly stock_discrepancy_count: number;
+  readonly notes: string;
+  readonly conducted_by: string;
+  readonly created_at: string;
+  readonly discrepancies?: readonly PilotDiscrepancy[] | undefined;
+}
+
+export interface GateCheckResult {
+  readonly metric: string;
+  readonly target: string;
+  readonly achieved: number;
+  readonly passed: boolean;
+}
+
+export interface ReconcileResponse {
+  readonly reconciliation: PilotReconciliation;
+  readonly gate_results: readonly GateCheckResult[];
+  readonly all_gates_passed: boolean;
+}
+
+export interface ShopCohort {
+  readonly shop_id: string;
+  readonly cohort_phase: "phase1_controlled" | "phase2_dual_shop" | "phase3_expanded_5" | "phase4_scaled_15";
+  readonly stage_status: "active" | "qualified" | "blocked";
+  readonly qualified_at?: string | undefined;
+  readonly notes: string;
+}
+
+export interface ReadinessCheckItem {
+  readonly requirement: string;
+  readonly satisfied: boolean;
+  readonly details: string;
+}
+
+export interface CohortReadinessResponse {
+  readonly shop_id: string;
+  readonly current_phase: string;
+  readonly next_phase: string;
+  readonly readiness_status: "qualified" | "blocked";
+  readonly checks: readonly ReadinessCheckItem[];
+  readonly all_checks_satisfied: boolean;
+}
+
+/** POST /api/pilot/reconcile — execute dual-entry reconciliation against independent records. */
+export async function reconcilePilot(body: ReconcileRequest): Promise<ReconcileResponse> {
+  return postJSON<ReconcileResponse>("/api/pilot/reconcile", body);
+}
+
+/** GET /api/pilot/reconciliations — list historical trial reconciliation sessions. */
+export async function fetchPilotReconciliations(signal?: AbortSignal): Promise<{ reconciliations: readonly PilotReconciliation[] }> {
+  const reqInit: RequestInit = { headers: { Accept: "application/json" } };
+  if (signal !== undefined) reqInit.signal = signal;
+  const res = await fetch("/api/pilot/reconciliations", reqInit);
+  if (!res.ok) {
+    throw new ApiError("/api/pilot/reconciliations", res.status);
+  }
+  return res.json() as Promise<{ reconciliations: readonly PilotReconciliation[] }>;
+}
+
+/** GET /api/pilot/reconciliations/{id} — get detailed reconciliation session with discrepancies. */
+export async function fetchPilotReconciliationDetail(id: string, signal?: AbortSignal): Promise<PilotReconciliation> {
+  const reqInit: RequestInit = { headers: { Accept: "application/json" } };
+  if (signal !== undefined) reqInit.signal = signal;
+  const res = await fetch(`/api/pilot/reconciliations/${id}`, reqInit);
+  if (!res.ok) {
+    throw new ApiError(`/api/pilot/reconciliations/${id}`, res.status);
+  }
+  return res.json() as Promise<PilotReconciliation>;
+}
+
+/** POST /api/pilot/discrepancies/{id}/investigate — record investigation root cause. */
+export async function investigatePilotDiscrepancy(
+  discrepancyId: string,
+  body: { root_cause: string; investigation_notes: string; investigated_by?: string },
+): Promise<void> {
+  await postJSON<{ discrepancy_id: string }>(`/api/pilot/discrepancies/${discrepancyId}/investigate`, body);
+}
+
+/** GET /api/pilot/cohort — fetch current shop cohort expansion phase. */
+export async function fetchPilotCohort(signal?: AbortSignal): Promise<ShopCohort> {
+  const reqInit: RequestInit = { headers: { Accept: "application/json" } };
+  if (signal !== undefined) reqInit.signal = signal;
+  const res = await fetch("/api/pilot/cohort", reqInit);
+  if (!res.ok) {
+    throw new ApiError("/api/pilot/cohort", res.status);
+  }
+  return res.json() as Promise<ShopCohort>;
+}
+
+/** POST /api/pilot/cohort/evaluate-readiness — evaluate readiness gates to advance cohort stage. */
+export async function evaluateCohortReadiness(promote: boolean = false): Promise<CohortReadinessResponse> {
+  return postJSON<CohortReadinessResponse>("/api/pilot/cohort/evaluate-readiness", { promote });
+}
+
+
 
 
 

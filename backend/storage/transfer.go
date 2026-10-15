@@ -118,6 +118,34 @@ var transferDependencyOrder = []tableTransferDef{
 		columns: []string{"key", "attempts", "expires_at"},
 		orderBy: "key ASC",
 	},
+	{
+		name: "pilot_reconciliations",
+		columns: []string{
+			"id", "shop_id", "status", "period_start", "period_end", "independent_source",
+			"total_independent_records", "total_captured_transactions", "matched_records",
+			"missed_captures", "false_captures", "price_discrepancies", "quantity_discrepancies",
+			"total_independent_revenue", "total_captured_revenue", "revenue_discrepancy",
+			"stock_discrepancy_count", "notes", "conducted_by", "created_at",
+		},
+		orderBy: "created_at ASC, id ASC",
+	},
+	{
+		name: "pilot_discrepancies",
+		columns: []string{
+			"id", "reconciliation_id", "shop_id", "discrepancy_type", "product_id",
+			"product_name", "expected_quantity", "actual_quantity", "expected_amount",
+			"actual_amount", "transaction_id", "investigation_status", "root_cause",
+			"investigation_notes", "investigated_at", "investigated_by",
+		},
+		orderBy: "id ASC",
+	},
+	{
+		name: "shop_cohorts",
+		columns: []string{
+			"shop_id", "cohort_phase", "stage_status", "qualified_at", "notes",
+		},
+		orderBy: "shop_id ASC",
+	},
 }
 
 // Transfer copies all persistent records from src to dst in dependency order without
