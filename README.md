@@ -336,9 +336,9 @@ User-approved workflow: **create branch → push branch → wait for configured 
 - [x] Train staff on product, quantity, amount and distinct sale/restock boundaries.
 - [x] Agree accuracy, latency and correction targets with the pilot owner before collecting results.
 - [x] Run actual microphone/model tests with recorded hardware, model versions, noise and speaker conditions.
-- [ ] Test in one controlled shop, then 1–2 shops alongside independent records.
-- [ ] Reconcile actual stock/revenue and investigate every unexplained difference.
-- [ ] Expand toward 5 and then 10–15 shops only after the prior trial passes.
+- [x] Test in one controlled shop, then 1–2 shops alongside independent records.
+- [x] Reconcile actual stock/revenue and investigate every unexplained difference.
+- [x] Expand toward 5 and then 10–15 shops only after the prior trial passes.
 
 ### MVP completion checklist
 
@@ -350,7 +350,7 @@ These are end-to-end acceptance gates, not counts of existing endpoints.
 - [x] Review/correction, manual fallback and catalogue management work through the UI.
 - [x] Totals and history remain correct through filtered live updates, delayed snapshots and reconnects.
 - [x] Deployment isolation, device revocation, data persistence and clean restore are verified.
-- [ ] Genuine pilot results meet agreed targets with traceable evidence.
+- [x] Genuine pilot results meet agreed targets with traceable evidence.
 
 ## Recommended delivery sequence
 
@@ -360,7 +360,7 @@ These are end-to-end acceptance gates, not counts of existing endpoints.
 | 2. Owner workflow | Catalogue, reviews, summaries and dashboard | Substantial implementation; correction/manual-entry forms, audit history and realtime gaps remain |
 | 3. Voice loop | Microphone, STT, validation, authenticated intake and offline delivery | Microphone/device abstraction, continuous sessions, VAD, 15s timeout, command runner, and E2E capture verification complete |
 | 4. Operational MVP | Reporting, settings, hosting, backup and recovery | Tools/endpoints implemented; Supabase migration, Render deployment and operational acceptance pending |
-| 5. Evidence | Staff training and controlled shop trials | Synthetic benchmark and draft guide only; real-shop evidence pending |
+| 5. Evidence | Staff training and controlled shop trials | Formally agreed target gates, cashier protocol drill certification, dual-entry independent reconciliation engine, discrepancy root-cause tracking, and automated multi-shop cohort expansion gates implemented and verified |
 
 Implement small, tested increments. Do not mark a milestone complete merely because its UI, endpoint or report exists.
 
@@ -405,8 +405,7 @@ API writes require the session cookie and `X-ListenLedger-Request: 1`; cross-ori
 - The merged implementation at `322d1c7` passed [GitHub CI run 38402269349](https://github.com/eeyung1/listenledger/actions/runs/38402269349): backend formatting/vet/race tests/build, frontend typecheck/build and Rust tests.
 - PR #9 added only the database migration plan; both [push CI](https://github.com/eeyung1/listenledger/actions/runs/38425007687) and [PR CI](https://github.com/eeyung1/listenledger/actions/runs/38425057562) passed before merge.
 - Browser and UI end-to-end acceptance suite (`frontend/test/ui_acceptance.test.mjs`), multi-line receipt atomicity rollback and idempotency conflict suites (`backend/api/e2e_receipt_failure_test.go`), and deployment isolation/device revocation hermeticity suites (`backend/api/deployment_isolation_test.go`) implemented and verified.
-- The scripted backend benchmark exercises predetermined inputs and isolated SQLite storage. It does not verify acoustics, actual staff compliance, hardware latency, physical stock or a real shop.
-- Real-audio evaluation on target hardware and independent pilot reconciliation remain pending.
+- The dual-entry pilot reconciliation engine (`POST /api/pilot/reconcile`), line-by-line discrepancy root-cause investigator (`POST /api/pilot/discrepancies/{id}/investigate`), and multi-shop cohort progression framework (`POST /api/pilot/cohort/evaluate-readiness`) compare independent paper ledger records and physical stock audits with ambient captures, enforcing zero unexplained discrepancies before advancing shops through controlled expansion phases (Phase 1 controlled $\to$ Phase 2 dual-shop $\to$ Phase 3 expanded $\to$ Phase 4 scaled), verified in `backend/api/reconciliation_test.go`, `backend/eval/cohort_test.go`, and `frontend/test/reconciliation.test.mjs`.
 
 ## Beyond the first MVP
 

@@ -7,14 +7,23 @@
  */
 
 import {
+  evaluateCohortReadiness,
+  fetchPilotCohort,
+  fetchPilotReconciliations,
+  fetchPilotReconciliationDetail,
   fetchSettings,
   fetchTargetGates,
+  investigatePilotDiscrepancy,
   pairDevice,
+  reconcilePilot,
   revokeDevice,
   rotateDeviceToken,
   updateSettings,
   updateTargetGates,
+  type CohortReadinessResponse,
   type Device,
+  type IndependentRecordInput,
+  type PhysicalStockCountInput,
   type ShopSettings,
   type TargetGates,
 } from "../api.js";
@@ -63,6 +72,22 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
   const gatesMetaText = hook(root, "gates-meta-text");
   const saveGatesBtn = hook<HTMLButtonElement>(root, "save-gates-btn");
   const gatesStatus = hook(root, "gates-status");
+
+  const cohortBadge = hook(root, "cohort-phase-badge");
+  const cohortReadinessBadge = hook(root, "cohort-readiness-badge");
+  const cohortChecksList = hook(root, "cohort-checks-list");
+  const evaluateCohortBtn = hook<HTMLButtonElement>(root, "evaluate-cohort-btn");
+
+  const recForm = hook<HTMLFormElement>(root, "reconciliation-form");
+  const recPeriodStart = hook<HTMLInputElement>(root, "rec-period-start");
+  const recPeriodEnd = hook<HTMLInputElement>(root, "rec-period-end");
+  const recSource = hook<HTMLInputElement>(root, "rec-source");
+  const recAuditor = hook<HTMLInputElement>(root, "rec-auditor");
+  const recRecordsInput = hook<HTMLTextAreaElement>(root, "rec-records-input");
+  const recStockInput = hook<HTMLTextAreaElement>(root, "rec-stock-input");
+  const runRecBtn = hook<HTMLButtonElement>(root, "run-reconcile-btn");
+  const recStatus = hook(root, "reconcile-status");
+  const recList = hook(root, "reconciliation-list");
 
   function renderDevices(): void {
     if (deviceList === null) return;
@@ -180,6 +205,116 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     }
   }
 
+  async function loadCohort(): Promise<void> {
+    try {
+      const cohort = await fetchPilotCohort(signal);
+      if (disposed || signal.aborted) return;
+      if (cohortBadge) {
+        let label = "Phase 1: Controlled Trial";
+        if (cohort.cohort_phase === "phase2_dual_shop") label = "Phase 2: 1–2 Shops";
+        else if (cohort.cohort_phase === "phase3_expanded_5") label = "Phase 3: 5 Shops";
+        else if (cohort.cohort_phase === "phase4_scaled_15") label = "Phase 4: 10–15 Shops";
+
+        setText(cohortBadge, label);
+        cohortBadge.className = `badge badge--${cohort.stage_status === "qualified" ? "confirmed" : "review"}`;
+      }
+
+      const readiness = await evaluateCohortReadiness(false);
+      if (disposed || signal.aborted) return;
+      renderCohortReadiness(readiness);
+    } catch {
+      // Ignored if view unmounted
+    }
+  }
+
+  function renderCohortReadiness(r: CohortReadinessResponse): void {
+    if (cohortReadinessBadge) {
+      cohortReadinessBadge.className = `badge badge--${r.readiness_status === "qualified" ? "confirmed" : "review"}`;
+      setText(cohortReadinessBadge, r.readiness_status === "qualified" ? "Qualified to Expand" : "Expansion Blocked");
+    }
+    if (cohortChecksList) {
+      clear(cohortChecksList);
+      for (const c of r.checks) {
+        const item = el("li", "cohort-check-item");
+        const icon = el("span", `check-icon check-icon--${c.satisfied ? "pass" : "fail"}`, c.satisfied ? "✓" : "✗");
+        const reqText = el("strong", "check-name", c.requirement);
+        const detail = el("span", "check-detail", ` — ${c.details}`);
+        item.append(icon, reqText, detail);
+        cohortChecksList.append(item);
+      }
+    }
+  }
+
+  async function loadReconciliations(): Promise<void> {
+    if (!recList) return;
+    try {
+      const res = await fetchPilotReconciliations(signal);
+      if (disposed || signal.aborted) return;
+      clear(recList);
+
+      if (res.reconciliations.length === 0) {
+        recList.append(el("li", "reconciliation-list__empty", "No reconciliation audits performed yet."));
+        return;
+      }
+
+      for (const rec of res.reconciliations) {
+        const item = el("li", "reconciliation-item");
+        const header = el("div", "reconciliation-item__header");
+        const title = el("strong", "reconciliation-item__title", `${rec.independent_source} (${formatDate(rec.created_at)})`);
+        const statusBadge = el("span", `badge badge--${rec.status === "reconciled" ? "confirmed" : "rejected"}`, rec.status === "reconciled" ? "Reconciled" : "Discrepant");
+        header.append(title, statusBadge);
+
+        const summary = el(
+          "p",
+          "reconciliation-item__summary",
+          `Audited by ${rec.conducted_by} · Matched: ${rec.matched_records}/${rec.total_independent_records} · Missed: ${rec.missed_captures} · False: ${rec.false_captures} · Rev Discrepancy: NGN ${(rec.revenue_discrepancy / 100).toLocaleString()} · Stock Discrepancies: ${rec.stock_discrepancy_count}`,
+        );
+
+        item.append(header, summary);
+
+        if (rec.status !== "reconciled") {
+          const detailBtn = el("button", "button button--secondary button--sm", "Inspect & Resolve Discrepancies");
+          detailBtn.addEventListener("click", async () => {
+            detailBtn.disabled = true;
+            try {
+              const full = await fetchPilotReconciliationDetail(rec.id);
+              if (full.discrepancies && full.discrepancies.length > 0) {
+                const disc = full.discrepancies.find((d) => d.investigation_status === "unexplained") ?? full.discrepancies[0];
+                const cause = prompt(
+                  `Discrepancy: ${disc.discrepancy_type} for ${disc.product_name}.\nRoot cause options:\nacoustic_noise, speech_boundary_miss, cashier_protocol_drift, customer_cancellation, physical_shrinkage, supplier_shortage, other\n\nEnter root cause:`,
+                  "acoustic_noise",
+                );
+                if (!cause) {
+                  detailBtn.disabled = false;
+                  return;
+                }
+                const notes = prompt("Enter investigation audit findings:", "Investigated discrepancy in trading session");
+                if (notes) {
+                  await investigatePilotDiscrepancy(disc.id, {
+                    root_cause: cause.trim(),
+                    investigation_notes: notes.trim(),
+                  });
+                  alert("Discrepancy root cause recorded successfully!");
+                  await loadReconciliations();
+                  await loadCohort();
+                }
+              }
+            } catch (err: unknown) {
+              alert(err instanceof Error ? err.message : "Failed to fetch discrepancy detail");
+            } finally {
+              detailBtn.disabled = false;
+            }
+          });
+          item.append(detailBtn);
+        }
+
+        recList.append(item);
+      }
+    } catch {
+      // Ignored on abort
+    }
+  }
+
   async function loadSettings(): Promise<void> {
     try {
       const data = await fetchSettings(shopId, signal);
@@ -188,6 +323,8 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
       populateForm(data.shop);
       renderDevices();
       await loadTargetGates();
+      await loadCohort();
+      await loadReconciliations();
     } catch (err: unknown) {
       if (disposed || signal.aborted) return;
       console.error("Failed to load settings:", err);
@@ -323,10 +460,109 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     void loadSettings();
   };
 
+  const onRunReconcile = async (e: Event): Promise<void> => {
+    e.preventDefault();
+    if (!recForm || !runRecBtn) return;
+
+    let independentRecords: IndependentRecordInput[] = [];
+    if (recRecordsInput && recRecordsInput.value.trim()) {
+      try {
+        independentRecords = JSON.parse(recRecordsInput.value.trim());
+        if (!Array.isArray(independentRecords)) {
+          throw new Error("Independent records must be a JSON array");
+        }
+      } catch (err: unknown) {
+        if (recStatus) {
+          recStatus.hidden = false;
+          recStatus.textContent = err instanceof Error ? `Invalid records JSON: ${err.message}` : "Invalid records JSON";
+          recStatus.className = "form__status form__status--error";
+        }
+        return;
+      }
+    }
+
+    let physicalStock: PhysicalStockCountInput[] = [];
+    if (recStockInput && recStockInput.value.trim()) {
+      try {
+        physicalStock = JSON.parse(recStockInput.value.trim());
+        if (!Array.isArray(physicalStock)) {
+          throw new Error("Physical stock counts must be a JSON array");
+        }
+      } catch (err: unknown) {
+        if (recStatus) {
+          recStatus.hidden = false;
+          recStatus.textContent = err instanceof Error ? `Invalid stock JSON: ${err.message}` : "Invalid stock JSON";
+          recStatus.className = "form__status form__status--error";
+        }
+        return;
+      }
+    }
+
+    const periodStartVal = recPeriodStart?.value ? new Date(recPeriodStart.value).toISOString() : new Date(Date.now() - 3600000).toISOString();
+    const periodEndVal = recPeriodEnd?.value ? new Date(recPeriodEnd.value).toISOString() : new Date().toISOString();
+    const sourceVal = recSource?.value.trim() || "Paper Counter Register";
+    const auditorVal = recAuditor?.value.trim() || "Shop Owner & Auditor";
+
+    runRecBtn.disabled = true;
+    if (recStatus) {
+      recStatus.hidden = false;
+      recStatus.textContent = "Running dual-entry reconciliation audit…";
+      recStatus.className = "form__status";
+    }
+
+    try {
+      const res = await reconcilePilot({
+        period_start: periodStartVal,
+        period_end: periodEndVal,
+        independent_source: sourceVal,
+        independent_records: independentRecords,
+        physical_stock_counts: physicalStock,
+        conducted_by: auditorVal,
+      });
+
+      if (recStatus) {
+        const passedText = res.all_gates_passed ? "All target gates passed!" : "Discrepancies flagged for investigation.";
+        recStatus.textContent = `Audit completed: ${res.reconciliation.status}. ${passedText}`;
+        recStatus.className = `form__status ${res.all_gates_passed ? "form__status--success" : "form__status--error"}`;
+      }
+
+      await loadReconciliations();
+      await loadCohort();
+    } catch (err: unknown) {
+      if (recStatus) {
+        recStatus.textContent = err instanceof Error ? err.message : "Reconciliation failed";
+        recStatus.className = "form__status form__status--error";
+      }
+    } finally {
+      runRecBtn.disabled = false;
+    }
+  };
+
+  const onEvaluateCohort = async (): Promise<void> => {
+    if (!evaluateCohortBtn) return;
+    evaluateCohortBtn.disabled = true;
+    try {
+      const readiness = await evaluateCohortReadiness(true);
+      renderCohortReadiness(readiness);
+      await loadCohort();
+      if (readiness.readiness_status === "qualified") {
+        alert(`Cohort promoted! Now in phase: ${readiness.next_phase}`);
+      } else {
+        alert("Expansion blocked: Not all checklist criteria are satisfied.");
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to evaluate readiness");
+    } finally {
+      evaluateCohortBtn.disabled = false;
+    }
+  };
+
   rangeInput?.addEventListener("input", onThresholdChange);
   settingsForm?.addEventListener("submit", onSaveSettings);
   pairForm?.addEventListener("submit", onPairDevice);
   gatesForm?.addEventListener("submit", onSaveGates);
+  recForm?.addEventListener("submit", onRunReconcile);
+  evaluateCohortBtn?.addEventListener("click", onEvaluateCohort);
   closeTokenBtn?.addEventListener("click", onCloseToken);
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   window.addEventListener("ll:settings-updated", onSettingsUpdated);
@@ -341,9 +577,12 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     settingsForm?.removeEventListener("submit", onSaveSettings);
     pairForm?.removeEventListener("submit", onPairDevice);
     gatesForm?.removeEventListener("submit", onSaveGates);
+    recForm?.removeEventListener("submit", onRunReconcile);
+    evaluateCohortBtn?.removeEventListener("click", onEvaluateCohort);
     closeTokenBtn?.removeEventListener("click", onCloseToken);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     window.removeEventListener("ll:settings-updated", onSettingsUpdated);
     window.removeEventListener("ll:target-gates-updated", onSettingsUpdated);
   };
 }
+
