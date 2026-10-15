@@ -1213,3 +1213,37 @@ func TestPostgres_RuntimeRequiresCompleteSchema(t *testing.T) {
 		t.Fatal("read-only runtime check modified migration history")
 	}
 }
+
+func TestPostgres_AuthLimiterConcurrentAttempts(t *testing.T) {
+	s := openTestPostgres(t)
+	ctx := context.Background()
+	var accepted atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			allowed, err := s.AllowAuthAttempt(ctx, "deployment-login", 3)
+			if err != nil {
+				t.Errorf("auth attempt: %v", err)
+				return
+			}
+			if allowed {
+				accepted.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := accepted.Load(); got != 3 {
+		t.Fatalf("accepted %d attempts, want 3", got)
+	}
+	if allowed, err := s.AllowAuthAttempt(ctx, "deployment-login", 3); err != nil || allowed {
+		t.Fatalf("exhausted counter: allowed=%v err=%v", allowed, err)
+	}
+	if _, err := s.db.ExecContext(ctx, "UPDATE auth_attempts SET expires_at = '2000-01-01T00:00:00.000000000Z'"); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := s.AllowAuthAttempt(ctx, "deployment-login", 3); err != nil || !allowed {
+		t.Fatalf("expired counter did not reset: allowed=%v err=%v", allowed, err)
+	}
+}
