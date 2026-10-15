@@ -85,6 +85,12 @@ func ProtectWrites(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != "GET" && r.Method != "HEAD" {
+			// Machine-to-machine requests authenticated by an edge device Bearer token
+			// are not vulnerable to browser cross-origin request forgery.
+			if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if r.Header.Get("X-ListenLedger-Request") != "1" {
 				reply(w, 403, map[string]string{"error": "request verification required"})
 				return
