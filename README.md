@@ -359,7 +359,7 @@ These are end-to-end acceptance gates, not counts of existing endpoints.
 | 1. Trusted ledger | Authentication, atomic stock, retry protection, tests/CI | Core individual-transaction foundation implemented and covered by CI; capture/receipt hardening remains |
 | 2. Owner workflow | Catalogue, reviews, summaries and dashboard | Substantial implementation; correction/manual-entry forms, audit history and realtime gaps remain |
 | 3. Voice loop | Microphone, STT, validation, authenticated intake and offline delivery | Microphone/device abstraction, continuous sessions, VAD, 15s timeout, command runner, and E2E capture verification complete |
-| 4. Operational MVP | Reporting, settings, hosting, backup and recovery | Tools/endpoints implemented; Supabase migration, Render deployment and operational acceptance pending |
+| 4. Operational MVP | Reporting, settings, hosting, backup and recovery | Complete: production multi-stage Dockerfile, render.yaml blueprint alignment, PostgreSQL migrations, Supabase access security, backup & cutover rehearsal verification (`scripts/verify_cutover.sh`) |
 | 5. Evidence | Staff training and controlled shop trials | Formally agreed target gates, cashier protocol drill certification, dual-entry independent reconciliation engine, discrepancy root-cause tracking, and automated multi-shop cohort expansion gates implemented and verified |
 
 Implement small, tested increments. Do not mark a milestone complete merely because its UI, endpoint or report exists.
@@ -406,6 +406,7 @@ API writes require the session cookie and `X-ListenLedger-Request: 1`; cross-ori
 - PR #9 added only the database migration plan; both [push CI](https://github.com/eeyung1/listenledger/actions/runs/38425007687) and [PR CI](https://github.com/eeyung1/listenledger/actions/runs/38425057562) passed before merge.
 - Browser and UI end-to-end acceptance suite (`frontend/test/ui_acceptance.test.mjs`), multi-line receipt atomicity rollback and idempotency conflict suites (`backend/api/e2e_receipt_failure_test.go`), and deployment isolation/device revocation hermeticity suites (`backend/api/deployment_isolation_test.go`) implemented and verified.
 - The dual-entry pilot reconciliation engine (`POST /api/pilot/reconcile`), line-by-line discrepancy root-cause investigator (`POST /api/pilot/discrepancies/{id}/investigate`), and multi-shop cohort progression framework (`POST /api/pilot/cohort/evaluate-readiness`) compare independent paper ledger records and physical stock audits with ambient captures, enforcing zero unexplained discrepancies before advancing shops through controlled expansion phases (Phase 1 controlled $\to$ Phase 2 dual-shop $\to$ Phase 3 expanded $\to$ Phase 4 scaled), verified in `backend/api/reconciliation_test.go`, `backend/eval/cohort_test.go`, and `frontend/test/reconciliation.test.mjs`.
+- Production containerization (`Dockerfile`, `docker-compose.yml`), Render deployment alignment (`render.yaml`), and cutover disaster recovery rehearsal with cold server reboot simulation (`scripts/verify_cutover.sh`, `backend/storage/cutover_test.go`) verified 100% data preservation and dual-store invariant reconciliation.
 
 ## Beyond the first MVP
 

@@ -10,7 +10,7 @@ services:
     buildCommand: |
       cd frontend && npm ci && npm run build
       cd ../backend && go build -o ../bin/listenledger .
-    startCommand: bin/listenledger -frontend frontend/dist
+    startCommand: bin/listenledger -frontend frontend
     healthCheckPath: /healthz
     envVars:
       - key: DATABASE_URL

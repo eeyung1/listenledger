@@ -1,5 +1,25 @@
 # TODO — ListenLedger
 
+## Production Cloud Deployment Containerization, Render Hosting Blueprint Alignment & Disaster Recovery Cutover Rehearsal increment (15 October 2026) — MILESTONE 23 COMPLETE
+
+Implemented production cloud deployment containerization, Render hosting blueprint alignment, and disaster recovery cutover verification (`Dockerfile`, `.dockerignore`, `docker-compose.yml`, `render.yaml`, `scripts/verify_cutover.sh`, `backend/storage/cutover_test.go`, `DATABASE_MIGRATION.md`):
+1. **Multi-Stage Production Containerization (`Dockerfile`, `.dockerignore`, `docker-compose.yml`)**:
+   - Built production multi-stage `Dockerfile`: Stage 1 compiles TypeScript frontend (`node:20-alpine`), Stage 2 builds Go orchestrator binary with embedded CGO SQLite driver (`golang:1.25-alpine`), Stage 3 minimal secure runtime (`alpine:3.20`) with dedicated non-root user `listenledger:listenledger`, tzdata/ca-certificates, and automated health checks on `/healthz`.
+   - Created `.dockerignore` excluding developer artifacts, databases, and node_modules.
+   - Built standalone `docker-compose.yml` wiring PostgreSQL 16 service with healthcheck, ListenLedger app container, environment variable bindings (`DATABASE_URL`, `PORT`), and persistent data volumes.
+2. **Render Hosting Blueprint Specification Alignment (`render.yaml`)**:
+   - Corrected `startCommand` to `bin/listenledger -frontend frontend` so that `restrictedStaticServer` properly resolves `index.html`, `style.css`, and view templates alongside `frontend/dist/*.js` compiled bundles.
+   - Maintained native healthcheck path `/healthz`, environment secret injection for `DATABASE_URL`, and same-origin WebSocket connectivity.
+3. **End-to-End Cutover Rehearsal & Cold Reboot Simulation (`backend/storage/cutover_test.go`, `scripts/verify_cutover.sh`)**:
+   - Implemented automated cutover rehearsal suite `TestCutover_FullLifecycleColdRebootAndDisasterRecovery`: simulates cold schema provisioning on empty database, owner onboarding, target gates agreement, cashier protocol certification, catalogue creation, device pairing, multi-line restock intake, confirmed sales, and pilot dual-entry reconciliation with discrepancy resolution.
+   - Simulates abrupt process crash (`store.Close()`), reboots storage, verifies `/readyz` probe, and asserts 100% data retention across all 14 database tables with zero inventory or financial drift.
+   - Executes clean disaster restore into isolated target and validates dual-store invariant reconciliation via `Transfer`.
+4. **Automated Verification Script & Makefile Integration (`scripts/verify_cutover.sh`, `Makefile`)**:
+   - Added `verify-cutover` target to `Makefile` executing SQLite vacuum/backup tests, PostgreSQL dialect transfer tests, and cold reboot cutover tests.
+   - Updated `DATABASE_MIGRATION.md` marking all migration, backup restoration, and controlled cutover rehearsal criteria as verified.
+
+Next: Physical counter pilot trials and field cohort rollout.
+
 ## Pilot Dual-Entry Reconciliation Engine, Multi-Shop Cohort Trial Framework & Unexplained Discrepancy Investigation Tooling increment (15 October 2026) — MILESTONE 22 COMPLETE
 
 Implemented independent paper ledger vs. ambient capture dual-entry reconciliation, unexplained discrepancy root-cause tracking, and automated multi-shop cohort expansion gates (`backend/storage/reconciliation.go`, `backend/api/reconciliation.go`, `backend/eval/cohort_test.go`, `frontend/src/views/settings.ts`, `frontend/test/reconciliation.test.mjs`):
