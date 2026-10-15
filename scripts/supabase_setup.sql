@@ -18,7 +18,8 @@ BEGIN
         'schema_migrations', 'owners', 'shops', 'sessions', 'auth_attempts',
         'products', 'transactions', 'stock_movements', 'ledger_requests',
         'devices', 'review_decisions', 'shop_target_gates',
-        'pilot_reconciliations', 'pilot_discrepancies', 'shop_cohorts'
+        'pilot_reconciliations', 'pilot_discrepancies', 'shop_cohorts',
+        'expenses'
     ] LOOP
         IF to_regclass(format('%I.%I', target_schema, table_name)) IS NULL THEN
             RAISE EXCEPTION 'Missing table %.%; apply migrations before security setup', target_schema, table_name;
@@ -43,3 +44,4 @@ BEGIN
     END LOOP;
 END
 $$;
+

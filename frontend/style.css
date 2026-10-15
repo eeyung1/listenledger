@@ -555,7 +555,8 @@ a {
 }
 
 /* Modals */
-.modal-overlay {
+.modal-overlay,
+.modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
@@ -567,7 +568,8 @@ a {
   padding: 1rem;
 }
 
-.modal-dialog {
+.modal-dialog,
+.modal {
   background: #ffffff;
   border-radius: 12px;
   max-width: 520px;

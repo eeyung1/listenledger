@@ -868,6 +868,36 @@ func TestPostgres_SummaryAccuracyAndDayBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Expense 1: Yesterday (generator fuel, should be outside today's summary)
+	expYesterday := models.Expense{
+		ID:          "exp_pg_yesterday",
+		ShopID:      shopID,
+		Category:    models.ExpenseCategoryGeneratorFuel,
+		Amount:      models.Money{Amount: 60000, Currency: "NGN"},
+		Description: "Yesterday fuel",
+		OccurredAt:  startOfToday.Add(-2 * time.Hour),
+		CreatedAt:   startOfToday.Add(-2 * time.Hour),
+		CreatedBy:   "owner",
+	}
+	if err := s.CreateExpense(ctx, expYesterday); err != nil {
+		t.Fatal(err)
+	}
+
+	// Expense 2: Today (generator fuel, 500 NGN = 50000 kobo)
+	expToday := models.Expense{
+		ID:          "exp_pg_today",
+		ShopID:      shopID,
+		Category:    models.ExpenseCategoryGeneratorFuel,
+		Amount:      models.Money{Amount: 50000, Currency: "NGN"},
+		Description: "Today generator fuel",
+		OccurredAt:  startOfToday.Add(3 * time.Hour),
+		CreatedAt:   startOfToday.Add(3 * time.Hour),
+		CreatedBy:   "owner",
+	}
+	if err := s.CreateExpense(ctx, expToday); err != nil {
+		t.Fatal(err)
+	}
+
 	summary, err := s.GetDailySummary(ctx, shopID, startOfToday, endOfToday)
 	if err != nil {
 		t.Fatalf("GetDailySummary failed: %v", err)
@@ -881,6 +911,16 @@ func TestPostgres_SummaryAccuracyAndDayBoundaries(t *testing.T) {
 	}
 	if summary.PendingReviews != 1 {
 		t.Errorf("expected pending_reviews 1, got %d", summary.PendingReviews)
+	}
+	if summary.TodayExpensesCount != 1 {
+		t.Errorf("expected today_expenses_count 1, got %d", summary.TodayExpensesCount)
+	}
+	if summary.TodayExpensesAmount.Amount != 50000 {
+		t.Errorf("expected today_expenses_amount 50000, got %d", summary.TodayExpensesAmount.Amount)
+	}
+	// Net Profit: Sales (150000) - Expenses (50000) = 100000 kobo
+	if summary.TodayNetProfit.Amount != 100000 {
+		t.Errorf("expected today_net_profit 100000, got %d", summary.TodayNetProfit.Amount)
 	}
 }
 
@@ -1190,6 +1230,84 @@ func TestPostgres_QueryProducts(t *testing.T) {
 	}
 	if total != 1 || len(searchRes) != 1 || searchRes[0].ID != "prd_pg_indomie_70g" {
 		t.Errorf("expected 1 match for Noodles alias, got %+v", searchRes)
+	}
+}
+
+func TestPostgres_ExpensesAndNetProfit(t *testing.T) {
+	s := openTestPostgres(t)
+	ctx := context.Background()
+	shopID := "shop_pg_expenses"
+	seedPostgresShop(t, s, shopID, "own_pg_exp")
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	exp1 := models.Expense{
+		ID:          "exp_pg_01",
+		ShopID:      shopID,
+		Category:    models.ExpenseCategoryGeneratorFuel,
+		Amount:      models.Money{Amount: 450000, Currency: "NGN"},
+		Description: "Fuel for generator",
+		OccurredAt:  now.Add(-1 * time.Hour),
+		CreatedAt:   now.Add(-1 * time.Hour),
+		CreatedBy:   "owner",
+	}
+	exp2 := models.Expense{
+		ID:          "exp_pg_02",
+		ShopID:      shopID,
+		Category:    models.ExpenseCategoryPackagingSupplies,
+		Amount:      models.Money{Amount: 150000, Currency: "NGN"},
+		Description: "Packaging nylon",
+		OccurredAt:  now,
+		CreatedAt:   now,
+		CreatedBy:   "cashier",
+	}
+
+	if err := s.CreateExpense(ctx, exp1); err != nil {
+		t.Fatalf("create expense 1: %v", err)
+	}
+	if err := s.CreateExpense(ctx, exp2); err != nil {
+		t.Fatalf("create expense 2: %v", err)
+	}
+
+	// 1. Fetch by ID
+	got, err := s.GetExpenseByID(ctx, shopID, exp1.ID)
+	if err != nil {
+		t.Fatalf("get expense by id: %v", err)
+	}
+	if got.Amount.Amount != 450000 || got.Category != models.ExpenseCategoryGeneratorFuel {
+		t.Errorf("unexpected expense: %+v", got)
+	}
+
+	// 2. List with category filter
+	fuelList, fuelCount, err := s.ListExpenses(ctx, ExpenseQuery{
+		ShopID:   shopID,
+		Category: models.ExpenseCategoryGeneratorFuel,
+	})
+	if err != nil {
+		t.Fatalf("list fuel expenses: %v", err)
+	}
+	if fuelCount != 1 || len(fuelList) != 1 {
+		t.Errorf("expected 1 fuel expense, got count=%d len=%d", fuelCount, len(fuelList))
+	}
+
+	// 3. Expense summary breakdown
+	summary, err := s.GetExpenseSummary(ctx, shopID, now.Add(-2*time.Hour), now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatalf("get expense summary: %v", err)
+	}
+	if summary.TotalCount != 2 || summary.TotalAmount.Amount != 600000 {
+		t.Errorf("expected 2 expenses totalling 600000, got count=%d amount=%d", summary.TotalCount, summary.TotalAmount.Amount)
+	}
+	if summary.ByCategory[models.ExpenseCategoryGeneratorFuel] != 450000 {
+		t.Errorf("expected fuel sum 450000, got %d", summary.ByCategory[models.ExpenseCategoryGeneratorFuel])
+	}
+
+	// 4. Delete expense
+	if err := s.DeleteExpense(ctx, shopID, exp2.ID); err != nil {
+		t.Fatalf("delete expense: %v", err)
+	}
+	if _, err := s.GetExpenseByID(ctx, shopID, exp2.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound for deleted expense, got %v", err)
 	}
 }
 

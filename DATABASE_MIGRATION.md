@@ -17,7 +17,7 @@ A Render persistent disk is unnecessary for the application database after this 
 
 ## Current implementation
 
-- `storage.Open` supports SQLite and PostgreSQL via pgx; seven embedded migrations exist for each dialect.
+- `storage.Open` supports SQLite and PostgreSQL via pgx; eight embedded migrations exist for each dialect.
 - PostgreSQL queries use rebinding and row locking; receipts and stock changes commit together with retry protection.
 - `backend/cmd/schema` applies schema migrations using an administrator connection.
 - `OpenPostgresRuntime` verifies required migration versions without DDL; the deployed image uses `-skip-migrations`.
@@ -30,7 +30,7 @@ A Render persistent disk is unnecessary for the application database after this 
 - [x] Implement PostgreSQL storage support and schema migrations.
 - [x] Preserve current API contracts, ownership checks, and ledger invariants.
 - [x] Test migration and concurrency against a real PostgreSQL test instance (`.github/workflows/ci.yml`, `backend/storage/postgres_integration_test.go`).
-- [x] Implement idempotent restricted-role/RLS setup for all 15 tables (`scripts/supabase_setup.sql`); no password is embedded.
+- [x] Implement idempotent restricted-role/RLS setup for all 16 tables (`scripts/supabase_setup.sql`); no password is embedded.
 - [ ] Apply and verify this configuration on the live Supabase project.
 - [x] Rehearse transfer of any existing SQLite data (`backend/storage/transfer.go`, `backend/cmd/migrate`).
 - [x] Add Render deployment configuration and secret references (`render.yaml`).

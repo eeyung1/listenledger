@@ -14,7 +14,9 @@
 
 import {
   MAX_TRANSACTION_LIMIT,
+  createExpense,
   fetchDevices,
+  fetchExpenses,
   fetchInventory,
   fetchOnboardingStatus,
   fetchSummary,
@@ -24,6 +26,8 @@ import {
   type DailySummary,
   type Device,
   type DrillRequest,
+  type Expense,
+  type ExpenseCategory,
   type OnboardingStatus,
   type Product,
   type Transaction,
@@ -32,6 +36,7 @@ import {
   clear,
   computeKPIs,
   el,
+  formatExpenseCategory,
   formatMoney,
   formatQuantity,
   formatStatus,
@@ -61,6 +66,7 @@ const CONNECTION_LABELS: Readonly<Record<ConnectionStatus, string>> = {
 interface HomeState {
   transactions: Transaction[];
   products: Product[];
+  expenses?: Expense[] | undefined;
   summary?: DailySummary | undefined;
   onboarding?: OnboardingStatus | undefined;
   devices?: readonly Device[] | undefined;
@@ -267,9 +273,11 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   }
 
   function renderKPIs(): void {
-    const kpis = computeKPIs(state.transactions, state.products, state.summary);
+    const kpis = computeKPIs(state.transactions, state.products, state.summary, state.expenses);
     setText(hook(root, "kpi-sales-today"), formatMoney(kpis.revenue));
     setText(hook(root, "kpi-transaction-count"), String(kpis.salesCount));
+    setText(hook(root, "kpi-expenses-today"), formatMoney(kpis.expenses));
+    setText(hook(root, "kpi-net-profit"), formatMoney(kpis.netProfit));
     setText(hook(root, "kpi-review-count"), String(kpis.reviewCount));
     setText(hook(root, "kpi-low-stock-count"), String(kpis.lowStockCount));
   }
@@ -364,12 +372,13 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   /** Fetches transactions, inventory and daily summary snapshots and replaces state wholesale. */
   async function refetch(): Promise<void> {
     try {
-      const [transactions, inventory, summary, onboarding, devicesRes] = await Promise.all([
+      const [transactions, inventory, summary, onboarding, devicesRes, expensesRes] = await Promise.all([
         fetchTransactions(shopId, MAX_TRANSACTION_LIMIT, undefined, signal),
         fetchInventory(shopId, signal),
         fetchSummary(shopId, signal).catch(() => undefined),
         fetchOnboardingStatus(signal).catch(() => undefined),
         fetchDevices(signal).catch(() => undefined),
+        fetchExpenses(undefined, signal).catch(() => undefined),
       ]);
       if (disposed || signal.aborted) return;
 
@@ -378,6 +387,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       state.summary = summary;
       state.onboarding = onboarding;
       state.devices = devicesRes?.devices;
+      state.expenses = expensesRes?.expenses ? [...expensesRes.expenses] : [];
       const maxSeq = Math.max(
         transactions.last_seq ?? 0,
         inventory.last_seq ?? 0,
@@ -470,11 +480,26 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     }
   };
 
+  const onExpenseEvent = (): void => {
+    void refetch();
+  };
+
+  const recordExpenseBtn = hook(root, "record-expense-btn");
+  if (recordExpenseBtn !== null) {
+    recordExpenseBtn.addEventListener("click", () => {
+      showRecordExpenseModal(root, () => {
+        void refetch();
+      });
+    });
+  }
+
   window.addEventListener("ll:transaction-received", onTransactionReceived);
   window.addEventListener("ll:transaction-review-required", onTransactionReceived);
   window.addEventListener("ll:transaction-updated", onTransactionUpdated);
   window.addEventListener("ll:inventory-updated", onInventoryUpdated);
   window.addEventListener("ll:product-created", onProductCreated);
+  window.addEventListener("ll:expense-created", onExpenseEvent);
+  window.addEventListener("ll:expense-deleted", onExpenseEvent);
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
 
   void refetch();
@@ -487,6 +512,8 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     window.removeEventListener("ll:transaction-updated", onTransactionUpdated);
     window.removeEventListener("ll:inventory-updated", onInventoryUpdated);
     window.removeEventListener("ll:product-created", onProductCreated);
+    window.removeEventListener("ll:expense-created", onExpenseEvent);
+    window.removeEventListener("ll:expense-deleted", onExpenseEvent);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   };
 }
@@ -817,4 +844,149 @@ function showTrainingDrillModal(root: HTMLElement, onDone: () => void): void {
     }
   });
 }
+
+function showRecordExpenseModal(_root: HTMLElement, onDone: () => void): void {
+  const existing = document.querySelector(".modal-backdrop");
+  if (existing) existing.remove();
+
+  const backdrop = el("div", "modal-backdrop");
+  const modal = el("div", "modal modal--record-expense");
+
+  const header = el("div", "modal__header");
+  header.append(
+    el("h2", "modal__title", "Record Operational Expense"),
+    el("p", "modal__subtitle", "Track daily generator fuel, shop rent, transport, wages, or supplies."),
+  );
+
+  const form = el("form", "modal__form");
+
+  // Category select
+  const catGroup = el("div", "form-group");
+  catGroup.append(el("label", "form-label", "Expense Category"));
+  const catSelect = document.createElement("select");
+  catSelect.className = "form-select";
+  catSelect.setAttribute("data-hook", "expense-category-select");
+
+  const categories: readonly ExpenseCategory[] = [
+    "generator_fuel",
+    "store_rent",
+    "transport_logistics",
+    "packaging_supplies",
+    "staff_wages",
+    "utilities",
+    "repairs",
+    "other",
+  ];
+  for (const c of categories) {
+    const opt = document.createElement("option");
+    opt.value = c;
+    opt.textContent = formatExpenseCategory(c);
+    catSelect.append(opt);
+  }
+  catGroup.append(catSelect);
+
+  // Amount input
+  const amountGroup = el("div", "form-group");
+  amountGroup.append(el("label", "form-label", "Amount (Naira)"));
+  const amountInput = document.createElement("input");
+  amountInput.type = "number";
+  amountInput.step = "any";
+  amountInput.min = "0.01";
+  amountInput.placeholder = "e.g. 5000";
+  amountInput.className = "form-input";
+  amountInput.setAttribute("data-hook", "expense-amount-input");
+  amountInput.required = true;
+  amountGroup.append(amountInput);
+
+  // Description input
+  const descGroup = el("div", "form-group");
+  descGroup.append(el("label", "form-label", "Description"));
+  const descInput = document.createElement("input");
+  descInput.type = "text";
+  descInput.placeholder = "e.g. 10 litres generator petrol for afternoon trading";
+  descInput.maxLength = 500;
+  descInput.className = "form-input";
+  descInput.setAttribute("data-hook", "expense-desc-input");
+  descInput.required = true;
+  descGroup.append(descInput);
+
+  // Receipt Reference input
+  const receiptGroup = el("div", "form-group");
+  receiptGroup.append(el("label", "form-label", "Receipt / Slip Ref (Optional)"));
+  const receiptInput = document.createElement("input");
+  receiptInput.type = "text";
+  receiptInput.placeholder = "e.g. REC-9821";
+  receiptInput.className = "form-input";
+  receiptInput.setAttribute("data-hook", "expense-receipt-input");
+  receiptGroup.append(receiptInput);
+
+  // Error message
+  const errorMsg = el("div", "modal__error form-error", "");
+  errorMsg.setAttribute("data-hook", "expense-error");
+  errorMsg.style.display = "none";
+
+  // Actions
+  const actions = el("div", "modal__actions");
+  const cancelBtn = el("button", "btn btn--secondary", "Cancel");
+  cancelBtn.type = "button";
+  cancelBtn.setAttribute("data-hook", "expense-cancel-btn");
+  cancelBtn.addEventListener("click", () => {
+    backdrop.remove();
+  });
+
+  const submitBtn = el("button", "btn btn--primary", "Record Expense");
+  submitBtn.type = "submit";
+  submitBtn.setAttribute("data-hook", "expense-submit-btn");
+
+  actions.append(cancelBtn, submitBtn);
+
+  form.append(catGroup, amountGroup, descGroup, receiptGroup, errorMsg, actions);
+  modal.append(header, form);
+  backdrop.append(modal);
+  document.body.append(backdrop);
+
+  if (typeof amountInput.focus === "function") {
+    amountInput.focus();
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorMsg.style.display = "none";
+    errorMsg.textContent = "";
+
+    const val = parseFloat(amountInput.value);
+    if (isNaN(val) || val <= 0) {
+      errorMsg.textContent = "Please enter a valid amount greater than zero.";
+      errorMsg.style.display = "block";
+      return;
+    }
+    const minorAmount = Math.round(val * 100);
+    const desc = descInput.value.trim();
+    if (!desc) {
+      errorMsg.textContent = "Please enter a description for the expense.";
+      errorMsg.style.display = "block";
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Recording…";
+
+    try {
+      await createExpense({
+        category: catSelect.value as ExpenseCategory,
+        amount: { amount: minorAmount },
+        description: desc,
+        receipt_ref: receiptInput.value.trim() || undefined,
+      });
+      backdrop.remove();
+      onDone();
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Record Expense";
+      errorMsg.textContent = err instanceof Error ? err.message : "Failed to record expense";
+      errorMsg.style.display = "block";
+    }
+  });
+}
+
 

@@ -229,7 +229,7 @@ func (s *Store) DeleteShopData(ctx context.Context, shopID string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	for _, table := range []string{"shop_target_gates", "review_decisions", "stock_movements", "ledger_requests", "transactions", "products"} {
+	for _, table := range []string{"expenses", "pilot_discrepancies", "pilot_reconciliations", "shop_cohorts", "shop_target_gates", "review_decisions", "stock_movements", "ledger_requests", "transactions", "products"} {
 		query := s.rebind(`DELETE FROM ` + table + ` WHERE shop_id = ?`)
 		if _, err := tx.ExecContext(ctx, query, shopID); err != nil {
 			return fmt.Errorf("storage: delete %s for shop %s: %w", table, shopID, err)

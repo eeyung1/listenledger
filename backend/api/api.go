@@ -99,6 +99,8 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	mux.HandleFunc("/api/pilot/discrepancies/", server.handlePilotDiscrepancyDetail)
 	mux.HandleFunc("/api/pilot/cohort", server.handlePilotCohort)
 	mux.HandleFunc("/api/pilot/cohort/evaluate-readiness", server.handlePilotCohortEvaluateReadiness)
+	mux.HandleFunc("/api/expenses", server.handleExpenses)
+	mux.HandleFunc("/api/expenses/", server.handleExpenseDetail)
 	// Catch-all, so an unknown path under /api/ answers in JSON like every
 	// other endpoint rather than the mux's plain-text 404.
 	mux.HandleFunc("/api/", server.handleNotFound)

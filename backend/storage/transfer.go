@@ -31,6 +31,9 @@ type ShopReconciliation struct {
 	PendingReviewsMatch bool   `json:"pending_reviews_match"`
 	SrcPendingReviews   int    `json:"src_pending_reviews"`
 	DstPendingReviews   int    `json:"dst_pending_reviews"`
+	ExpenseSumMatch     bool   `json:"expense_sum_match"`
+	SrcExpenseSum       int64  `json:"src_expense_sum"`
+	DstExpenseSum       int64  `json:"dst_expense_sum"`
 }
 
 // ReconciliationReport summarizes the migration verification status.
@@ -145,6 +148,14 @@ var transferDependencyOrder = []tableTransferDef{
 			"shop_id", "cohort_phase", "stage_status", "qualified_at", "notes",
 		},
 		orderBy: "shop_id ASC",
+	},
+	{
+		name: "expenses",
+		columns: []string{
+			"id", "shop_id", "category", "amount_amount", "amount_currency",
+			"description", "receipt_ref", "occurred_at", "created_by", "created_at",
+		},
+		orderBy: "occurred_at ASC, id ASC",
 	},
 }
 
@@ -288,7 +299,13 @@ func Transfer(ctx context.Context, src, dst *Store, dryRun bool) (Reconciliation
 		_ = tx.QueryRowContext(ctx, dst.rebind(reviewsQuery), shopID).Scan(&sr.DstPendingReviews)
 		sr.PendingReviewsMatch = (sr.SrcPendingReviews == sr.DstPendingReviews)
 
-		if !sr.ProductCountMatch || !sr.StockSumMatch || !sr.SalesRevenueMatch || !sr.PendingReviewsMatch {
+		// Operating expenses sum
+		const expenseQuery = `SELECT COALESCE(SUM(amount_amount), 0) FROM expenses WHERE shop_id = ?`
+		_ = src.db.QueryRowContext(ctx, src.rebind(expenseQuery), shopID).Scan(&sr.SrcExpenseSum)
+		_ = tx.QueryRowContext(ctx, dst.rebind(expenseQuery), shopID).Scan(&sr.DstExpenseSum)
+		sr.ExpenseSumMatch = (sr.SrcExpenseSum == sr.DstExpenseSum)
+
+		if !sr.ProductCountMatch || !sr.StockSumMatch || !sr.SalesRevenueMatch || !sr.PendingReviewsMatch || !sr.ExpenseSumMatch {
 			report.AllMatched = false
 		}
 		report.Shops = append(report.Shops, sr)
