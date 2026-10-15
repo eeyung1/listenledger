@@ -1,22 +1,16 @@
-# Render Blueprint Specification for ListenLedger
-# Reference: DATABASE_MIGRATION.md §7
-
+# Single-instance ledger/dashboard. Edge capture is not deployed by this blueprint.
 services:
   - type: web
     name: listenledger
-    runtime: go
-    plan: starter
-    region: frankfurt # Low-latency routing to West Africa / Nigeria
-    buildCommand: |
-      cd frontend && npm ci && npm run build
-      cd ../backend && go build -o ../bin/listenledger .
-    startCommand: bin/listenledger -frontend frontend
-    healthCheckPath: /healthz
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /readyz
+    autoDeployTrigger: checksPass
     envVars:
       - key: DATABASE_URL
-        sync: false # Injected from Render Environment Secrets (Supabase connection string)
+        sync: false # Restricted listenledger_app PostgreSQL URL with TLS; never commit it.
       - key: PORT
         value: "8080"
-      - key: ALLOWED_ORIGINS
-        sync: false # Comma-separated browser origins (empty for same-origin only)
-

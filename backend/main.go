@@ -2,9 +2,8 @@
 // realtime channel to the owner's dashboard and the persisted catalogue and
 // ledger behind it.
 //
-// This entry point wires the HTTP layer and SQLite storage. There is no
-// capture endpoint yet, so nothing writes real transactions; see the -dev flag
-// for exercising the realtime pipe, and TODO.md for what is still missing.
+// The production image serves the dashboard and API against an initialized
+// PostgreSQL database using a restricted runtime role.
 package main
 
 import (
@@ -41,13 +40,15 @@ func main() {
 }
 
 type config struct {
-	addr           string
-	dbPath         string
-	frontendDir    string
-	devMode        bool
-	allowedOrigins []string
-	tlsCertFile    string
-	tlsKeyFile     string
+	addr            string
+	dbPath          string
+	frontendDir     string
+	devMode         bool
+	allowedOrigins  []string
+	tlsCertFile     string
+	tlsKeyFile      string
+	requirePostgres bool
+	skipMigrations  bool
 }
 
 func run() error {
@@ -60,9 +61,11 @@ func run() error {
 		"directory containing index.html and the built SPA")
 	flag.BoolVar(&cfg.devMode, "dev", false,
 		"enable development-only endpoints; never enable in production")
+	flag.BoolVar(&cfg.requirePostgres, "require-postgres", false, "require a PostgreSQL database; refuse SQLite fallback")
+	flag.BoolVar(&cfg.skipMigrations, "skip-migrations", false, "verify PostgreSQL schema without DDL; use a restricted runtime role")
 	flag.StringVar(&cfg.tlsCertFile, "tls-cert", "", "path to TLS certificate PEM file (or LISTENLEDGER_TLS_CERT env)")
 	flag.StringVar(&cfg.tlsKeyFile, "tls-key", "", "path to TLS private key PEM file (or LISTENLEDGER_TLS_KEY env)")
-	origins := flag.String("allowed-origins", "",
+	origins := flag.String("allowed-origins", os.Getenv("ALLOWED_ORIGINS"),
 		"comma-separated browser origins permitted to open a WebSocket (empty = same-origin only)")
 	flag.Parse()
 
@@ -73,6 +76,9 @@ func run() error {
 		} else {
 			cfg.dbPath = "listenledger.db"
 		}
+	}
+	if err := validateDatabaseConfig(cfg); err != nil {
+		return err
 	}
 
 	if port := os.Getenv("PORT"); port != "" && cfg.addr == ":8080" {
@@ -114,6 +120,9 @@ func redactDSN(dsn string) string {
 }
 
 func serve(logger *slog.Logger, cfg config) error {
+	if err := validateDatabaseConfig(cfg); err != nil {
+		return err
+	}
 	frontendDir, err := filepath.Abs(cfg.frontendDir)
 	if err != nil {
 		return err
@@ -126,7 +135,11 @@ func serve(logger *slog.Logger, cfg config) error {
 			"path", frontendDir, "error", err)
 	}
 
-	store, err := storage.Open(cfg.dbPath)
+	openStore := storage.Open
+	if cfg.skipMigrations {
+		openStore = storage.OpenPostgresRuntime
+	}
+	store, err := openStore(cfg.dbPath)
 	if err != nil {
 		return err
 	}
@@ -253,6 +266,14 @@ func serve(logger *slog.Logger, cfg config) error {
 	}
 
 	logger.Info("stopped cleanly")
+	return nil
+}
+
+func validateDatabaseConfig(cfg config) error {
+	postgres := strings.HasPrefix(cfg.dbPath, "postgres://") || strings.HasPrefix(cfg.dbPath, "postgresql://")
+	if (cfg.requirePostgres || cfg.skipMigrations) && !postgres {
+		return errors.New("PostgreSQL is required: set DATABASE_URL to a PostgreSQL connection URL; SQLite fallback is disabled")
+	}
 	return nil
 }
 

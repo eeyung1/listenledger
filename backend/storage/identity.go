@@ -96,6 +96,9 @@ func (s *Store) RecoverAccount(ctx context.Context, owner, oldRecovery, password
 
 // AllowAuthAttempt persists a fixed-window limiter so restarts do not reset it.
 func (s *Store) AllowAuthAttempt(ctx context.Context, key string, limit int) (bool, error) {
+	if limit <= 0 {
+		return false, nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -108,15 +111,17 @@ func (s *Store) AllowAuthAttempt(ctx context.Context, key string, limit int) (bo
 	if _, err = tx.ExecContext(ctx, s.rebind(`DELETE FROM sessions WHERE expires_at<=?`), formatTime(now)); err != nil {
 		return false, err
 	}
+	// The conditional upsert locks the counter row and admits at most limit
+	// concurrent attempts. Qualify the existing value to distinguish EXCLUDED.
 	var attempts int
-	err = tx.QueryRowContext(ctx, s.rebind(`SELECT attempts FROM auth_attempts WHERE key=?`), key).Scan(&attempts)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-	if attempts >= limit {
+	err = tx.QueryRowContext(ctx, s.rebind(`
+		INSERT INTO auth_attempts(key,attempts,expires_at) VALUES(?,1,?)
+		ON CONFLICT(key) DO UPDATE SET attempts=auth_attempts.attempts+1
+		WHERE auth_attempts.attempts < ? RETURNING attempts`),
+		key, formatTime(now.Add(15*time.Minute)), limit).Scan(&attempts)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	_, err = tx.ExecContext(ctx, s.rebind(`INSERT INTO auth_attempts(key,attempts,expires_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1`), key, formatTime(now.Add(15*time.Minute)))
 	if err != nil {
 		return false, err
 	}
