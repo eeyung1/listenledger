@@ -19,7 +19,7 @@ BEGIN
         'products', 'transactions', 'stock_movements', 'ledger_requests',
         'devices', 'review_decisions', 'shop_target_gates',
         'pilot_reconciliations', 'pilot_discrepancies', 'shop_cohorts',
-        'expenses'
+        'expenses', 'customers', 'customer_debts'
     ] LOOP
         IF to_regclass(format('%I.%I', target_schema, table_name)) IS NULL THEN
             RAISE EXCEPTION 'Missing table %.%; apply migrations before security setup', target_schema, table_name;

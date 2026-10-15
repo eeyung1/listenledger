@@ -18,22 +18,25 @@ type TableReconciliation struct {
 
 // ShopReconciliation records per-tenant ledger and inventory invariant verification.
 type ShopReconciliation struct {
-	ShopID              string `json:"shop_id"`
-	ProductCountMatch   bool   `json:"product_count_match"`
-	SrcProductCount     int    `json:"src_product_count"`
-	DstProductCount     int    `json:"dst_product_count"`
-	StockSumMatch       bool   `json:"stock_sum_match"`
-	SrcStockSum         int64  `json:"src_stock_sum"`
-	DstStockSum         int64  `json:"dst_stock_sum"`
-	SalesRevenueMatch   bool   `json:"sales_revenue_match"`
-	SrcSalesRevenue     int64  `json:"src_sales_revenue"`
-	DstSalesRevenue     int64  `json:"dst_sales_revenue"`
-	PendingReviewsMatch bool   `json:"pending_reviews_match"`
-	SrcPendingReviews   int    `json:"src_pending_reviews"`
-	DstPendingReviews   int    `json:"dst_pending_reviews"`
-	ExpenseSumMatch     bool   `json:"expense_sum_match"`
-	SrcExpenseSum       int64  `json:"src_expense_sum"`
-	DstExpenseSum       int64  `json:"dst_expense_sum"`
+	ShopID               string `json:"shop_id"`
+	ProductCountMatch    bool   `json:"product_count_match"`
+	SrcProductCount      int    `json:"src_product_count"`
+	DstProductCount      int    `json:"dst_product_count"`
+	StockSumMatch        bool   `json:"stock_sum_match"`
+	SrcStockSum          int64  `json:"src_stock_sum"`
+	DstStockSum          int64  `json:"dst_stock_sum"`
+	SalesRevenueMatch    bool   `json:"sales_revenue_match"`
+	SrcSalesRevenue      int64  `json:"src_sales_revenue"`
+	DstSalesRevenue      int64  `json:"dst_sales_revenue"`
+	PendingReviewsMatch  bool   `json:"pending_reviews_match"`
+	SrcPendingReviews    int    `json:"src_pending_reviews"`
+	DstPendingReviews    int    `json:"dst_pending_reviews"`
+	ExpenseSumMatch      bool   `json:"expense_sum_match"`
+	SrcExpenseSum        int64  `json:"src_expense_sum"`
+	DstExpenseSum        int64  `json:"dst_expense_sum"`
+	CustomerDebtSumMatch bool   `json:"customer_debt_sum_match"`
+	SrcCustomerDebtSum   int64  `json:"src_customer_debt_sum"`
+	DstCustomerDebtSum   int64  `json:"dst_customer_debt_sum"`
 }
 
 // ReconciliationReport summarizes the migration verification status.
@@ -154,6 +157,23 @@ var transferDependencyOrder = []tableTransferDef{
 		columns: []string{
 			"id", "shop_id", "category", "amount_amount", "amount_currency",
 			"description", "receipt_ref", "occurred_at", "created_by", "created_at",
+		},
+		orderBy: "occurred_at ASC, id ASC",
+	},
+	{
+		name: "customers",
+		columns: []string{
+			"id", "shop_id", "name", "phone", "notes",
+			"outstanding_amount", "outstanding_currency", "created_at", "updated_at",
+		},
+		orderBy: "created_at ASC, id ASC",
+	},
+	{
+		name: "customer_debts",
+		columns: []string{
+			"id", "shop_id", "customer_id", "type", "amount_amount", "amount_currency",
+			"balance_after_amount", "balance_after_currency", "description", "receipt_ref",
+			"occurred_at", "created_by", "created_at",
 		},
 		orderBy: "occurred_at ASC, id ASC",
 	},
@@ -305,7 +325,13 @@ func Transfer(ctx context.Context, src, dst *Store, dryRun bool) (Reconciliation
 		_ = tx.QueryRowContext(ctx, dst.rebind(expenseQuery), shopID).Scan(&sr.DstExpenseSum)
 		sr.ExpenseSumMatch = (sr.SrcExpenseSum == sr.DstExpenseSum)
 
-		if !sr.ProductCountMatch || !sr.StockSumMatch || !sr.SalesRevenueMatch || !sr.PendingReviewsMatch || !sr.ExpenseSumMatch {
+		// Customer outstanding debts sum
+		const customerDebtQuery = `SELECT COALESCE(SUM(outstanding_amount), 0) FROM customers WHERE shop_id = ?`
+		_ = src.db.QueryRowContext(ctx, src.rebind(customerDebtQuery), shopID).Scan(&sr.SrcCustomerDebtSum)
+		_ = tx.QueryRowContext(ctx, dst.rebind(customerDebtQuery), shopID).Scan(&sr.DstCustomerDebtSum)
+		sr.CustomerDebtSumMatch = (sr.SrcCustomerDebtSum == sr.DstCustomerDebtSum)
+
+		if !sr.ProductCountMatch || !sr.StockSumMatch || !sr.SalesRevenueMatch || !sr.PendingReviewsMatch || !sr.ExpenseSumMatch || !sr.CustomerDebtSumMatch {
 			report.AllMatched = false
 		}
 		report.Shops = append(report.Shops, sr)

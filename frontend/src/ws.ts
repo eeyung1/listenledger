@@ -20,7 +20,9 @@ export type EventType =
   | "product.created"
   | "settings.updated"
   | "expense.created"
-  | "expense.deleted";
+  | "expense.deleted"
+  | "customer.created"
+  | "customer.debt_recorded";
 
 /** The envelope every server message uses, mirroring ws.Event. */
 export interface ServerEvent<T = unknown> {
@@ -42,6 +44,8 @@ export const DOM_EVENT_NAMES: Readonly<Record<EventType, string>> = {
   "settings.updated": "ll:settings-updated",
   "expense.created": "ll:expense-created",
   "expense.deleted": "ll:expense-deleted",
+  "customer.created": "ll:customer-created",
+  "customer.debt_recorded": "ll:customer-debt-recorded",
 };
 
 /** Dispatched whenever the connection state changes. */

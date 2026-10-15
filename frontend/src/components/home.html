@@ -18,6 +18,7 @@
       <p class="view__subtitle" data-hook="connection-status">Connecting…</p>
     </div>
     <div class="view__header-badges">
+      <button type="button" class="btn btn--secondary btn--sm" data-hook="customer-book-btn">📖 Customer Credit Book</button>
       <button type="button" class="btn btn--secondary btn--sm" data-hook="record-expense-btn">+ Record Expense</button>
       <span class="badge badge--device badge--device-checking" data-hook="device-health-badge" role="status" aria-label="Edge capture hardware health">Hardware: Checking…</span>
     </div>
@@ -41,6 +42,11 @@
     <article class="kpi">
       <h2 class="kpi__label">Net profit</h2>
       <p class="kpi__value" data-hook="kpi-net-profit">—</p>
+    </article>
+    <article class="kpi kpi--attention">
+      <h2 class="kpi__label">Customer Debt</h2>
+      <p class="kpi__value" data-hook="kpi-customer-debt">—</p>
+      <a class="kpi__link" href="javascript:void(0)" data-hook="kpi-customer-debt-link">Open credit book</a>
     </article>
     <article class="kpi kpi--attention">
       <h2 class="kpi__label">Needs review</h2>

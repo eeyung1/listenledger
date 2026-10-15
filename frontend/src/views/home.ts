@@ -19,6 +19,7 @@ import {
   fetchExpenses,
   fetchInventory,
   fetchOnboardingStatus,
+  fetchShopCreditSummary,
   fetchSummary,
   fetchTransactions,
   runTestCapture,
@@ -30,6 +31,7 @@ import {
   type ExpenseCategory,
   type OnboardingStatus,
   type Product,
+  type ShopCreditSummary,
   type Transaction,
 } from "../api.js";
 import {
@@ -51,6 +53,7 @@ import {
   type ConnectionStatus,
   type ConnectionStatusDetail,
 } from "../ws.js";
+import { showCustomerBookModal } from "./customers.js";
 import type { ViewCleanup } from "./index.js";
 
 /** How many movements the overview feed shows before it stops growing. */
@@ -70,6 +73,7 @@ interface HomeState {
   summary?: DailySummary | undefined;
   onboarding?: OnboardingStatus | undefined;
   devices?: readonly Device[] | undefined;
+  creditSummary?: ShopCreditSummary | undefined;
 }
 
 export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
@@ -278,6 +282,18 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     setText(hook(root, "kpi-transaction-count"), String(kpis.salesCount));
     setText(hook(root, "kpi-expenses-today"), formatMoney(kpis.expenses));
     setText(hook(root, "kpi-net-profit"), formatMoney(kpis.netProfit));
+    const customerDebtEl = hook(root, "kpi-customer-debt");
+    if (customerDebtEl !== null) {
+      if (
+        state.creditSummary &&
+        state.creditSummary.total_outstanding_debt &&
+        typeof state.creditSummary.total_outstanding_debt.amount === "number"
+      ) {
+        setText(customerDebtEl, formatMoney(state.creditSummary.total_outstanding_debt));
+      } else {
+        setText(customerDebtEl, "—");
+      }
+    }
     setText(hook(root, "kpi-review-count"), String(kpis.reviewCount));
     setText(hook(root, "kpi-low-stock-count"), String(kpis.lowStockCount));
   }
@@ -372,13 +388,14 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   /** Fetches transactions, inventory and daily summary snapshots and replaces state wholesale. */
   async function refetch(): Promise<void> {
     try {
-      const [transactions, inventory, summary, onboarding, devicesRes, expensesRes] = await Promise.all([
+      const [transactions, inventory, summary, onboarding, devicesRes, expensesRes, creditRes] = await Promise.all([
         fetchTransactions(shopId, MAX_TRANSACTION_LIMIT, undefined, signal),
         fetchInventory(shopId, signal),
         fetchSummary(shopId, signal).catch(() => undefined),
         fetchOnboardingStatus(signal).catch(() => undefined),
         fetchDevices(signal).catch(() => undefined),
         fetchExpenses(undefined, signal).catch(() => undefined),
+        fetchShopCreditSummary(signal).catch(() => undefined),
       ]);
       if (disposed || signal.aborted) return;
 
@@ -388,6 +405,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       state.onboarding = onboarding;
       state.devices = devicesRes?.devices;
       state.expenses = expensesRes?.expenses ? [...expensesRes.expenses] : [];
+      state.creditSummary = creditRes;
       const maxSeq = Math.max(
         transactions.last_seq ?? 0,
         inventory.last_seq ?? 0,
@@ -484,10 +502,33 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     void refetch();
   };
 
+  const onCustomerEvent = (): void => {
+    void refetch();
+  };
+
   const recordExpenseBtn = hook(root, "record-expense-btn");
   if (recordExpenseBtn !== null) {
     recordExpenseBtn.addEventListener("click", () => {
       showRecordExpenseModal(root, () => {
+        void refetch();
+      });
+    });
+  }
+
+  const customerBookBtn = hook(root, "customer-book-btn");
+  if (customerBookBtn !== null) {
+    customerBookBtn.addEventListener("click", () => {
+      showCustomerBookModal(root, () => {
+        void refetch();
+      });
+    });
+  }
+
+  const customerDebtKpiLink = hook(root, "kpi-customer-debt-link");
+  if (customerDebtKpiLink !== null) {
+    customerDebtKpiLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      showCustomerBookModal(root, () => {
         void refetch();
       });
     });
@@ -500,6 +541,8 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   window.addEventListener("ll:product-created", onProductCreated);
   window.addEventListener("ll:expense-created", onExpenseEvent);
   window.addEventListener("ll:expense-deleted", onExpenseEvent);
+  window.addEventListener("ll:customer-created", onCustomerEvent);
+  window.addEventListener("ll:customer-debt-recorded", onCustomerEvent);
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
 
   void refetch();
@@ -514,6 +557,8 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     window.removeEventListener("ll:product-created", onProductCreated);
     window.removeEventListener("ll:expense-created", onExpenseEvent);
     window.removeEventListener("ll:expense-deleted", onExpenseEvent);
+    window.removeEventListener("ll:customer-created", onCustomerEvent);
+    window.removeEventListener("ll:customer-debt-recorded", onCustomerEvent);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   };
 }

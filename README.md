@@ -12,9 +12,9 @@ The intended result is one sale for two Milo at NGN 4,000, a stock reduction of 
 
 Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 
-**Stage: ledger/dashboard ready for controlled deployment preparation; live hosting and genuine voice/shop acceptance are pending.** Authentication, atomic receipts and stock movements, retries, review correction/rejection, reversals, catalogue forms/import, manual entry, daily summaries, settings, device pairing, CSV exports and pilot reconciliation tooling are implemented.
+**Stage: ledger/dashboard ready for controlled deployment preparation; live hosting and genuine voice/shop acceptance are pending.** Authentication, atomic receipts and stock movements, retries, review correction/rejection, reversals, catalogue forms/import, manual entry, daily summaries, settings, device pairing, CSV exports, pilot reconciliation tooling, operational expense tracking, and customer credit & debt ledger ("Customer Book" / "Gbese") are implemented.
 
-**Database:** SQLite and PostgreSQL are supported. Seven embedded PostgreSQL migrations and transfer tooling exist. The production image requires PostgreSQL and uses read-only schema validation (`-require-postgres -skip-migrations`); initialize schema with an administrator, then run with the restricted application role. See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md).
+**Database:** SQLite and PostgreSQL are supported. Nine embedded PostgreSQL migrations and transfer tooling exist. The production image requires PostgreSQL and uses read-only schema validation (`-require-postgres -skip-migrations`); initialize schema with an administrator, then run with the restricted application role. See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md).
 
 **Voice limitation:** the Rust executable accepts WAV or synthetic audio, not a wired hardware microphone. A command STT adapter exists, but the bundled runner can fall back to canned transcripts based on duration/volume. Never connect that fallback to real trading data. Initial cloud deployment is the ledger/dashboard with manual entry; the edge runner is not included in the production image.
 
@@ -66,6 +66,8 @@ Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 - [x] Catalogue CSV/JSON import API, downloadable CSV template and frontend import form.
 - [x] Scripted backend evaluation harness (`backend/eval/`); it is not a physical-shop trial.
 - [x] Dual-dialect database storage engine (SQLite & PostgreSQL) with embedded migrations, pgx connection pooling, query rebinding, row-level locking, and DATABASE_URL support.
+- [x] Operational expense tracking (`models.Expense`, `storage.Expense`, `POST /api/expenses`), category breakdown aggregations, and daily net operating profit calculations.
+- [x] Customer credit and debt ledger ("Customer Book" / I-Owe-You / "Gbese" tracking): customer registration, accounts receivable overview, credit sales, cash repayments, debt forgiveness/discounts, and real-time dashboard updates.
 
 #### Backend and persistence
 

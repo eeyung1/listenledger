@@ -43,6 +43,10 @@ const (
 	EventExpenseCreated EventType = "expense.created"
 	// EventExpenseDeleted announces the removal or voiding of an operating expense.
 	EventExpenseDeleted EventType = "expense.deleted"
+	// EventCustomerCreated announces a newly registered customer in the shop's credit book.
+	EventCustomerCreated EventType = "customer.created"
+	// EventCustomerDebtRecorded announces an atomic credit purchase or debt repayment.
+	EventCustomerDebtRecorded EventType = "customer.debt_recorded"
 )
 
 // Event is the single envelope for everything the backend pushes.

@@ -243,6 +243,34 @@ func TestCutover_FullLifecycleColdRebootAndDisasterRecovery(t *testing.T) {
 		t.Fatalf("create expense before cutover: %v", err)
 	}
 
+	// 11. Record Customer Credit Ledger Entry
+	cutoverCustomer := models.Customer{
+		ID:                 "cus_cutover_01",
+		ShopID:             shopID,
+		Name:               "Madam Beatrice",
+		Phone:              "+2348055554444",
+		Notes:              "Provisions credit account",
+		OutstandingBalance: models.Money{Amount: 0, Currency: "NGN"},
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
+	}
+	if err := src.CreateCustomer(ctx, cutoverCustomer); err != nil {
+		t.Fatalf("create customer before cutover: %v", err)
+	}
+	cutoverDebt := models.CustomerDebt{
+		ID:          "dbt_cutover_01",
+		ShopID:      shopID,
+		CustomerID:  cutoverCustomer.ID,
+		Type:        models.DebtTypeCreditSale,
+		Amount:      models.Money{Amount: 320000, Currency: "NGN"},
+		Description: "Milk and bread on credit",
+		OccurredAt:  time.Now().UTC(),
+		CreatedBy:   "owner",
+	}
+	if _, err := src.RecordCustomerDebt(ctx, cutoverDebt); err != nil {
+		t.Fatalf("record debt before cutover: %v", err)
+	}
+
 	// Phase 2: Abrupt Server Reboot Simulation
 	// Close store connection completely, simulating container restart or crash
 	if err := src.Close(); err != nil {
@@ -313,6 +341,19 @@ func TestCutover_FullLifecycleColdRebootAndDisasterRecovery(t *testing.T) {
 		t.Errorf("expected net profit %d, got %d", summaryCheck.TodaySalesAmount.Amount-500000, summaryCheck.TodayNetProfit.Amount)
 	}
 
+	// Verify customer & debt persistence after reboot
+	custCheck, err := restartedStore.GetCustomerByID(ctx, shopID, cutoverCustomer.ID)
+	if err != nil {
+		t.Fatalf("get customer after reboot: %v", err)
+	}
+	if custCheck.OutstandingBalance.Amount != 320000 {
+		t.Errorf("customer balance mismatch after reboot: %d", custCheck.OutstandingBalance.Amount)
+	}
+	debtsCheck, totalDebts, err := restartedStore.ListCustomerDebts(ctx, shopID, cutoverCustomer.ID, 10, 0)
+	if err != nil || totalDebts != 1 || len(debtsCheck) != 1 {
+		t.Errorf("debts check mismatch after reboot: total=%d, err=%v", totalDebts, err)
+	}
+
 	// Phase 4: Disaster Recovery Target Provisioning & Reconciliation
 	destDBFile := filepath.Join(t.TempDir(), "cutover_target.db")
 	dst, err := Open(destDBFile)
@@ -326,7 +367,10 @@ func TestCutover_FullLifecycleColdRebootAndDisasterRecovery(t *testing.T) {
 		t.Fatalf("cutover disaster restore transfer failed: %v", err)
 	}
 	if !report.AllMatched {
-		t.Errorf("expected clean 100%% match across all 15 tables, got report: %+v", report)
+		t.Errorf("expected clean 100%% match across all 17 tables, got report: %+v", report)
+	}
+	if len(report.Tables) != 17 {
+		t.Errorf("expected 17 tables transferred, got %d", len(report.Tables))
 	}
 
 	// Verify live queries on restored destination

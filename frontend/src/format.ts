@@ -251,8 +251,8 @@ export function computeKPIs(
   summary?: DailySummary,
   expenses?: readonly Expense[],
 ): ComputedKPIs {
-  if (summary !== undefined) {
-    const expensesMoney = summary.today_expenses_amount ?? { amount: 0, currency: summary.currency };
+  if (summary !== undefined && summary.today_sales_amount !== undefined) {
+    const expensesMoney = summary.today_expenses_amount ?? { amount: 0, currency: summary.currency || "NGN" };
     const expensesCount = summary.today_expenses_count ?? 0;
     const netProfit = summary.today_net_profit ?? {
       amount: summary.today_sales_amount.amount - expensesMoney.amount,
