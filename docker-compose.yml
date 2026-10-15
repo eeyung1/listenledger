@@ -1,8 +1,6 @@
 # Docker Compose for ListenLedger local staging & rehearsal
 # Reference: DATABASE_MIGRATION.md §6, §7
 
-version: "3.8"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -26,6 +24,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Local-only: initialize a disposable database and allow HTTP cookies.
+    command: ["-frontend", "/app/frontend", "-require-postgres", "-dev"]
     container_name: listenledger-app
     restart: unless-stopped
     depends_on:
@@ -37,11 +37,12 @@ services:
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/readyz"]
       interval: 10s
       timeout: 3s
       retries: 3
 
 volumes:
   pgdata:
+
 

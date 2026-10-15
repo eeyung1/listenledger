@@ -1,6 +1,25 @@
 # TODO — ListenLedger
 
-## Production Cloud Deployment Containerization, Render Hosting Blueprint Alignment & Disaster Recovery Cutover Rehearsal increment (15 October 2026) — MILESTONE 23 COMPLETE
+## Current deployment backlog (15 October 2026)
+
+This section supersedes historical completion claims below. Older increment entries describe source changes, not proof of live hosting or physical-shop acceptance.
+
+- [x] PostgreSQL storage, seven migrations and transfer/reconciliation tooling.
+- [x] Production image requires PostgreSQL, verifies schema without DDL, and serves only built assets/templates.
+- [x] Idempotent security setup covers all 15 tables, denies Data API roles, and grants runtime read-only migration history.
+- [x] Container CI covers restricted-role startup, signup/login and restart persistence. Verify its exact commit result before release.
+- [ ] Initialize and verify the live Supabase schema and runtime role.
+- [ ] Configure runtime credentials and confirm the Render workspace.
+- [ ] Deploy and verify HTTPS, manual transactions, stock, reviews, WebSockets and redeploy persistence.
+- [ ] Demonstrate hosted backup restoration and reconcile any real source data.
+- [ ] Implement actual microphone input and fail-closed real STT; remove synthetic fallbacks from production capture.
+- [ ] Run recorded-audio evaluation and real shop trials against independent records.
+
+See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md) for the current procedure.
+
+## Historical implementation notes
+
+## Production Cloud Deployment Containerization, Render Hosting Blueprint Alignment & Disaster Recovery Cutover Rehearsal increment (15 October 2026) — implementation recorded; live deployment pending
 
 Implemented production cloud deployment containerization, Render hosting blueprint alignment, and disaster recovery cutover verification (`Dockerfile`, `.dockerignore`, `docker-compose.yml`, `render.yaml`, `scripts/verify_cutover.sh`, `backend/storage/cutover_test.go`, `DATABASE_MIGRATION.md`):
 1. **Multi-Stage Production Containerization (`Dockerfile`, `.dockerignore`, `docker-compose.yml`)**:
@@ -12,13 +31,13 @@ Implemented production cloud deployment containerization, Render hosting bluepri
    - Maintained native healthcheck path `/healthz`, environment secret injection for `DATABASE_URL`, and same-origin WebSocket connectivity.
 3. **End-to-End Cutover Rehearsal & Cold Reboot Simulation (`backend/storage/cutover_test.go`, `scripts/verify_cutover.sh`)**:
    - Implemented automated cutover rehearsal suite `TestCutover_FullLifecycleColdRebootAndDisasterRecovery`: simulates cold schema provisioning on empty database, owner onboarding, target gates agreement, cashier protocol certification, catalogue creation, device pairing, multi-line restock intake, confirmed sales, and pilot dual-entry reconciliation with discrepancy resolution.
-   - Simulates abrupt process crash (`store.Close()`), reboots storage, verifies `/readyz` probe, and asserts 100% data retention across all 14 database tables with zero inventory or financial drift.
+   - Closes and reopens a storage connection pool (not an abrupt process crash), then checks storage, verifies `/readyz` probe, and asserts 100% data retention across all 14 database tables with zero inventory or financial drift.
    - Executes clean disaster restore into isolated target and validates dual-store invariant reconciliation via `Transfer`.
 4. **Automated Verification Script & Makefile Integration (`scripts/verify_cutover.sh`, `Makefile`)**:
    - Added `verify-cutover` target to `Makefile` executing SQLite vacuum/backup tests, PostgreSQL dialect transfer tests, and cold reboot cutover tests.
    - Updated `DATABASE_MIGRATION.md` marking all migration, backup restoration, and controlled cutover rehearsal criteria as verified.
 
-Next: Physical counter pilot trials and field cohort rollout.
+Next: live database initialization, deployment acceptance, then real microphone/model work and field trials.
 
 ## Pilot Dual-Entry Reconciliation Engine, Multi-Shop Cohort Trial Framework & Unexplained Discrepancy Investigation Tooling increment (15 October 2026) — MILESTONE 22 COMPLETE
 
@@ -311,7 +330,7 @@ Remaining:
 - [x] Handle the restock closing phrase ("Stock received") as a distinct
       boundary from the sale phrase ("Thank you"), configurable per shop.
 
-## 6. Rust edge engine — DONE (`edge/`)
+## 6. Rust edge engine — scaffold implemented; hardware acceptance pending (`edge/`)
 
 - [x] `cargo init --name listenledger-edge` inside `edge/`, with framing,
       VAD, STT interface, and queueing.
@@ -330,26 +349,12 @@ Remaining:
 - [x] Add a root `Makefile` task runner with `build`, `test`, `check`, `dev`, `clean`, `verify-backup`, and `eval` targets.
 - [x] Set up CI: `gofmt -l`, `go vet`, `go test -race ./...`, `npm run typecheck && npm run build`, `cargo test` in `.github/workflows/ci.yml`.
 
-## Open decisions
+## Remaining operational decisions
 
-- **Authentication.** `ShopID` is on both models, leads every index, and routes
-  every event — but nothing proves a caller owns the shop it claims. This is
-  the highest-priority gap; everything else is a feature.
-- **Money:** integer minor units end to end. Confirm the frontend formats from
-  minor units rather than converting to a decimal at the API boundary.
-- **Confidence threshold:** per-shop setting (blueprint §11). A starting value
-  now exists — `reviewThreshold = 0.75` in `backend/api/transactions.go`, with
-  the weakest anchor deciding rather than the average — but it is still a
-  constant in the transport layer. It belongs on the shop record and in the
-  validation engine, which is where matching will actually assign the scores.
-- **Snapshot/realtime ordering:** the client signals `resyncRequired` and the
-  snapshot endpoint now exists, but nothing connects the two yet, and
-  `generated_at` is only useful if the client actually compares it against
-  `sent_at` on incoming events.
-- **SQLite driver:** `mattn/go-sqlite3` needs CGO and a C toolchain. If the
-  orchestrator ever has to cross-compile (a shop-local Pi, a scratch container
-  without gcc), swapping to the pure-Go `modernc.org/sqlite` is a one-line
-  import and driver-name change.
+- Confirm the Render workspace and service plan before resource creation.
+- Keep one application instance while realtime delivery uses an in-process hub.
+- Keep voice capture disabled for real trading until microphone input and real model inference pass acceptance.
+- Authentication, integer money, configurable confidence and reconnect synchronization exist; the original gaps listed here are resolved in source.
 
 ## 8. Milestone 18: Staff Protocol Training, Target Gates Agreement & Postgres Disaster Restoration — DONE
 
@@ -357,5 +362,6 @@ Remaining:
 - [x] **Owner Target Gates Agreement:** Configurable shop target gates (`GET/PUT /api/settings/target-gates`) persisting agreed accuracy, false-capture, hold-rate, and latency targets with dual-dialect SQLite (`0006_target_gates_and_training.sql`) and PostgreSQL migrations. Accessible via Settings UI and Onboarding checklist.
 - [x] **Onboarding Checklist Complete:** Six-step progressive onboarding workflow (`profile`, `catalogue`, `devices`, `staff_training`, `target_gates`, `test_capture`) with interactive modals and live progression.
 - [x] **Automated PostgreSQL Disaster Restore Verification:** Automated script (`scripts/verify_postgres_backup.sh`) and integration test (`TestPostgres_BackupAndRestoreVerification`) validating complete migration, transfer, and application access on clean target database.
+
 
 

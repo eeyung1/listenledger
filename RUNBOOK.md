@@ -4,6 +4,12 @@ This runbook documents the deployment architecture, disaster recovery procedures
 
 ---
 
+## Current cloud deployment procedure
+
+Use [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md) for Render + Supabase. Initialize using an administrator, apply `scripts/supabase_setup.sql`, and run the tested Docker image with a restricted runtime role. `/readyz` checks the database; the image refuses SQLite fallback and does not apply migrations at startup. The edge process is not part of this deployment. Do not use mock/canned audio transcription for real sales.
+
+The local/SQLite and hardware sections below are reference procedures, not proof of completed cloud deployment or supported microphone integration. Physical capture, model inference and shop trials still need real acceptance evidence.
+
 ## 1. System Architecture & Deployment Topology
 
 ListenLedger uses a partitioned, single-writer architecture designed for edge counters and shop networks:
@@ -237,4 +243,5 @@ The server includes built-in panic recovery (`api.Recoverer`) preventing server 
   - **Direct HTTPS**: Launch backend with `-tls-cert /path/to/cert.pem -tls-key /path/to/key.pem` (or environment variables `LISTENLEDGER_TLS_CERT` and `LISTENLEDGER_TLS_KEY`). The server configures TLS 1.2+ minimum version and secure ciphers.
   - **Reverse Proxy**: Behind Caddy, Nginx, Render, or Cloudflare, the server respects `X-Forwarded-Proto: https` and applies strict HSTS (`Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`).
   - **Defensive Headers**: All HTTP responses include `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and Content Security Policy (CSP).
+
 

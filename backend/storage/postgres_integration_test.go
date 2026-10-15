@@ -1192,3 +1192,24 @@ func TestPostgres_QueryProducts(t *testing.T) {
 		t.Errorf("expected 1 match for Noodles alias, got %+v", searchRes)
 	}
 }
+
+func TestPostgres_RuntimeRequiresCompleteSchema(t *testing.T) {
+	s := openTestPostgres(t)
+	ctx := context.Background()
+	if err := s.verifyMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM schema_migrations WHERE version = 7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.verifyMigrations(ctx); err == nil {
+		t.Fatal("runtime accepted a schema missing migration 7")
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version = 7").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("read-only runtime check modified migration history")
+	}
+}

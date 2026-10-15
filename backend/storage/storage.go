@@ -125,6 +125,19 @@ func OpenSQLite(path string) (*Store, error) {
 // OpenPostgres connects to PostgreSQL using the provided connection string (URL),
 // configures production-grade connection pooling, and runs any outstanding PostgreSQL migrations.
 func OpenPostgres(connStr string) (*Store, error) {
+	return openPostgres(connStr, true)
+}
+
+// OpenPostgresRuntime never performs DDL. Deployment must apply migrations with
+// an administrative connection before starting the server with its runtime role.
+func OpenPostgresRuntime(connStr string) (*Store, error) {
+	if !strings.HasPrefix(connStr, "postgres://") && !strings.HasPrefix(connStr, "postgresql://") {
+		return nil, errors.New("storage: PostgreSQL connection URL required")
+	}
+	return openPostgres(connStr, false)
+}
+
+func openPostgres(connStr string, migrate bool) (*Store, error) {
 	db, err := sql.Open("pgx", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("storage: open postgres: %w", err)
@@ -145,11 +158,38 @@ func OpenPostgres(connStr string) (*Store, error) {
 	}
 
 	store := &Store{db: db, dialect: DialectPostgres}
-	if err := store.migrate(ctx); err != nil {
+	var schemaErr error
+	if migrate {
+		schemaErr = store.migrate(ctx)
+	} else {
+		schemaErr = store.verifyMigrations(ctx)
+	}
+	if schemaErr != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, schemaErr
 	}
 	return store, nil
+}
+
+func (s *Store) verifyMigrations(ctx context.Context) error {
+	applied, err := s.appliedVersions(ctx)
+	if err != nil {
+		return fmt.Errorf("storage: schema unavailable; apply migrations with an administrator first: %w", err)
+	}
+	names, err := fs.Glob(migrationPgFS, "migrations_pg/*.sql")
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		version, err := migrationVersion(name)
+		if err != nil {
+			return err
+		}
+		if !applied[version] {
+			return fmt.Errorf("storage: migration %d missing; apply migrations with an administrator before deploying", version)
+		}
+	}
+	return nil
 }
 
 // Close releases the database handle.
