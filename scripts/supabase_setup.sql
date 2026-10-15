@@ -39,6 +39,10 @@ ALTER TABLE IF EXISTS review_decisions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS auth_attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS shop_target_gates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS pilot_reconciliations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS pilot_discrepancies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS shop_cohorts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS expenses ENABLE ROW LEVEL SECURITY;
 
 -- 5. Policies allowing server application role access
 -- The Go orchestrator authenticates with listenledger_app credentials, which operates server-side.
@@ -54,6 +58,10 @@ CREATE POLICY "allow_app_full_access_review_decisions" ON review_decisions FOR A
 CREATE POLICY "allow_app_full_access_sessions" ON sessions FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
 CREATE POLICY "allow_app_full_access_auth_attempts" ON auth_attempts FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
 CREATE POLICY "allow_app_full_access_shop_target_gates" ON shop_target_gates FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
+CREATE POLICY "allow_app_full_access_pilot_reconciliations" ON pilot_reconciliations FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
+CREATE POLICY "allow_app_full_access_pilot_discrepancies" ON pilot_discrepancies FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
+CREATE POLICY "allow_app_full_access_shop_cohorts" ON shop_cohorts FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
+CREATE POLICY "allow_app_full_access_expenses" ON expenses FOR ALL TO listenledger_app USING (true) WITH CHECK (true);
 
 -- 6. Disallow anonymous (anon) PostgREST Data API exposure
 -- Ensure public/anon roles cannot query or mutate business data directly.

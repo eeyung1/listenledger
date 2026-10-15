@@ -228,6 +228,21 @@ func TestCutover_FullLifecycleColdRebootAndDisasterRecovery(t *testing.T) {
 		t.Fatalf("upsert cohort: %v", err)
 	}
 
+	// 10. Record Operational Expense (Generator Fuel)
+	cutoverExpense := models.Expense{
+		ID:          "exp_cutover_01",
+		ShopID:      shopID,
+		Category:    models.ExpenseCategoryGeneratorFuel,
+		Amount:      models.Money{Amount: 500000, Currency: "NGN"},
+		Description: "10L Generator Petrol for afternoon trading",
+		OccurredAt:  time.Now().UTC(),
+		CreatedBy:   "owner",
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := src.CreateExpense(ctx, cutoverExpense); err != nil {
+		t.Fatalf("create expense before cutover: %v", err)
+	}
+
 	// Phase 2: Abrupt Server Reboot Simulation
 	// Close store connection completely, simulating container restart or crash
 	if err := src.Close(); err != nil {
@@ -276,6 +291,28 @@ func TestCutover_FullLifecycleColdRebootAndDisasterRecovery(t *testing.T) {
 		t.Errorf("cohort lost or corrupted after reboot: %+v", cohortCheck)
 	}
 
+	// Verify expense persistence after reboot
+	expCheck, err := restartedStore.GetExpenseByID(ctx, shopID, cutoverExpense.ID)
+	if err != nil {
+		t.Fatalf("get expense after reboot: %v", err)
+	}
+	if expCheck.Amount.Amount != 500000 || expCheck.Category != models.ExpenseCategoryGeneratorFuel {
+		t.Errorf("expense mismatch after reboot: %+v", expCheck)
+	}
+
+	// Verify daily summary reflects sales, expenses, and net profit
+	todayStart := time.Now().UTC().Truncate(24 * time.Hour)
+	summaryCheck, err := restartedStore.GetDailySummary(ctx, shopID, todayStart, todayStart.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("get daily summary after reboot: %v", err)
+	}
+	if summaryCheck.TodayExpensesAmount.Amount != 500000 {
+		t.Errorf("expected 500000 expenses in summary after reboot, got %d", summaryCheck.TodayExpensesAmount.Amount)
+	}
+	if summaryCheck.TodayNetProfit.Amount != summaryCheck.TodaySalesAmount.Amount-500000 {
+		t.Errorf("expected net profit %d, got %d", summaryCheck.TodaySalesAmount.Amount-500000, summaryCheck.TodayNetProfit.Amount)
+	}
+
 	// Phase 4: Disaster Recovery Target Provisioning & Reconciliation
 	destDBFile := filepath.Join(t.TempDir(), "cutover_target.db")
 	dst, err := Open(destDBFile)
@@ -289,7 +326,7 @@ func TestCutover_FullLifecycleColdRebootAndDisasterRecovery(t *testing.T) {
 		t.Fatalf("cutover disaster restore transfer failed: %v", err)
 	}
 	if !report.AllMatched {
-		t.Errorf("expected clean 100%% match across all 14 tables, got report: %+v", report)
+		t.Errorf("expected clean 100%% match across all 15 tables, got report: %+v", report)
 	}
 
 	// Verify live queries on restored destination

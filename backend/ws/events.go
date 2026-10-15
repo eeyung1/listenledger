@@ -39,6 +39,10 @@ const (
 	EventTargetGatesUpdated EventType = "target_gates.updated"
 	// EventStaffTrainingCompleted announces completion of staff training drill session.
 	EventStaffTrainingCompleted EventType = "staff_training.completed"
+	// EventExpenseCreated announces a newly recorded operating expense.
+	EventExpenseCreated EventType = "expense.created"
+	// EventExpenseDeleted announces the removal or voiding of an operating expense.
+	EventExpenseDeleted EventType = "expense.deleted"
 )
 
 // Event is the single envelope for everything the backend pushes.

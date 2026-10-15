@@ -14,7 +14,7 @@
  *     a tag. This is why the views build elements rather than HTML strings.
  */
 
-import type { DailySummary, Money, Product, Transaction, TransactionStatus, Unit } from "./api.js";
+import type { DailySummary, Expense, ExpenseCategory, Money, Product, Transaction, TransactionStatus, Unit } from "./api.js";
 
 /** Minor units per major unit, for the two-decimal currencies in V1. */
 const MINOR_UNITS_PER_MAJOR = 100;
@@ -207,9 +207,35 @@ export function setText(element: Element | null, text: string): void {
   if (element !== null) element.textContent = text;
 }
 
+/** Formats an expense category into human-friendly description text. */
+export function formatExpenseCategory(cat: ExpenseCategory): string {
+  switch (cat) {
+    case "generator_fuel":
+      return "Generator Fuel & Oil";
+    case "store_rent":
+      return "Store Rent & Rates";
+    case "transport_logistics":
+      return "Transport & Haulage";
+    case "packaging_supplies":
+      return "Packaging & Bags";
+    case "staff_wages":
+      return "Staff Daily Wages";
+    case "utilities":
+      return "Power & Water Utilities";
+    case "repairs":
+      return "Repairs & Maintenance";
+    case "other":
+    default:
+      return "Other Operational Cost";
+  }
+}
+
 export interface ComputedKPIs {
   readonly revenue: Money;
   readonly salesCount: number;
+  readonly expenses: Money;
+  readonly expensesCount: number;
+  readonly netProfit: Money;
   readonly reviewCount: number;
   readonly lowStockCount: number;
 }
@@ -217,17 +243,27 @@ export interface ComputedKPIs {
 /**
  * Computes today's overview KPIs.
  * When daily summary is provided (server-authoritative), it takes precedence.
- * Otherwise, derives metrics from the locally held transactions and products.
+ * Otherwise, derives metrics from the locally held transactions, products, and expenses.
  */
 export function computeKPIs(
   transactions: readonly Transaction[],
   products: readonly Product[],
   summary?: DailySummary,
+  expenses?: readonly Expense[],
 ): ComputedKPIs {
   if (summary !== undefined) {
+    const expensesMoney = summary.today_expenses_amount ?? { amount: 0, currency: summary.currency };
+    const expensesCount = summary.today_expenses_count ?? 0;
+    const netProfit = summary.today_net_profit ?? {
+      amount: summary.today_sales_amount.amount - expensesMoney.amount,
+      currency: summary.currency,
+    };
     return {
       revenue: summary.today_sales_amount,
       salesCount: summary.today_sales_count,
+      expenses: expensesMoney,
+      expensesCount,
+      netProfit,
       reviewCount: summary.pending_reviews,
       lowStockCount: summary.low_stock_count,
     };
@@ -238,12 +274,20 @@ export function computeKPIs(
   );
   const revenueAmount = todaySales.reduce((total, t) => total + t.amount.amount, 0);
   const currency = todaySales[0]?.amount.currency ?? "NGN";
+
+  const todayExpenses = (expenses ?? []).filter((e) => isToday(e.occurred_at));
+  const expensesAmount = todayExpenses.reduce((total, e) => total + e.amount.amount, 0);
+  const netProfitAmount = revenueAmount - expensesAmount;
+
   const reviewCount = transactions.filter((t) => t.status === "review_required").length;
   const lowStockCount = products.filter(isLowStock).length;
 
   return {
     revenue: { amount: revenueAmount, currency },
     salesCount: todaySales.length,
+    expenses: { amount: expensesAmount, currency },
+    expensesCount: todayExpenses.length,
+    netProfit: { amount: netProfitAmount, currency },
     reviewCount,
     lowStockCount,
   };

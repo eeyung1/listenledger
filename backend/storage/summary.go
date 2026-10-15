@@ -12,14 +12,17 @@ import (
 
 // DailySummary carries server-authoritative daily aggregates for the dashboard KPIs.
 type DailySummary struct {
-	ShopID           string       `json:"shop_id"`
-	Currency         string       `json:"currency"`
-	TodaySalesAmount models.Money `json:"today_sales_amount"`
-	TodaySalesCount  int          `json:"today_sales_count"`
-	PendingReviews   int          `json:"pending_reviews"`
-	LowStockCount    int          `json:"low_stock_count"`
-	LastSeq          int64        `json:"last_seq"`
-	GeneratedAt      time.Time    `json:"generated_at"`
+	ShopID              string       `json:"shop_id"`
+	Currency            string       `json:"currency"`
+	TodaySalesAmount    models.Money `json:"today_sales_amount"`
+	TodaySalesCount     int          `json:"today_sales_count"`
+	TodayExpensesAmount models.Money `json:"today_expenses_amount"`
+	TodayExpensesCount  int          `json:"today_expenses_count"`
+	TodayNetProfit      models.Money `json:"today_net_profit"`
+	PendingReviews      int          `json:"pending_reviews"`
+	LowStockCount       int          `json:"low_stock_count"`
+	LastSeq             int64        `json:"last_seq"`
+	GeneratedAt         time.Time    `json:"generated_at"`
 }
 
 // GetDailySummary computes authoritative totals for today's trading day within
@@ -55,6 +58,20 @@ func (s *Store) GetDailySummary(ctx context.Context, shopID string, startUTC, en
 		return DailySummary{}, fmt.Errorf("storage: query sales summary: %w", err)
 	}
 
+	// 2b. Compute operating expenses total and count within the today window.
+	var expensesSum int64
+	var expensesCount int
+	err = s.db.QueryRowContext(ctx, s.rebind(`
+		SELECT COALESCE(SUM(amount_amount), 0), COUNT(id)
+		FROM expenses
+		WHERE shop_id = ?
+		  AND occurred_at >= ?
+		  AND occurred_at < ?
+	`), shopID, formatTime(startUTC), formatTime(endUTC)).Scan(&expensesSum, &expensesCount)
+	if err != nil {
+		return DailySummary{}, fmt.Errorf("storage: query expenses summary: %w", err)
+	}
+
 	// 3. Count held transactions awaiting human review.
 	var pendingReviews int
 	err = s.db.QueryRowContext(ctx, s.rebind(`
@@ -87,8 +104,17 @@ func (s *Store) GetDailySummary(ctx context.Context, shopID string, startUTC, en
 			Currency: currency,
 		},
 		TodaySalesCount: salesCount,
-		PendingReviews:  pendingReviews,
-		LowStockCount:   lowStockCount,
-		GeneratedAt:     time.Now().UTC(),
+		TodayExpensesAmount: models.Money{
+			Amount:   expensesSum,
+			Currency: currency,
+		},
+		TodayExpensesCount: expensesCount,
+		TodayNetProfit: models.Money{
+			Amount:   salesSum - expensesSum,
+			Currency: currency,
+		},
+		PendingReviews: pendingReviews,
+		LowStockCount:  lowStockCount,
+		GeneratedAt:    time.Now().UTC(),
 	}, nil
 }

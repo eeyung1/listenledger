@@ -18,6 +18,7 @@
       <p class="view__subtitle" data-hook="connection-status">Connecting…</p>
     </div>
     <div class="view__header-badges">
+      <button type="button" class="btn btn--secondary btn--sm" data-hook="record-expense-btn">+ Record Expense</button>
       <span class="badge badge--device badge--device-checking" data-hook="device-health-badge" role="status" aria-label="Edge capture hardware health">Hardware: Checking…</span>
     </div>
   </header>
@@ -32,6 +33,14 @@
     <article class="kpi">
       <h2 class="kpi__label">Transactions</h2>
       <p class="kpi__value" data-hook="kpi-transaction-count">—</p>
+    </article>
+    <article class="kpi">
+      <h2 class="kpi__label">Expenses today</h2>
+      <p class="kpi__value" data-hook="kpi-expenses-today">—</p>
+    </article>
+    <article class="kpi">
+      <h2 class="kpi__label">Net profit</h2>
+      <p class="kpi__value" data-hook="kpi-net-profit">—</p>
     </article>
     <article class="kpi kpi--attention">
       <h2 class="kpi__label">Needs review</h2>

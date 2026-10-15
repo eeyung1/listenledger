@@ -4,7 +4,7 @@
 
 **Evaluation Mode**: Synthetic In-Memory Backend Integration Suite (`backend/eval`)  
 **Target Scenario Profile**: Mama Tolu Provisions Simulation (Simulated Shop ID: shop_pilot_01)  
-**Execution Timestamp**: 2026-10-15 09:41:52 UTC  
+**Execution Timestamp**: 2026-10-15 13:06:34 UTC  
 **Tested Storage**: SQLite / PostgreSQL Dual-Dialect Engine  
 
 ---
@@ -22,7 +22,7 @@
 | **Missed Transaction Rate** | &le; 5.0% | **0.0%** | **PASS** |
 | **Owner Correction Rate** | &le; 10.0% | **6.2%** | **PASS** |
 | **Staff Protocol Compliance** | &ge; 85.0% | **88.9%** | **PASS** |
-| **Processing Latency (p95)** | &le; 1500 ms | **8.14 ms** | **PASS** |
+| **Processing Latency (p95)** | &le; 1500 ms | **7.75 ms** | **PASS** |
 | **Inventory Reconciliation** | 0 discrepancies | **0 discrepancies** | **PASS** |
 | **Revenue Reconciliation** | 0 discrepancy | **&#8358;0 discrepancy** | **PASS** |
 
@@ -47,11 +47,11 @@
 
 ## 3. End-to-End Latency Profile
 
-- **p50 Latency**: 3.52 ms
-- **p90 Latency**: 5.58 ms
-- **p95 Latency**: 8.14 ms
-- **p99 Latency**: 8.14 ms
-- **Total Test Execution Duration**: 132ms
+- **p50 Latency**: 3.31 ms
+- **p90 Latency**: 6.12 ms
+- **p95 Latency**: 7.75 ms
+- **p99 Latency**: 7.75 ms
+- **Total Test Execution Duration**: 113ms
 
 ---
 

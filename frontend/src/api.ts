@@ -117,6 +117,9 @@ export interface DailySummary {
   readonly currency: string;
   readonly today_sales_amount: Money;
   readonly today_sales_count: number;
+  readonly today_expenses_amount?: Money | undefined;
+  readonly today_expenses_count?: number | undefined;
+  readonly today_net_profit?: Money | undefined;
   readonly pending_reviews: number;
   readonly low_stock_count: number;
   readonly last_seq?: number | undefined;
@@ -960,6 +963,87 @@ export async function fetchPilotCohort(signal?: AbortSignal): Promise<ShopCohort
 export async function evaluateCohortReadiness(promote: boolean = false): Promise<CohortReadinessResponse> {
   return postJSON<CohortReadinessResponse>("/api/pilot/cohort/evaluate-readiness", { promote });
 }
+
+export type ExpenseCategory =
+  | "generator_fuel"
+  | "store_rent"
+  | "transport_logistics"
+  | "packaging_supplies"
+  | "staff_wages"
+  | "utilities"
+  | "repairs"
+  | "other";
+
+export interface Expense {
+  readonly id: string;
+  readonly shop_id: string;
+  readonly category: ExpenseCategory;
+  readonly amount: Money;
+  readonly description: string;
+  readonly receipt_ref?: string | undefined;
+  readonly occurred_at: string;
+  readonly created_by: string;
+  readonly created_at: string;
+}
+
+export interface ExpenseQuery {
+  readonly category?: ExpenseCategory | undefined;
+  readonly from?: string | undefined;
+  readonly to?: string | undefined;
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+}
+
+export interface ExpensesSnapshot {
+  readonly shop_id: string;
+  readonly expenses: readonly Expense[];
+  readonly count: number;
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+  readonly generated_at: string;
+}
+
+export interface CreateExpenseRequest {
+  readonly category: ExpenseCategory;
+  readonly amount: { readonly amount: number; readonly currency?: string };
+  readonly description: string;
+  readonly receipt_ref?: string | undefined;
+  readonly occurred_at?: string | undefined;
+}
+
+/** GET /api/expenses — fetch filtered, paginated expense list */
+export async function fetchExpenses(query?: ExpenseQuery, signal?: AbortSignal): Promise<ExpensesSnapshot> {
+  const params: Record<string, string> = {};
+  if (query?.category) params.category = query.category;
+  if (query?.from) params.from = query.from;
+  if (query?.to) params.to = query.to;
+  if (query?.limit !== undefined) params.limit = String(query.limit);
+  if (query?.offset !== undefined) params.offset = String(query.offset);
+
+  return getJSON<ExpensesSnapshot>("/api/expenses", params, signal);
+}
+
+/** POST /api/expenses — record a new operating expense */
+export async function createExpense(data: CreateExpenseRequest): Promise<Expense> {
+  return postJSON<Expense>("/api/expenses", data);
+}
+
+/** DELETE /api/expenses/{id} — delete an operational expense record */
+export async function deleteExpense(id: string): Promise<{ readonly deleted: boolean; readonly id: string }> {
+  const res = await fetch(`/api/expenses/${id}`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      "X-ListenLedger-Request": "1",
+    },
+  });
+  if (!res.ok) {
+    throw new ApiError(`/api/expenses/${id}`, res.status);
+  }
+  return res.json() as Promise<{ readonly deleted: boolean; readonly id: string }>;
+}
+
 
 
 

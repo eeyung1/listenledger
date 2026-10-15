@@ -1,5 +1,35 @@
 # TODO — ListenLedger
 
+## Shop Operational Expense Tracking, Real-Time Operating Profitability & Multi-Dialect Expense Ledger increment (15 October 2026) — MILESTONE 24 COMPLETE
+
+Implemented shop operational expense tracking, category breakdown analytics, real-time daily operating net profit computation, and command centre modal workflows (`backend/models/expense.go`, `backend/storage/expenses.go`, `backend/storage/migrations/0008_expenses.sql`, `backend/storage/migrations_pg/0008_expenses.sql`, `backend/api/expenses.go`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/test/expenses.test.mjs`):
+1. **Domain Model & Category Taxonomy (`backend/models/expense.go`, `backend/models/expense_test.go`)**:
+   - Implemented `ExpenseCategory` enum supporting standard informal retail shop overheads: `generator_fuel` (petrol/diesel for generator), `store_rent` (shop/stall rent), `transport_logistics` (keke/okada/bus/freight delivery), `packaging_supplies` (nylon carrier bags, cartons, tape), `staff_wages` (daily shop assistant stipend/wages), `utilities` (NEPA/PHCN electricity bills, water, waste), `repairs` (stall/appliance maintenance), and `other`.
+   - Built `Expense` validation invariants enforcing positive amount, non-empty description ($\le 500$ chars), valid ISO 4217 3-letter currency, valid category, and bounded occurrence timestamp.
+2. **Dual-Dialect Migrations & Storage Repository (`backend/storage/migrations/0008_expenses.sql`, `backend/storage/migrations_pg/0008_expenses.sql`, `backend/storage/expenses.go`, `backend/storage/expenses_test.go`)**:
+   - Created `expenses` table across SQLite and PostgreSQL with foreign key cascade to `shops(id)`, category check constraints, positive amount constraints, and compound indexes on `(shop_id, occurred_at DESC)` and `(shop_id, category)`.
+   - Implemented `CreateExpense`, `GetExpenseByID`, `ListExpenses` (with category, date range `from`/`to`, and limit/offset pagination), `DeleteExpense`, and `GetExpenseSummary` (category breakdown aggregations).
+   - Enforced strict cross-tenant isolation and tenant partition integrity in both SQLite and PostgreSQL.
+3. **Daily Summary Net Operating Profit Integration (`backend/storage/summary.go`)**:
+   - Added `TodayExpensesAmount`, `TodayExpensesCount`, and `TodayNetProfit` (`TodaySalesAmount - TodayExpensesAmount`) to `DailySummary` in both SQLite and PostgreSQL.
+   - Preserved net profit accuracy across all trading sessions.
+4. **Transfer, Cutover & Disaster Recovery Rehearsal (`backend/storage/transfer.go`, `backend/storage/cutover_test.go`, `scripts/supabase_setup.sql`)**:
+   - Added `expenses` to `transferDependencyOrder` (15 tables total) and added `ExpenseSumMatch` to `ShopReconciliation`.
+   - Included `expenses` in `DeleteShopData`.
+   - Updated disaster recovery rehearsal test `TestCutover_FullLifecycleColdRebootAndDisasterRecovery` and PostgreSQL test suite to populate, persist, reboot, and transfer expenses with zero drift.
+   - Added Supabase Row-Level Security policies for `expenses`, `pilot_reconciliations`, `pilot_discrepancies`, and `shop_cohorts`.
+5. **REST API & Real-Time WebSocket Notifications (`backend/api/expenses.go`, `backend/api/api.go`, `backend/ws/events.go`, `frontend/src/ws.ts`)**:
+   - `POST /api/expenses`: creates operational expense with ULID (`exp_`), defaults currency to shop default, enforces CSRF & session auth, and broadcasts `ws.EventExpenseCreated` (`expense.created`).
+   - `GET /api/expenses`: paginated and filterable expense list by category and date.
+   - `GET /api/expenses/{id}` & `DELETE /api/expenses/{id}`: single record fetch and deletion broadcasting `ws.EventExpenseDeleted` (`expense.deleted`).
+6. **Frontend UI, Computed KPIs & Acceptance Suite (`frontend/src/api.ts`, `frontend/src/format.ts`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/style.css`, `frontend/test/expenses.test.mjs`)**:
+   - Added `formatExpenseCategory` and updated `computeKPIs` to calculate net profit from summary or local ledger state.
+   - Added "Expenses today" and "Net profit" KPI cards to home command centre, with color-coded profit status (accent when non-negative, warning when negative).
+   - Added "+ Record Expense" button and interactive modal supporting category selection, major-unit to minor-unit conversion, and optional slip references.
+   - Added unit and DOM acceptance test suite in `frontend/test/expenses.test.mjs` (6/6 tests passing, 38/38 total frontend tests passing).
+
+Next: Customer credit and debt ledger (I-Owe-You / customer book) tracking.
+
 ## Production Cloud Deployment Containerization, Render Hosting Blueprint Alignment & Disaster Recovery Cutover Rehearsal increment (15 October 2026) — MILESTONE 23 COMPLETE
 
 Implemented production cloud deployment containerization, Render hosting blueprint alignment, and disaster recovery cutover verification (`Dockerfile`, `.dockerignore`, `docker-compose.yml`, `render.yaml`, `scripts/verify_cutover.sh`, `backend/storage/cutover_test.go`, `DATABASE_MIGRATION.md`):
