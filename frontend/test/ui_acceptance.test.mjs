@@ -230,6 +230,7 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
         confidence: { overall: 0.88, product: 0.85, quantity: 0.95, amount: 0.9 },
         status: "review_required",
         transcript: "Customer bought one pack of Milo",
+        audio_data: "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=",
         occurred_at: "2026-10-14T10:10:00Z",
         created_at: "2026-10-14T10:10:00Z",
       },
@@ -361,6 +362,15 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
 
     // --- Action A: Quick Confirm ---
     const cleanCard = reviewCards[0];
+    const audioWrapper = cleanCard.querySelector(".review-card__audio");
+    assert.notEqual(audioWrapper, null, "cleanCard with audio_data must render audio player wrapper");
+    const audioElem = audioWrapper.querySelector("audio");
+    assert.notEqual(audioElem, null, "audio element must be rendered");
+    assert.equal(audioElem.getAttribute("src"), "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=");
+
+    // Second review card without audio snippet must not render audio player
+    assert.equal(reviewCards[1].querySelector(".review-card__audio"), null);
+
     const confirmBtn = cleanCard.querySelector(".button--primary");
     assert.equal(confirmBtn.textContent, "Confirm");
     confirmBtn.dispatchEvent(new MockEvent("click"));
@@ -370,6 +380,10 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
     const ledgerRows = root.querySelectorAll('[data-hook="ledger-body"] tr');
     assert.equal(ledgerRows.length, 1);
     assert.match(ledgerRows[0].textContent, /Milo 500g/);
+
+    const replayBtn = ledgerRows[0].querySelector(".button--audio-replay");
+    assert.notEqual(replayBtn, null, "ledger row must render audio replay button for transaction with audio snippet");
+    assert.ok(replayBtn.textContent.includes("Audio"));
 
     // --- Action B: Edit & Confirm with Corrections ---
     const editCard = root.querySelectorAll(".review-card")[0]; // now first

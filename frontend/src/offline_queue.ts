@@ -21,6 +21,7 @@ export interface QueuedSpokenCapture {
   readonly type: TransactionType | "cancelled";
   readonly closing_phrase: string;
   readonly queued_at: string;
+  readonly audio_data?: string | undefined;
   retry_count: number;
   last_error?: string | undefined;
   status: "queued" | "syncing";
@@ -149,6 +150,9 @@ export async function enqueueCapture(
   }
   if (input.shop_id) {
     (item as { shop_id?: string }).shop_id = input.shop_id;
+  }
+  if (input.audio_data) {
+    (item as { audio_data?: string }).audio_data = input.audio_data;
   }
 
   if (isIndexedDBSupported()) {
@@ -396,6 +400,7 @@ export async function syncOfflineQueue(
           type: item.type,
           closing_phrase: item.closing_phrase,
           occurred_at: item.queued_at,
+          audio_data: item.audio_data,
         });
 
         await removeQueuedCapture(item.queue_id);

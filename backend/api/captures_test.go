@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -550,5 +551,55 @@ func TestCaptures_NigerianMarketColloquialIntake(t *testing.T) {
 				t.Errorf("amount = %d, want %d", txn.Amount.Amount, tc.expectedAmt)
 			}
 		})
+	}
+}
+
+func TestCaptures_AudioSnippetPreservationAndPlayback(t *testing.T) {
+	store, handler, shopID := setupCaptureTest(t)
+	ctx := context.Background()
+
+	audioSnippet := "data:audio/webm;codecs=opus;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAA"
+
+	captureJSON := fmt.Sprintf(`{
+		"capture_id": "cap_audio_001",
+		"transcript": "Two Milo, four thousand naira. Thank you.",
+		"type": "sale",
+		"audio_data": "%s"
+	}`, audioSnippet)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewBufferString(captureJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ListenLedger-Request", "1")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var capRes struct {
+		CaptureID    string               `json:"capture_id"`
+		Transactions []models.Transaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &capRes); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+
+	if len(capRes.Transactions) != 1 {
+		t.Fatalf("expected 1 transaction, got %d", len(capRes.Transactions))
+	}
+
+	txn := capRes.Transactions[0]
+	if txn.AudioData != audioSnippet {
+		t.Errorf("expected AudioData %q, got %q", audioSnippet, txn.AudioData)
+	}
+
+	// Verify retrieval via GetTransactionByID
+	dbTxn, err := store.GetTransactionByID(ctx, shopID, txn.ID)
+	if err != nil {
+		t.Fatalf("GetTransactionByID failed: %v", err)
+	}
+	if dbTxn.AudioData != audioSnippet {
+		t.Errorf("expected stored AudioData %q, got %q", audioSnippet, dbTxn.AudioData)
 	}
 }

@@ -91,6 +91,7 @@ export interface Transaction {
   readonly supplier_name?: string | undefined;
   readonly customer_id?: string | undefined;
   readonly customer_name?: string | undefined;
+  readonly audio_data?: string | undefined;
 }
 
 export interface Product {
@@ -1277,6 +1278,7 @@ export interface CaptureInput {
   readonly supplier_name?: string;
   readonly occurred_at?: string;
   readonly extracted_lines?: readonly CaptureLineInput[];
+  readonly audio_data?: string | undefined;
 }
 
 export interface CaptureResult {

@@ -17,6 +17,8 @@ import {
   calculateSpeechThreshold,
   calculateAdaptiveSilenceTimeout,
   classifyEnvironmentMode,
+  calculateSNR,
+  calculateSpectralBands,
 } from "../dist/audio.js";
 import { postCapture } from "../dist/api.js";
 import { clearQueue, getQueuedCount } from "../dist/offline_queue.js";
@@ -1159,5 +1161,301 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
 
     cleanup();
     await clearQueue();
+  });
+
+  await t.test("16. calculateSNR: computes decibel ratio with clamping and zero safeguards", () => {
+    // 20 * log10(0.1 / 0.01) = 20.0 dB
+    assert.equal(calculateSNR(0.1, 0.01), 20.0);
+    // 20 * log10(0.05 / 0.05) = 0.0 dB
+    assert.equal(calculateSNR(0.05, 0.05), 0.0);
+    // Severe background noise: signal 0.001, noise floor 0.1 -> ratio 0.01 -> -40 dB -> clamped to -6.0 dB
+    assert.equal(calculateSNR(0.001, 0.1), -6.0);
+    // Pristine high SNR: signal 0.8, noise floor 0.001 -> ratio 800 -> 58 dB -> clamped to 30.0 dB
+    assert.equal(calculateSNR(0.8, 0.001), 30.0);
+    // Zero noise floor safeguard: should not throw or return NaN/Infinity
+    const zeroFloorSNR = calculateSNR(0.05, 0);
+    assert.ok(!Number.isNaN(zeroFloorSNR));
+    assert.ok(Number.isFinite(zeroFloorSNR));
+    assert.ok(zeroFloorSNR >= -6.0 && zeroFloorSNR <= 30.0);
+  });
+
+  await t.test("17. calculateSpectralBands: groups FFT frequency bins into normalized discrete bands", () => {
+    // Empty frequency data
+    const emptyBands = calculateSpectralBands([], 16);
+    assert.equal(emptyBands.length, 16);
+    assert.deepEqual(emptyBands, new Array(16).fill(0));
+
+    // Full scale 255 uniform frequency data (32 bins into 16 bands = 2 bins per band)
+    const fullBins = new Uint8Array(32).fill(255);
+    const fullBands = calculateSpectralBands(fullBins, 16);
+    assert.equal(fullBands.length, 16);
+    assert.ok(fullBands.every((v) => v === 1.0));
+
+    // Half scale 128 uniform frequency data
+    const halfBins = new Uint8Array(32).fill(128);
+    const halfBands = calculateSpectralBands(halfBins, 16);
+    assert.equal(halfBands.length, 16);
+    assert.ok(halfBands.every((v) => Math.abs(v - 0.502) < 0.01));
+
+    // Non-uniform distribution: low frequency energy, high frequency silence
+    const shapedBins = new Uint8Array(16);
+    shapedBins[0] = 255;
+    shapedBins[1] = 255;
+    for (let i = 2; i < 16; i++) shapedBins[i] = 0;
+    const shapedBands = calculateSpectralBands(shapedBins, 8);
+    assert.equal(shapedBands.length, 8);
+    assert.equal(shapedBands[0], 1.0);
+    assert.equal(shapedBands[1], 0.0);
+    assert.equal(shapedBands[7], 0.0);
+  });
+
+  await t.test("18. CounterSpeechListener: audio snippet recording and spectral bands callback", async () => {
+    let recognitionInstance = null;
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionInstance = this;
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {
+        this.onend?.(new MockEvent("end"));
+      }
+      stop() {
+        this.onend?.(new MockEvent("end"));
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    let mockAnalyser = null;
+    class MockAnalyserNode {
+      constructor() {
+        mockAnalyser = this;
+        this.frequencyBinCount = 128;
+        this.fftSize = 256;
+        this.samples = new Float32Array(256).fill(0.03);
+      }
+      getFloatTimeDomainData(target) {
+        target.set(this.samples);
+      }
+      getByteFrequencyData(target) {
+        target.fill(15);
+      }
+    }
+
+    class MockAudioContext {
+      constructor() {
+        this.state = "running";
+      }
+      createMediaStreamSource() {
+        return { connect: () => {} };
+      }
+      createAnalyser() {
+        return new MockAnalyserNode();
+      }
+      async resume() {}
+      async close() {
+        this.state = "closed";
+      }
+    }
+    window.AudioContext = MockAudioContext;
+
+    navigator.mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop: () => {} }],
+      }),
+    };
+
+    let mediaRecorderInstance = null;
+    class MockMediaRecorder {
+      static isTypeSupported(type) {
+        return true;
+      }
+      constructor(stream, options) {
+        mediaRecorderInstance = this;
+        this.stream = stream;
+        this.mimeType = options?.mimeType || "audio/webm";
+        this.state = "inactive";
+        this.ondataavailable = null;
+      }
+      start(timeslice) {
+        this.state = "recording";
+      }
+      stop() {
+        this.state = "inactive";
+      }
+    }
+    window.MediaRecorder = MockMediaRecorder;
+    globalThis.MediaRecorder = MockMediaRecorder;
+
+    class MockFileReader {
+      readAsDataURL(blob) {
+        setTimeout(() => {
+          this.result = "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=";
+          this.onloadend?.();
+        }, 5);
+      }
+    }
+    window.FileReader = MockFileReader;
+    globalThis.FileReader = MockFileReader;
+
+    let receivedSpectralBands = null;
+    let capturedCandidate = null;
+
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      onSpectralBands: (bands) => {
+        receivedSpectralBands = bands;
+      },
+      onBoundaryDetected: (cand) => {
+        capturedCandidate = cand;
+      },
+    });
+
+    await listener.start();
+    assert.equal(listener.isListening(), true);
+
+    // Verify media recorder was initialized and simulate audio chunk collection
+    assert.notEqual(mediaRecorderInstance, null, "MediaRecorder must be created");
+    mediaRecorderInstance.ondataavailable?.({
+      data: { size: 1024, type: "audio/webm" },
+    });
+
+    // Test exportRecentAudioSnippet
+    const snippet = await listener.exportRecentAudioSnippet();
+    assert.equal(snippet, "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=");
+
+    // Simulate recognition boundary event
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [
+        [
+          {
+            transcript: "One peak milk five hundred naira thank you",
+            confidence: 0.95,
+          },
+        ],
+      ],
+    });
+
+    // Await async snippet attachment
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.notEqual(capturedCandidate, null);
+    assert.equal(capturedCandidate.type, "sale");
+    assert.equal(capturedCandidate.audioData, "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=");
+
+    // Check VAD metrics SNR
+    const vadMetrics = listener.getVADMetrics();
+    assert.ok(typeof vadMetrics.snrDb === "number");
+    assert.ok(vadMetrics.snrDb >= -6.0 && vadMetrics.snrDb <= 30.0);
+
+    listener.stop();
+    delete window.MediaRecorder;
+    delete globalThis.MediaRecorder;
+    delete window.FileReader;
+    delete globalThis.FileReader;
+    delete window.AudioContext;
+    delete navigator.mediaDevices;
+  });
+
+  await t.test("19. Home Overview: renders spectral visualizer bars and SNR diagnostic badge", async () => {
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes("/api/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            today_sales_count: 5,
+            today_sales_amount: { amount: 2000000, currency: "NGN" },
+            pending_reviews: 0,
+            low_stock_count: 0,
+            active_devices_count: 1,
+            today_expenses_count: 0,
+            today_expenses_amount: { amount: 0, currency: "NGN" },
+            today_net_profit: { amount: 2000000, currency: "NGN" },
+          }),
+        };
+      }
+      if (u.includes("/api/transactions")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ transactions: [], total: 0 }),
+        };
+      }
+      if (u.includes("/api/inventory")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ products: [], low_stock_count: 0 }),
+        };
+      }
+      if (u.includes("/api/onboarding/status")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ is_complete: true, steps: {} }),
+        };
+      }
+      if (u.includes("/api/devices")) {
+        return { ok: true, status: 200, json: async () => ({ devices: [] }) };
+      }
+      if (u.includes("/api/customers/credit-summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_customers_with_debt: 0,
+            total_outstanding_debt: { amount: 0, currency: "NGN" },
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    document.body.innerHTML = HOME_HTML;
+    const cleanup = mountHome(document.body, "shop_test");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const spectralContainer = document.querySelector("[data-hook='counter-spectral-bars']");
+    const snrBadge = document.querySelector("[data-hook='counter-snr-badge']");
+
+    assert.notEqual(spectralContainer, null, "spectral bars container must exist");
+    assert.notEqual(snrBadge, null, "snr badge must exist");
+
+    const bars = spectralContainer.querySelectorAll(".spectral-bar");
+    assert.equal(bars.length, 16, "must mount 16 spectral bars");
+
+    // Check SNR badge initial state
+    assert.equal(snrBadge.textContent, "SNR: Calibrating…");
+
+    cleanup();
   });
 });

@@ -16,6 +16,7 @@ export interface BoundaryCaptureCandidate {
   readonly transcript: string;
   readonly type: TransactionType | "cancelled";
   readonly closingPhrase: string;
+  readonly audioData?: string | undefined;
 }
 
 export interface BoundaryDetectionResult {
@@ -35,6 +36,7 @@ export interface AudioVADMetrics {
   readonly adaptiveSilenceTimeoutMs: number;
   readonly isCalibrating: boolean;
   readonly environmentMode: EnvironmentAudioMode;
+  readonly snrDb: number;
 }
 
 export interface CounterSpeechListenerOptions {
@@ -50,6 +52,7 @@ export interface CounterSpeechListenerOptions {
   readonly onWakeLockChange?: ((active: boolean) => void) | undefined;
   readonly onSpeechActivityChange?: ((isSpeaking: boolean) => void) | undefined;
   readonly onVADChange?: ((metrics: AudioVADMetrics) => void) | undefined;
+  readonly onSpectralBands?: ((bands: number[]) => void) | undefined;
 }
 
 // Minimal browser typing for vendor-prefixed SpeechRecognition
@@ -285,6 +288,48 @@ export function classifyEnvironmentMode(noiseFloor: number): EnvironmentAudioMod
 }
 
 /**
+ * Computes the estimated Signal-to-Noise Ratio (SNR) in decibels (dB).
+ * Formula: 20 * log10(signalLevel / max(noiseFloor, 0.001))
+ * Clamped to a practical range between -6.0 dB and +30.0 dB.
+ */
+export function calculateSNR(signalLevel: number, noiseFloor: number): number {
+  const safeFloor = Math.max(0.001, noiseFloor);
+  const safeSignal = Math.max(0.0001, signalLevel);
+  const ratio = safeSignal / safeFloor;
+  const db = 20 * Math.log10(ratio);
+  const clamped = Math.max(-6.0, Math.min(30.0, db));
+  return Number(clamped.toFixed(1));
+}
+
+/**
+ * Aggregates frequency bin data into a normalized discrete multi-band spectral array.
+ * Useful for 16-band visualizers representing vocal frequency presence (300Hz - 3.4kHz)
+ * and acoustic noise profiles (low-frequency motor/generator hum vs high-frequency hiss).
+ */
+export function calculateSpectralBands(freqData: Uint8Array | number[], bandCount = 16): number[] {
+  if (freqData.length === 0 || bandCount <= 0) {
+    return new Array(bandCount).fill(0);
+  }
+  const result: number[] = [];
+  const binsPerBand = Math.max(1, Math.floor(freqData.length / bandCount));
+  for (let b = 0; b < bandCount; b++) {
+    const start = b * binsPerBand;
+    const end = b === bandCount - 1 ? freqData.length : (b + 1) * binsPerBand;
+    let sum = 0;
+    let count = 0;
+    for (let i = start; i < end; i++) {
+      sum += (freqData[i] ?? 0);
+      count++;
+    }
+    const avg = count > 0 ? sum / count : 0;
+    // Normalize 0..255 byte frequency values to 0.0..1.0
+    result.push(Number(Math.min(1.0, Math.max(0.0, avg / 255.0)).toFixed(3)));
+  }
+  return result;
+}
+
+
+/**
  * Synthesizes an immediate audio chime feedback using the Web Audio API.
  * Never throws an error if audio autoplay is restricted.
  */
@@ -447,6 +492,11 @@ export class CounterSpeechListener {
   private vadSilenceDebounce = 0;
   private currentAudioLevel = 0;
 
+  // Multi-Band Spectral Visualizer & Audio Snippet Recording
+  private mediaRecorder: MediaRecorder | null = null;
+  private audioChunks: Blob[] = [];
+  private currentSpectralBands: number[] = new Array(16).fill(0);
+
   constructor(options: CounterSpeechListenerOptions = {}) {
     this.options = options;
     if (options.catalogueWords) {
@@ -484,7 +534,44 @@ export class CounterSpeechListener {
       adaptiveSilenceTimeoutMs: this.vadAdaptiveSilenceTimeoutMs,
       isCalibrating: this.vadIsCalibrating,
       environmentMode: classifyEnvironmentMode(this.vadNoiseFloor),
+      snrDb: calculateSNR(this.currentAudioLevel, this.vadNoiseFloor),
     };
+  }
+
+  /** Returns the latest 16-band normalized frequency spectrum (0.0 to 1.0). */
+  public getSpectralBands(): readonly number[] {
+    return this.currentSpectralBands;
+  }
+
+  /** Returns real-time estimated Signal-to-Noise Ratio (SNR) in dB. */
+  public getSNR(): number {
+    return calculateSNR(this.currentAudioLevel, this.vadNoiseFloor);
+  }
+
+  /**
+   * Exports recent rolling counter audio as a base64 Data URL.
+   * Returns undefined if MediaRecorder or audio chunks are unavailable.
+   */
+  public async exportRecentAudioSnippet(): Promise<string | undefined> {
+    if (this.audioChunks.length === 0) return undefined;
+    try {
+      const mimeType = this.mediaRecorder?.mimeType || "audio/webm";
+      const blob = new Blob(this.audioChunks, { type: mimeType });
+      return await new Promise<string | undefined>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === "string") {
+            resolve(reader.result);
+          } else {
+            resolve(undefined);
+          }
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   /** Returns true if active voice articulation is currently detected above the ambient noise floor. */
@@ -724,15 +811,36 @@ export class CounterSpeechListener {
       );
 
       if (boundary.detected && boundary.type && boundary.closingPhrase && boundary.cleanTranscript) {
-        const candidate: BoundaryCaptureCandidate = {
-          transcript: boundary.cleanTranscript,
-          type: boundary.type,
-          closingPhrase: boundary.closingPhrase,
-        };
-
-        // Notify listener that an authoritative boundary phrase was spoken
-        this.options.onBoundaryDetected?.(candidate);
+        const cleanText = boundary.cleanTranscript;
+        const boundaryType = boundary.type;
+        const phrase = boundary.closingPhrase;
         this.currentTranscript = "";
+
+        if (this.audioChunks.length === 0) {
+          const candidate: BoundaryCaptureCandidate = {
+            transcript: cleanText,
+            type: boundaryType,
+            closingPhrase: phrase,
+            audioData: undefined,
+          };
+          this.options.onBoundaryDetected?.(candidate);
+        } else {
+          void (async () => {
+            let audioData: string | undefined;
+            try {
+              audioData = await this.exportRecentAudioSnippet();
+            } catch {
+              // audio snippet export failure is non-fatal
+            }
+            const candidate: BoundaryCaptureCandidate = {
+              transcript: cleanText,
+              type: boundaryType,
+              closingPhrase: phrase,
+              audioData,
+            };
+            this.options.onBoundaryDetected?.(candidate);
+          })();
+        }
       }
     };
 
@@ -806,6 +914,35 @@ export class CounterSpeechListener {
       this.analyser.fftSize = 256;
       source.connect(this.analyser);
 
+      if (typeof MediaRecorder !== "undefined" && this.mediaStream) {
+        try {
+          let mimeType = "";
+          if (typeof MediaRecorder.isTypeSupported === "function") {
+            if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+              mimeType = "audio/webm;codecs=opus";
+            } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+              mimeType = "audio/webm";
+            } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+              mimeType = "audio/mp4";
+            }
+          }
+          const recOptions = mimeType ? { mimeType } : undefined;
+          this.mediaRecorder = new MediaRecorder(this.mediaStream, recOptions);
+          this.audioChunks = [];
+          this.mediaRecorder.ondataavailable = (event: BlobEvent) => {
+            if (event.data && event.data.size > 0) {
+              this.audioChunks.push(event.data);
+              if (this.audioChunks.length > 30) {
+                this.audioChunks.shift();
+              }
+            }
+          };
+          this.mediaRecorder.start(500);
+        } catch {
+          // MediaRecorder unsupported in environment
+        }
+      }
+
       this.startLevelLoop();
     } catch {
       // Microphone audio metering is non-critical fallback; continue without VU meter
@@ -825,6 +962,11 @@ export class CounterSpeechListener {
         return;
       }
 
+      this.analyser.getByteFrequencyData(freqData);
+      const bands = calculateSpectralBands(freqData, 16);
+      this.currentSpectralBands = bands;
+      this.options.onSpectralBands?.(bands);
+
       let level = 0;
       if (floatTimeData && typeof this.analyser.getFloatTimeDomainData === "function") {
         this.analyser.getFloatTimeDomainData(floatTimeData);
@@ -832,7 +974,6 @@ export class CounterSpeechListener {
         // Normalize RMS: 0.35 RMS is typical loud speech peak
         level = Math.min(1.0, Math.max(0.0, rms / 0.35));
       } else {
-        this.analyser.getByteFrequencyData(freqData);
         let sum = 0;
         for (let i = 0; i < freqData.length; i++) {
           sum += (freqData[i] ?? 0);
@@ -900,6 +1041,18 @@ export class CounterSpeechListener {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
+
+    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+      try {
+        this.mediaRecorder.stop();
+      } catch {
+        // ignore
+      }
+      this.mediaRecorder = null;
+    }
+    this.audioChunks = [];
+    this.currentSpectralBands = new Array(16).fill(0);
+    this.options.onSpectralBands?.(this.currentSpectralBands);
 
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach((track) => track.stop());
