@@ -902,4 +902,3 @@ func TestColloquialParserVariants(t *testing.T) {
 		}
 	}
 }
-
