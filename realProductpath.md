@@ -48,6 +48,17 @@ These are not needed to answer the core question. Stop extending them. Hide them
 
 - [ ] Parked features listed above are agreed and hidden from the pilot build where they would confuse users.
 
+### P0 implementation checklist
+
+- [x] P0a: Park credit-book/expense actions and KPIs, edge-device UI, training/target-gate onboarding, and reconciliation/cohort panels in the pilot interface. Preserve existing data and backend capabilities.
+- [x] P0a: Replace inaccurate privacy claims with current browser-processing and retention behaviour; explain the transcript queue's connectivity limits.
+- [x] P0a: Align README and frontend priorities with this document's feature freeze.
+- [ ] P0b: Disable new raw-audio recording/upload and server retention, including stale clients and queued captures. Implement and regression-test on a branch; merge only with the real-device evidence required by working rule 2.
+- [ ] Verify P0b on a real device and deployed build, then close the parent P0 gate.
+
+P0a is a UI-only increment: hidden controls are not an API authorization boundary. Spoken credit attribution remains parked work for P0b; it is not disabled by hiding the credit book. No P1–P7 evidence or capture accuracy is claimed. Automated checks and desktop-browser inspection validate this interface change only.
+
+
 ---
 
 ## P1 — Field truth test (no new code)
@@ -277,3 +288,4 @@ Fill in one row per field session. Link to the labelled ground-truth sheet, not 
 | Edge mock fail-open (P0) | Code reading |
 
 Update this table when a finding is confirmed, fixed or disproved.
+
