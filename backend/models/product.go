@@ -32,11 +32,19 @@ type Money struct {
 type Unit string
 
 const (
-	UnitPiece  Unit = "piece"
-	UnitPack   Unit = "pack"
-	UnitCarton Unit = "carton"
-	UnitBottle Unit = "bottle"
-	UnitCrate  Unit = "crate"
+	UnitPiece   Unit = "piece"
+	UnitPack    Unit = "pack"
+	UnitCarton  Unit = "carton"
+	UnitBottle  Unit = "bottle"
+	UnitCrate   Unit = "crate"
+	UnitTin     Unit = "tin"
+	UnitBag     Unit = "bag"
+	UnitSachet  Unit = "sachet"
+	UnitRoll    Unit = "roll"
+	UnitPainter Unit = "painter"
+	UnitMudu    Unit = "mudu"
+	UnitDerica  Unit = "derica"
+	UnitRubber  Unit = "rubber"
 )
 
 // Valid reports whether u is one of the units the inventory engine knows how
@@ -47,7 +55,9 @@ const (
 // in the ledger unable to be converted into a product's base unit.
 func (u Unit) Valid() bool {
 	switch u {
-	case UnitPiece, UnitPack, UnitCarton, UnitBottle, UnitCrate:
+	case UnitPiece, UnitPack, UnitCarton, UnitBottle, UnitCrate,
+		UnitTin, UnitBag, UnitSachet, UnitRoll,
+		UnitPainter, UnitMudu, UnitDerica, UnitRubber:
 		return true
 	default:
 		return false
