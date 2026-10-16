@@ -158,6 +158,7 @@ If real SQLite data exists, first back it up, run `backend/cmd/migrate -dry-run`
 
 - Confirm the user's Render workspace before creation. `render.yaml` proposes a free single-instance Docker web service; approve any paid plan separately.
 - Supply only the restricted role's TLS `DATABASE_URL` to Render. The Docker defaults are `-frontend /app/frontend -require-postgres -skip-migrations`.
+- `render.yaml` specifies `AUTO_MIGRATE: "true"`; if the configured database connection has migration privileges or if pending schema migrations are detected during restricted startup, the orchestrator automatically applies pending migrations instead of failing deployment.
 - Use `/readyz` for readiness (database ping) and `/healthz` for process/WebSocket counters.
 - Use same-origin HTTPS for dashboard/API/WebSockets. Optional `ALLOWED_ORIGINS` is read by the backend; it is normally unnecessary.
 - Keep automatic deploys gated by passing checks. CI builds the exact Dockerfile and verifies restricted-role startup and account persistence after container restart.

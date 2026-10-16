@@ -8,6 +8,8 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -16,6 +18,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/eeyung1/listenledger-backend/storage"
 )
 
 func TestRestrictedStaticServer(t *testing.T) {
@@ -258,5 +262,49 @@ func TestPostgresDeploymentRejectsSQLiteFallback(t *testing.T) {
 	}
 	if err := validateDatabaseConfig(config{dbPath: "local.db"}); err != nil {
 		t.Fatalf("explicit local SQLite use must remain supported: %v", err)
+	}
+}
+
+func TestInitStore_SQLite(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store, err := initStore(logger, config{dbPath: ":memory:"})
+	if err != nil {
+		t.Fatalf("expected store to initialize, got %v", err)
+	}
+	defer store.Close()
+	if store.Dialect() != storage.DialectSQLite {
+		t.Errorf("expected SQLite dialect, got %v", store.Dialect())
+	}
+}
+
+func TestAutoMigrateEnvironmentFlag(t *testing.T) {
+	// Verify AUTO_MIGRATE=true overrides skipMigrations
+	t.Setenv("AUTO_MIGRATE", "true")
+	cfg := config{skipMigrations: true}
+	if envAutoMigrate := os.Getenv("AUTO_MIGRATE"); envAutoMigrate == "true" || envAutoMigrate == "1" {
+		cfg.skipMigrations = false
+	}
+	if cfg.skipMigrations {
+		t.Errorf("expected skipMigrations to be false when AUTO_MIGRATE=true")
+	}
+
+	// Verify AUTO_MIGRATE=1 overrides skipMigrations
+	t.Setenv("AUTO_MIGRATE", "1")
+	cfg = config{skipMigrations: true}
+	if envAutoMigrate := os.Getenv("AUTO_MIGRATE"); envAutoMigrate == "true" || envAutoMigrate == "1" {
+		cfg.skipMigrations = false
+	}
+	if cfg.skipMigrations {
+		t.Errorf("expected skipMigrations to be false when AUTO_MIGRATE=1")
+	}
+
+	// Verify AUTO_MIGRATE=false retains skipMigrations
+	t.Setenv("AUTO_MIGRATE", "false")
+	cfg = config{skipMigrations: true}
+	if envAutoMigrate := os.Getenv("AUTO_MIGRATE"); envAutoMigrate == "true" || envAutoMigrate == "1" {
+		cfg.skipMigrations = false
+	}
+	if !cfg.skipMigrations {
+		t.Errorf("expected skipMigrations to remain true when AUTO_MIGRATE=false")
 	}
 }

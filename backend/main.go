@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -124,6 +125,27 @@ func redactDSN(dsn string) string {
 	return u.Redacted()
 }
 
+func initStore(logger *slog.Logger, cfg config) (*storage.Store, error) {
+	openStore := storage.Open
+	if cfg.skipMigrations {
+		openStore = storage.OpenPostgresRuntime
+	}
+	store, err := openStore(cfg.dbPath)
+	if err != nil && cfg.skipMigrations && os.Getenv("AUTO_MIGRATE") != "false" && os.Getenv("AUTO_MIGRATE") != "0" && strings.Contains(err.Error(), "apply migrations with an administrator") {
+		logger.Warn("pending schema migrations detected in restricted runtime mode; attempting auto-migration",
+			"target", redactDSN(cfg.dbPath), "cause", err)
+		store, err = storage.Open(cfg.dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("storage: auto-migration fallback failed (%w); apply migrations with an administrator before deploying", err)
+		}
+		logger.Info("pending migrations successfully auto-applied", "target", redactDSN(cfg.dbPath))
+	}
+	if err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
 func serve(logger *slog.Logger, cfg config) error {
 	if err := validateDatabaseConfig(cfg); err != nil {
 		return err
@@ -140,11 +162,7 @@ func serve(logger *slog.Logger, cfg config) error {
 			"path", frontendDir, "error", err)
 	}
 
-	openStore := storage.Open
-	if cfg.skipMigrations {
-		openStore = storage.OpenPostgresRuntime
-	}
-	store, err := openStore(cfg.dbPath)
+	store, err := initStore(logger, cfg)
 	if err != nil {
 		return err
 	}
