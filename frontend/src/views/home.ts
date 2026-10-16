@@ -741,7 +741,20 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           } else {
             playAudioFeedback("sale");
             const isRestock = candidate.type === "restock" || (first && first.type === "restock");
-            if (isRestock) {
+            if (res.transactions.length > 1) {
+              const count = res.transactions.length;
+              const itemsSummary = res.transactions.map((t) => `${t.quantity} ${t.product_name}`).join(", ");
+              const totalAmount = res.transactions.reduce((acc, t) => acc + (t.amount?.amount || 0), 0);
+              const moneyStr = formatMoney({ amount: totalAmount, currency: first?.amount?.currency || "NGN" });
+              const supplierInfo = isRestock && first?.supplier_name ? ` from ${first.supplier_name}` : "";
+              showCaptureToast(
+                `✓ Logged ${isRestock ? "Restock" : "Sale"} (${count} items): ${itemsSummary}${supplierInfo} (${moneyStr})`,
+                "success",
+              );
+              if (voiceFeedbackEnabled) {
+                speakFeedback(`Logged ${count} items: ${itemsSummary}`);
+              }
+            } else if (isRestock) {
               const supplierInfo = first?.supplier_name ? ` from ${first.supplier_name}` : "";
               const detail = first
                 ? `${first.quantity} ${first.product_name}${supplierInfo}`

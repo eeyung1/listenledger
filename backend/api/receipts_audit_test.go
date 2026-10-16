@@ -720,3 +720,98 @@ func TestSpokenCancellationCaptureE2E(t *testing.T) {
 		t.Fatalf("expected stock to remain 10 after cancelled sale, got %d", prodAfter.Quantity)
 	}
 }
+
+func TestCompoundMultiItemCaptureE2E(t *testing.T) {
+	store, handler, shopID := setupTestApp(t)
+	ctx := context.Background()
+
+	prodMilo := models.Product{
+		ID:        "prd_milo_01",
+		ShopID:    shopID,
+		Name:      "Milo 500g",
+		SKU:       "MILO-500",
+		Aliases:   []string{"Milo", "Milo pack"},
+		Price:     models.Money{Amount: 250000, Currency: "NGN"},
+		Quantity:  20,
+		BaseUnit:  models.UnitPack,
+		Packaging: []models.PackagingRelation{},
+	}
+	prodPeak := models.Product{
+		ID:        "prd_peak_01",
+		ShopID:    shopID,
+		Name:      "Peak Milk 400g",
+		SKU:       "PEAK-400",
+		Aliases:   []string{"Peak", "Peak milk", "Peak tin"},
+		Price:     models.Money{Amount: 350000, Currency: "NGN"},
+		Quantity:  15,
+		BaseUnit:  models.UnitPack,
+		Packaging: []models.PackagingRelation{},
+	}
+	if err := store.InsertProduct(ctx, prodMilo); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.InsertProduct(ctx, prodPeak); err != nil {
+		t.Fatal(err)
+	}
+
+	capReq := map[string]any{
+		"transcript": "2 Milo and 3 Peak milk thank you",
+	}
+	body, _ := json.Marshal(capReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("unexpected capture status %d: %s", w.Code, w.Body.String())
+	}
+
+	var capResp struct {
+		ReceiptID      string               `json:"receipt_id"`
+		RequiresReview bool                 `json:"requires_review"`
+		Transactions   []models.Transaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &capResp); err != nil {
+		t.Fatal(err)
+	}
+
+	if capResp.RequiresReview {
+		t.Fatalf("expected multi-item compound cart to be auto-confirmed without review")
+	}
+	if len(capResp.Transactions) != 2 {
+		t.Fatalf("expected 2 transactions in receipt, got %d", len(capResp.Transactions))
+	}
+	if capResp.ReceiptID == "" {
+		t.Fatalf("expected a valid receipt_id grouping the compound items")
+	}
+
+	t1, t2 := capResp.Transactions[0], capResp.Transactions[1]
+	if t1.ReceiptID != capResp.ReceiptID || t2.ReceiptID != capResp.ReceiptID {
+		t.Fatalf("expected both transactions to share receipt_id %s, got %s and %s", capResp.ReceiptID, t1.ReceiptID, t2.ReceiptID)
+	}
+
+	if t1.ProductName != "Milo 500g" || t1.Quantity != 2 {
+		t.Errorf("expected t1 to be 2 Milo 500g, got %d %s", t1.Quantity, t1.ProductName)
+	}
+	if t2.ProductName != "Peak Milk 400g" || t2.Quantity != 3 {
+		t.Errorf("expected t2 to be 3 Peak Milk 400g, got %d %s", t2.Quantity, t2.ProductName)
+	}
+
+	// Verify inventory atomically decremented for both items
+	afterMilo, err := store.GetProductByID(ctx, shopID, "prd_milo_01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterMilo.Quantity != 18 {
+		t.Errorf("expected Milo stock to be 18 (20-2), got %d", afterMilo.Quantity)
+	}
+
+	afterPeak, err := store.GetProductByID(ctx, shopID, "prd_peak_01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterPeak.Quantity != 12 {
+		t.Errorf("expected Peak stock to be 12 (15-3), got %d", afterPeak.Quantity)
+	}
+}
