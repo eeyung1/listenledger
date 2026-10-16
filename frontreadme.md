@@ -7,7 +7,7 @@ Baseline: `ea37895b6532c2c464ff4d10c2fdc3b5610dcea5` (main, PR #38).
 
 This is the execution checklist for the agreed frontend redesign. Counter is the main audio listening dashboard staff keep open during trading. Home is the owner's business summary.
 
-This first change documents the plan only. All redesign features below are pending; existing backend/frontend foundations are not being claimed as newly implemented. Re-read current main before each stage because development continues in parallel.
+F01 is implemented in PR #40: shared visual tokens, compatible component styles, and responsive sizing. All other redesign features remain pending; the new navigation and dedicated Counter page are not yet implemented. Re-read current main before each stage because development continues in parallel.
 
 The baseline has four page routes (Home, Transactions, Inventory, Settings), customer management in dialogs, and audio capture on Home. PR #38 introduced an IndexedDB offline capture queue; preserve and inspect it rather than replacing it or assuming offline persistence is absent. Its real-device reliability still needs acceptance testing.
 
@@ -44,7 +44,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 
 ## Phase 1 — Shared visual system and navigation
 
-- [ ] F01. Define reusable colour, spacing, typography, radius, and focus tokens; unify button/input/card/badge/dialog styles.
+- [x] F01. Define reusable colour, spacing, typography, radius, and focus tokens; unify button/input/card/badge/dialog styles.
 - [ ] F02. Build the desktop sidebar and shop/account top bar with active navigation and accessible labels.
 - [ ] F03. Build mobile bottom navigation and More menu with safe-area spacing, usable close behaviour, and no content obstruction.
 - [ ] F04. Register the new page routes and lifecycle handlers; preserve old links, browser back/forward, page titles, and unknown-route handling. Do not ship dead navigation entries.
@@ -126,8 +126,9 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 
 | Feature IDs | PR / commit | Automated verification | Browser / live verification | Remaining limitations |
 | --- | --- | --- | --- | --- |
-| Planning document | This documentation-only change | See this PR's CI checks | Not applicable; no UI change | All redesign items remain unchecked |
+| Planning document | [PR #39](https://github.com/eeyung1/listenledger/pull/39) | All four CI jobs passed before merge | Not applicable; no UI change | Plan established |
+| F01 | [PR #40](https://github.com/eeyung1/listenledger/pull/40) | Typecheck/build and 63 existing frontend tests passed; exact-head repository CI required before merge | Chromium rendered-template checks at 360/390/768/1440px for four current pages and Customer Book dialog; viewport containment, 44px button sizing, button alias parity, reduced motion, screenshots | Empty/intercepted test responses; not full authenticated or physical microphone acceptance. New shell, per-page layouts, modal focus lifecycle, and real-device checks remain pending. |
 
 ## Next action
 
-After this documentation branch passes CI and merges, begin F01: shared visual tokens and reusable component styles. Deliver the redesign incrementally in the order above, ticking only the features actually completed.
+After PR #40 passes CI and merges, begin F02: desktop sidebar and shop/account top bar, followed by mobile navigation and route lifecycle work. Deliver the redesign incrementally, ticking only completed and verified items.
