@@ -420,4 +420,3 @@ func ExtractSupplier(text string) (string, string) {
 
 	return "", text
 }
-

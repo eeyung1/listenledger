@@ -434,4 +434,3 @@ func TestResolveReviewWithNewProduct(t *testing.T) {
 		t.Fatalf("expected DecisionCorrectedAndConfirmed, got %s", dec.Decision)
 	}
 }
-

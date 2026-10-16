@@ -398,4 +398,3 @@ func TestValidateSpokenCancellationAndSupplier(t *testing.T) {
 		t.Fatalf("expected supplier Dangote, got %q", res2.Lines[0].Transaction.SupplierName)
 	}
 }
-

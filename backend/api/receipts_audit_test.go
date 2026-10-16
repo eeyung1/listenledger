@@ -720,4 +720,3 @@ func TestSpokenCancellationCaptureE2E(t *testing.T) {
 		t.Fatalf("expected stock to remain 10 after cancelled sale, got %d", prodAfter.Quantity)
 	}
 }
-
