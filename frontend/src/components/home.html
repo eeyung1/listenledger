@@ -29,11 +29,18 @@
       <div class="counter-dock__indicator-group">
         <span class="counter-dock__status-dot" data-hook="counter-mic-dot" aria-hidden="true"></span>
         <div class="counter-dock__meta">
-          <h2 class="counter-dock__title" data-hook="counter-mic-title">Counter Microphone</h2>
+          <div class="counter-dock__title-row">
+            <h2 class="counter-dock__title" data-hook="counter-mic-title">Counter Microphone</h2>
+            <span class="badge badge--wakelock" data-hook="counter-wakelock-badge" style="display: none;">⚡ Screen Awake</span>
+          </div>
           <p class="counter-dock__subtitle" data-hook="counter-mic-subtitle">Idle — Tap to start ambient sales listening on this phone</p>
         </div>
       </div>
       <div class="counter-dock__actions">
+        <button type="button" class="btn counter-dock__tts-btn" data-hook="counter-tts-toggle-btn" title="Toggle spoken audio readout for logged sales and restocks" aria-pressed="false">
+          <span data-hook="counter-tts-btn-icon">🔇</span>
+          <span data-hook="counter-tts-btn-label">Voice: Off</span>
+        </button>
         <button type="button" class="btn btn--primary counter-dock__toggle-btn" data-hook="counter-mic-toggle-btn">
           <span class="counter-dock__btn-icon" data-hook="counter-mic-btn-icon">🎙</span>
           <span data-hook="counter-mic-btn-label">Start Listening</span>
@@ -50,7 +57,7 @@
         </div>
       </div>
       <div class="counter-dock__transcript" data-hook="counter-live-transcript">
-        <em>Say a sale ending with "Thank you"…</em>
+        <em>Say a sale ending with "Thank you" or a restock ending with "Stock received"…</em>
       </div>
     </div>
     <div class="counter-dock__toast" data-hook="counter-capture-toast" style="display: none;"></div>

@@ -28,11 +28,14 @@ export interface BoundaryDetectionResult {
 export interface CounterSpeechListenerOptions {
   readonly salePhrase?: string | undefined;
   readonly restockPhrase?: string | undefined;
+  readonly catalogueWords?: readonly string[] | undefined;
+  readonly enableVoiceFeedback?: boolean | undefined;
   readonly onStateChange?: ((state: CounterListenerState) => void) | undefined;
   readonly onInterimTranscript?: ((transcript: string) => void) | undefined;
   readonly onBoundaryDetected?: ((candidate: BoundaryCaptureCandidate) => void) | undefined;
   readonly onError?: ((error: Error) => void) | undefined;
   readonly onAudioLevel?: ((level: number) => void) | undefined;
+  readonly onWakeLockChange?: ((active: boolean) => void) | undefined;
 }
 
 // Minimal browser typing for vendor-prefixed SpeechRecognition
@@ -60,11 +63,35 @@ interface SpeechRecognitionErrorEventLike extends Event {
   readonly message?: string;
 }
 
+// Minimal browser typing for SpeechGrammarList
+export interface SpeechGrammarLike {
+  src: string;
+  weight: number;
+}
+
+export interface SpeechGrammarListLike {
+  readonly length: number;
+  [index: number]: SpeechGrammarLike;
+  addFromURI(src: string, weight?: number): void;
+  addFromString(string: string, weight?: number): void;
+}
+
+export type SpeechGrammarListConstructor = new () => SpeechGrammarListLike;
+
+// Minimal browser typing for WakeLockSentinel
+export interface WakeLockSentinelLike extends EventTarget {
+  readonly released: boolean;
+  readonly type: string;
+  release(): Promise<void>;
+  onrelease: ((this: WakeLockSentinelLike, ev: Event) => void) | null;
+}
+
 interface SpeechRecognitionLike extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   maxAlternatives: number;
+  grammars?: SpeechGrammarListLike;
   start(): void;
   stop(): void;
   abort(): void;
@@ -89,6 +116,34 @@ export function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor 
 /** Checks whether speech recognition is supported in the current browser. */
 export function isSpeechRecognitionSupported(): boolean {
   return getSpeechRecognitionConstructor() !== null;
+}
+
+/** Returns the browser's native SpeechGrammarList constructor if available. */
+export function getSpeechGrammarListConstructor(): SpeechGrammarListConstructor | null {
+  if (typeof window === "undefined") return null;
+  const win = window as unknown as {
+    SpeechGrammarList?: SpeechGrammarListConstructor;
+    webkitSpeechGrammarList?: SpeechGrammarListConstructor;
+  };
+  return win.SpeechGrammarList ?? win.webkitSpeechGrammarList ?? null;
+}
+
+/** Checks whether SpeechGrammarList is supported in the current browser. */
+export function isSpeechGrammarListSupported(): boolean {
+  return getSpeechGrammarListConstructor() !== null;
+}
+
+/** Checks whether the Screen Wake Lock API is supported. */
+export function isWakeLockSupported(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    Boolean((navigator as unknown as { wakeLock?: { request: unknown } }).wakeLock?.request)
+  );
+}
+
+/** Checks whether SpeechSynthesis is supported in the current browser. */
+export function isSpeechSynthesisSupported(): boolean {
+  return typeof window !== "undefined" && Boolean(window.speechSynthesis);
 }
 
 /** Checks whether microphone audio capture (getUserMedia) is supported. */
@@ -215,12 +270,50 @@ export function playAudioFeedback(type: "sale" | "review" | "error" | "start"): 
   }
 }
 
+export interface SpeakFeedbackOptions {
+  readonly lang?: string | undefined;
+  readonly rate?: number | undefined;
+  readonly pitch?: number | undefined;
+  readonly volume?: number | undefined;
+}
+
+/**
+ * Speaks an immediate verbal confirmation using the browser's SpeechSynthesis API.
+ * Never throws if speech synthesis is unavailable or voice playback is muted.
+ */
+export function speakFeedback(text: string, options: SpeakFeedbackOptions = {}): boolean {
+  if (!isSpeechSynthesisSupported() || typeof window === "undefined") {
+    return false;
+  }
+  try {
+    const synth = window.speechSynthesis;
+    synth.cancel(); // Stop any pending utterance for snappy counter feedback
+    const UtteranceClass =
+      (window as unknown as { SpeechSynthesisUtterance?: typeof SpeechSynthesisUtterance })
+        .SpeechSynthesisUtterance ??
+      (typeof SpeechSynthesisUtterance !== "undefined" ? SpeechSynthesisUtterance : null);
+    if (!UtteranceClass) {
+      return false;
+    }
+    const utterance = new UtteranceClass(text);
+    utterance.lang = options.lang ?? "en-US";
+    utterance.rate = options.rate ?? 1.15; // Brisk pace for counter efficiency
+    utterance.pitch = options.pitch ?? 1.0;
+    utterance.volume = options.volume ?? 0.9;
+    synth.speak(utterance);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Continuous Counter Ambient Speech Listener.
  *
  * Manages the browser microphone and SpeechRecognition session, maintaining
- * an active listening state, detecting closing boundaries, and calculating audio
- * levels for visual display.
+ * an active listening state, detecting closing boundaries, boosting recognition
+ * with catalogue product grammars, and holding screen wake lock for uninterrupted
+ * counter operations.
  */
 export class CounterSpeechListener {
   private readonly options: CounterSpeechListenerOptions;
@@ -232,9 +325,15 @@ export class CounterSpeechListener {
   private isExplicitlyStopped = false;
   private state: CounterListenerState = "idle";
   private currentTranscript = "";
+  private wakeLockSentinel: WakeLockSentinelLike | null = null;
+  private onVisibilityChangeBound: (() => void) | null = null;
+  private catalogueWords: string[] = [];
 
   constructor(options: CounterSpeechListenerOptions = {}) {
     this.options = options;
+    if (options.catalogueWords) {
+      this.setCatalogueWords(options.catalogueWords);
+    }
   }
 
   public getState(): CounterListenerState {
@@ -245,13 +344,42 @@ export class CounterSpeechListener {
     return this.state === "listening";
   }
 
+  public isWakeLockActive(): boolean {
+    return this.wakeLockSentinel !== null && !this.wakeLockSentinel.released;
+  }
+
   public getCurrentTranscript(): string {
     return this.currentTranscript;
   }
 
+  public getCatalogueWords(): readonly string[] {
+    return this.catalogueWords;
+  }
+
+  /**
+   * Updates the catalogue vocabulary used to bias the speech recognition grammar.
+   * Sanitizes phrases to alphanumeric tokens and updates active recognizer if present.
+   */
+  public setCatalogueWords(words: readonly string[]): void {
+    const sanitized: string[] = [];
+    for (const w of words) {
+      const trimmed = w.trim().toLowerCase();
+      // Remove punctuation and invalid chars from grammar token
+      const clean = trimmed.replace(/[^a-z0-9\s-]/g, "").trim();
+      if (clean.length > 0) {
+        sanitized.push(clean);
+      }
+    }
+    this.catalogueWords = Array.from(new Set(sanitized));
+
+    if (this.recognition) {
+      this.applyGrammar(this.recognition);
+    }
+  }
+
   /**
    * Starts continuous ambient counter listening.
-   * Requests microphone access if needed and initializes speech recognition.
+   * Requests screen wake lock, microphone access, and initializes speech recognition.
    */
   public async start(): Promise<void> {
     const RecognizerClass = getSpeechRecognitionConstructor();
@@ -267,10 +395,14 @@ export class CounterSpeechListener {
     this.isExplicitlyStopped = false;
     this.currentTranscript = "";
 
-    // 1. Initialize audio level analyser if getUserMedia is supported
+    // 1. Request Screen Wake Lock so mobile phone display doesn't sleep at counter
+    await this.requestWakeLock();
+    this.setupVisibilityListener();
+
+    // 2. Initialize audio level analyser if getUserMedia is supported
     await this.initAudioAnalyser();
 
-    // 2. Initialize and configure speech recognition instance
+    // 3. Initialize and configure speech recognition instance
     try {
       this.initRecognition(RecognizerClass);
       this.recognition?.start();
@@ -284,7 +416,7 @@ export class CounterSpeechListener {
     }
   }
 
-  /** Stops counter speech listening and releases microphone streams. */
+  /** Stops counter speech listening, releases wake lock, and cleans up audio streams. */
   public stop(): void {
     this.isExplicitlyStopped = true;
 
@@ -297,6 +429,8 @@ export class CounterSpeechListener {
       this.recognition = null;
     }
 
+    this.teardownVisibilityListener();
+    void this.releaseWakeLock();
     this.teardownAudioAnalyser();
     this.currentTranscript = "";
     this.setState("idle");
@@ -309,12 +443,91 @@ export class CounterSpeechListener {
     }
   }
 
+  private async requestWakeLock(): Promise<void> {
+    if (!isWakeLockSupported() || typeof navigator === "undefined") {
+      return;
+    }
+    try {
+      const nav = navigator as unknown as {
+        wakeLock: { request(type: string): Promise<WakeLockSentinelLike> };
+      };
+      this.wakeLockSentinel = await nav.wakeLock.request("screen");
+      this.wakeLockSentinel.onrelease = () => {
+        this.wakeLockSentinel = null;
+        this.options.onWakeLockChange?.(false);
+      };
+      this.options.onWakeLockChange?.(true);
+    } catch {
+      // Gracefully ignore wake lock failure (e.g. low battery, background tab)
+      this.wakeLockSentinel = null;
+      this.options.onWakeLockChange?.(false);
+    }
+  }
+
+  private async releaseWakeLock(): Promise<void> {
+    if (this.wakeLockSentinel) {
+      try {
+        await this.wakeLockSentinel.release();
+      } catch {
+        // ignore release errors
+      }
+      this.wakeLockSentinel = null;
+      this.options.onWakeLockChange?.(false);
+    }
+  }
+
+  private setupVisibilityListener(): void {
+    if (
+      typeof document === "undefined" ||
+      typeof document.addEventListener !== "function" ||
+      this.onVisibilityChangeBound
+    ) {
+      return;
+    }
+    this.onVisibilityChangeBound = () => {
+      // Re-request wake lock when user switches back to active tab
+      if (document.visibilityState === "visible" && !this.isExplicitlyStopped && this.state === "listening") {
+        void this.requestWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", this.onVisibilityChangeBound);
+  }
+
+  private teardownVisibilityListener(): void {
+    if (
+      typeof document !== "undefined" &&
+      typeof document.removeEventListener === "function" &&
+      this.onVisibilityChangeBound
+    ) {
+      document.removeEventListener("visibilitychange", this.onVisibilityChangeBound);
+      this.onVisibilityChangeBound = null;
+    }
+  }
+
+  private applyGrammar(recognition: SpeechRecognitionLike): void {
+    if (this.catalogueWords.length === 0) return;
+    const GrammarClass = getSpeechGrammarListConstructor();
+    if (!GrammarClass) return;
+
+    try {
+      const grammarList = new GrammarClass();
+      const grammarTerms = this.catalogueWords.join(" | ");
+      const jsgf = `#JSGF V1.0; grammar products; public <product> = ${grammarTerms} ;`;
+      grammarList.addFromString(jsgf, 1.0);
+      recognition.grammars = grammarList;
+    } catch {
+      // Non-critical if browser grammar compilation throws
+    }
+  }
+
   private initRecognition(RecognizerClass: SpeechRecognitionConstructor): void {
     const recognition = new RecognizerClass();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
     recognition.maxAlternatives = 1;
+
+    this.applyGrammar(recognition);
 
     recognition.onstart = () => {
       if (!this.isExplicitlyStopped) {

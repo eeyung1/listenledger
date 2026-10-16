@@ -39,6 +39,7 @@ import {
   CounterSpeechListener,
   isSpeechRecognitionSupported,
   playAudioFeedback,
+  speakFeedback,
   type BoundaryCaptureCandidate,
   type CounterListenerState,
 } from "../audio.js";
@@ -385,12 +386,44 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     }
   }
 
+  function extractCatalogueWords(products: readonly Product[]): string[] {
+    const words = new Set<string>();
+    words.add("carton");
+    words.add("pack");
+    words.add("crate");
+    words.add("piece");
+    words.add("bottle");
+    words.add("roll");
+    words.add("sachet");
+    words.add("naira");
+    words.add("thank you");
+    words.add("stock received");
+
+    for (const p of products) {
+      if (p.name) {
+        words.add(p.name);
+        p.name.split(/\s+/).forEach((tok) => {
+          if (tok.length > 2) words.add(tok);
+        });
+      }
+      if (p.aliases && Array.isArray(p.aliases)) {
+        for (const a of p.aliases) {
+          if (a) words.add(a);
+        }
+      }
+    }
+    return Array.from(words);
+  }
+
   function render(): void {
     renderKPIs();
     renderDeviceHealth();
     renderOnboarding();
     renderFeed();
     renderLowStock();
+    if (counterListener && state.products.length > 0) {
+      counterListener.setCatalogueWords(extractCatalogueWords(state.products));
+    }
   }
 
   /** Fetches transactions, inventory and daily summary snapshots and replaces state wholesale. */
@@ -547,6 +580,10 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const micDot = hook(root, "counter-mic-dot");
   const micTitle = hook(root, "counter-mic-title");
   const micSubtitle = hook(root, "counter-mic-subtitle");
+  const wakeLockBadge = hook(root, "counter-wakelock-badge");
+  const ttsToggleBtn = hook<HTMLButtonElement>(root, "counter-tts-toggle-btn");
+  const ttsBtnIcon = hook(root, "counter-tts-btn-icon");
+  const ttsBtnLabel = hook(root, "counter-tts-btn-label");
   const micToggleBtn = hook<HTMLButtonElement>(root, "counter-mic-toggle-btn");
   const micBtnIcon = hook(root, "counter-mic-btn-icon");
   const micBtnLabel = hook(root, "counter-mic-btn-label");
@@ -554,6 +591,44 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const levelFill = hook(root, "counter-level-fill");
   const liveTranscript = hook(root, "counter-live-transcript");
   const captureToast = hook(root, "counter-capture-toast");
+
+  let voiceFeedbackEnabled = false;
+  try {
+    voiceFeedbackEnabled = localStorage.getItem("ll_voice_feedback") === "true";
+  } catch {
+    // localStorage may be unavailable or restricted
+  }
+
+  function updateTTSButton(): void {
+    if (!ttsToggleBtn || !ttsBtnIcon || !ttsBtnLabel) return;
+    ttsToggleBtn.setAttribute("aria-pressed", String(voiceFeedbackEnabled));
+    if (voiceFeedbackEnabled) {
+      ttsToggleBtn.className = "btn counter-dock__tts-btn counter-dock__tts-btn--active";
+      setText(ttsBtnIcon, "🔊");
+      setText(ttsBtnLabel, "Voice: On");
+      ttsToggleBtn.title = "Spoken audio readout is ON (announcing sales and restocks aloud)";
+    } else {
+      ttsToggleBtn.className = "btn counter-dock__tts-btn";
+      setText(ttsBtnIcon, "🔇");
+      setText(ttsBtnLabel, "Voice: Off");
+      ttsToggleBtn.title = "Spoken audio readout is OFF (tap to announce sales and restocks aloud)";
+    }
+  }
+
+  updateTTSButton();
+
+  ttsToggleBtn?.addEventListener("click", () => {
+    voiceFeedbackEnabled = !voiceFeedbackEnabled;
+    try {
+      localStorage.setItem("ll_voice_feedback", String(voiceFeedbackEnabled));
+    } catch {
+      // ignore
+    }
+    updateTTSButton();
+    if (voiceFeedbackEnabled) {
+      speakFeedback("Voice readout enabled");
+    }
+  });
 
   let toastTimeout: ReturnType<typeof setTimeout> | null = null;
   function showCaptureToast(text: string, type: "success" | "warning" | "error"): void {
@@ -583,6 +658,12 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     counterListener = new CounterSpeechListener({
       salePhrase: "thank you",
       restockPhrase: "stock received",
+      catalogueWords: extractCatalogueWords(state.products),
+      onWakeLockChange: (active: boolean) => {
+        if (wakeLockBadge) {
+          wakeLockBadge.style.display = active ? "inline-flex" : "none";
+        }
+      },
       onStateChange: (listenerState: CounterListenerState) => {
         if (!counterDock || !micDot || !micToggleBtn || !micBtnIcon || !micBtnLabel || !livePanel) return;
 
@@ -591,13 +672,13 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
         if (listenerState === "listening") {
           setText(micTitle, "Counter Microphone: Active");
-          setText(micSubtitle, "Listening for sales at counter. Conclude with 'Thank you'");
+          setText(micSubtitle, "Listening for sales ('Thank you') and restocks ('Stock received')");
           setText(micBtnIcon, "⏹");
           setText(micBtnLabel, "Stop Listening");
           micToggleBtn.className = "btn counter-dock__toggle-btn counter-dock__toggle-btn--active";
           livePanel.style.display = "flex";
         } else if (listenerState === "processing") {
-          setText(micTitle, "Processing Spoken Sale…");
+          setText(micTitle, "Processing Spoken Capture…");
           setText(micSubtitle, "Validating items against catalogue and recording movement");
           setText(micBtnIcon, "⏳");
           setText(micBtnLabel, "Processing…");
@@ -606,6 +687,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           setText(micBtnIcon, "🎙");
           setText(micBtnLabel, "Retry Listening");
           micToggleBtn.className = "btn btn--primary counter-dock__toggle-btn";
+          if (wakeLockBadge) wakeLockBadge.style.display = "none";
         } else {
           setText(micTitle, "Counter Microphone");
           setText(micSubtitle, "Idle — Tap to start ambient sales listening on this phone");
@@ -613,8 +695,9 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           setText(micBtnLabel, "Start Listening");
           micToggleBtn.className = "btn btn--primary counter-dock__toggle-btn";
           livePanel.style.display = "none";
+          if (wakeLockBadge) wakeLockBadge.style.display = "none";
           if (liveTranscript) {
-            liveTranscript.innerHTML = `<em>Say a sale ending with "Thank you"…</em>`;
+            liveTranscript.innerHTML = `<em>Say a sale ending with "Thank you" or a restock ending with "Stock received"…</em>`;
           }
         }
       },
@@ -644,13 +727,30 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
             const first = res.transactions[0];
             const name = first ? first.product_name : "Unrecognized item";
             showCaptureToast(`⚠ Logged for Review: ${name} ("${candidate.transcript}")`, "warning");
+            if (voiceFeedbackEnabled) {
+              speakFeedback(`Held for review: ${name}`);
+            }
           } else {
             playAudioFeedback("sale");
             const first = res.transactions[0];
-            const detail = first
-              ? `${first.quantity} ${first.product_name} (${formatMoney(first.amount)})`
-              : candidate.transcript;
-            showCaptureToast(`✓ Logged Sale: ${detail}`, "success");
+            const isRestock = candidate.type === "restock" || (first && first.type === "restock");
+            if (isRestock) {
+              const detail = first
+                ? `${first.quantity} ${first.product_name}`
+                : candidate.transcript;
+              showCaptureToast(`✓ Logged Restock: ${detail} (+${first ? first.quantity : ""} stock)`, "success");
+              if (voiceFeedbackEnabled && first) {
+                speakFeedback(`Stock received: ${first.quantity} ${first.product_name}`);
+              }
+            } else {
+              const detail = first
+                ? `${first.quantity} ${first.product_name} (${formatMoney(first.amount)})`
+                : candidate.transcript;
+              showCaptureToast(`✓ Logged Sale: ${detail}`, "success");
+              if (voiceFeedbackEnabled && first) {
+                speakFeedback(`Sale: ${first.quantity} ${first.product_name}`);
+              }
+            }
           }
           void refetch();
         } catch (err) {

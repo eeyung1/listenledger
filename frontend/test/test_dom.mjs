@@ -480,6 +480,7 @@ export function parseHTMLFragment(html, rootElement) {
 }
 
 export function setupDOMEnvironment() {
+  const docListeners = new Map();
   const document = {
     createElement(tag) {
       const lower = tag.toLowerCase();
@@ -500,6 +501,21 @@ export function setupDOMEnvironment() {
       return document.body.querySelectorAll(sel);
     },
     body: new MockElement("body"),
+    visibilityState: "visible",
+    addEventListener(type, listener) {
+      if (!docListeners.has(type)) docListeners.set(type, new Set());
+      docListeners.get(type).add(listener);
+    },
+    removeEventListener(type, listener) {
+      docListeners.get(type)?.delete(listener);
+    },
+    dispatchEvent(event) {
+      const set = docListeners.get(event.type);
+      if (set) {
+        for (const l of Array.from(set)) l.call(document, event);
+      }
+      return !event.defaultPrevented;
+    },
   };
 
   const window = {
