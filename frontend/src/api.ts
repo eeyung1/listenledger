@@ -1211,3 +1211,36 @@ export async function fetchShopCreditSummary(signal?: AbortSignal): Promise<Shop
   return getJSON<ShopCreditSummary>("/api/customers/credit-summary", undefined, signal);
 }
 
+export interface CaptureLineInput {
+  readonly product_id?: string;
+  readonly product_name: string;
+  readonly quantity: number;
+  readonly unit: Unit;
+  readonly amount?: Money;
+  readonly confidence?: Confidence;
+}
+
+export interface CaptureInput {
+  readonly capture_id?: string;
+  readonly device_id?: string;
+  readonly type?: TransactionType;
+  readonly transcript: string;
+  readonly closing_phrase?: string;
+  readonly occurred_at?: string;
+  readonly extracted_lines?: readonly CaptureLineInput[];
+}
+
+export interface CaptureResult {
+  readonly capture_id: string;
+  readonly receipt_id?: string;
+  readonly shop_id: string;
+  readonly type: TransactionType;
+  readonly transactions: readonly Transaction[];
+  readonly requires_review: boolean;
+}
+
+/** POST /api/captures — edge and mobile counter capture intake endpoint. */
+export async function postCapture(input: CaptureInput): Promise<CaptureResult> {
+  return postJSON<CaptureResult>("/api/captures", input);
+}
+

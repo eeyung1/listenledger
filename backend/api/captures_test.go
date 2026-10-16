@@ -377,3 +377,52 @@ func TestCaptures_MultiLineRestockAndSpokenSaleE2E(t *testing.T) {
 		t.Errorf("expected Peak Milk quantity to remain 110 on retry, got %d", updatedPeak.Quantity)
 	}
 }
+
+func TestCaptures_MobileBrowserSessionDirectIntake(t *testing.T) {
+	store, handler, shopID := setupCaptureTest(t)
+	ctx := context.Background()
+
+	// Direct browser session intake without device token
+	saleJSON := `{
+		"capture_id": "cap_mob_001",
+		"transcript": "Two Milo, four thousand naira. Thank you.",
+		"type": "sale"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewBufferString(saleJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ListenLedger-Request", "1")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for mobile session capture intake, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var capRes struct {
+		CaptureID      string               `json:"capture_id"`
+		Transactions   []models.Transaction `json:"transactions"`
+		RequiresReview bool                 `json:"requires_review"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &capRes); err != nil {
+		t.Fatalf("decode capture response: %v", err)
+	}
+
+	if capRes.RequiresReview {
+		t.Errorf("expected clean Milo sale not to require review")
+	}
+	if len(capRes.Transactions) != 1 {
+		t.Fatalf("expected 1 transaction, got %d", len(capRes.Transactions))
+	}
+	if capRes.Transactions[0].Status != models.StatusConfirmed {
+		t.Errorf("expected confirmed status, got %s", capRes.Transactions[0].Status)
+	}
+
+	// Verify Milo stock decreased from 20 to 18
+	milo, err := store.GetProductByID(ctx, shopID, "prd_milo")
+	if err != nil {
+		t.Fatalf("GetProductByID: %v", err)
+	}
+	if milo.Quantity != 18 {
+		t.Errorf("expected Milo stock 18, got %d", milo.Quantity)
+	}
+}

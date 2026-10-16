@@ -1084,3 +1084,269 @@ a {
   border-left-color: #3b82f6;
 }
 
+/* Counter Audio Interface & Speech Capture Dock */
+.counter-dock {
+  background: #ffffff;
+  border: 1px solid #c9dede;
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 2px 8px rgba(19, 91, 89, 0.06);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.counter-dock--listening {
+  border-color: #135b59;
+  box-shadow: 0 4px 16px rgba(19, 91, 89, 0.15);
+  background: #fcfefe;
+}
+
+.counter-dock--error {
+  border-color: #ef4444;
+  background: #fffafa;
+}
+
+.counter-dock__main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.counter-dock__indicator-group {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.counter-dock__status-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #94a3b8;
+  display: inline-block;
+  flex-shrink: 0;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.counter-dock__status-dot--listening {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.25);
+  animation: pulse-mic 1.6s infinite ease-in-out;
+}
+
+.counter-dock__status-dot--processing {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.25);
+  animation: pulse-mic 1s infinite ease-in-out;
+}
+
+.counter-dock__status-dot--error {
+  background: #dc2626;
+}
+
+@keyframes pulse-mic {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.75;
+  }
+}
+
+.counter-dock__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #152b30;
+}
+
+.counter-dock__subtitle {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: #557174;
+}
+
+.counter-dock__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.counter-dock__toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  padding: 0.55rem 1.1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.counter-dock__toggle-btn--active {
+  background: #dc2626;
+  border-color: #b91c1c;
+  color: #ffffff;
+}
+
+.counter-dock__toggle-btn--active:hover {
+  background: #b91c1c;
+}
+
+.counter-dock__live-panel {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px dashed #d0dfdf;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.counter-dock__meters {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.counter-dock__waveform {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+}
+
+.wave-bar {
+  width: 3px;
+  height: 6px;
+  background: #135b59;
+  border-radius: 2px;
+  transition: height 0.1s ease;
+}
+
+.counter-dock--listening .wave-bar {
+  animation: wave-anim 1.2s infinite ease-in-out;
+}
+
+.counter-dock--listening .wave-bar:nth-child(2) { animation-delay: 0.15s; }
+.counter-dock--listening .wave-bar:nth-child(3) { animation-delay: 0.3s; }
+.counter-dock--listening .wave-bar:nth-child(4) { animation-delay: 0.45s; }
+.counter-dock--listening .wave-bar:nth-child(5) { animation-delay: 0.6s; }
+
+@keyframes wave-anim {
+  0%, 100% { height: 4px; }
+  50% { height: 18px; }
+}
+
+.counter-dock__level-track {
+  flex: 1;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.counter-dock__level-fill {
+  height: 100%;
+  width: 0%;
+  background: #10b981;
+  border-radius: 3px;
+  transition: width 0.08s linear;
+}
+
+.counter-dock__transcript {
+  font-size: 0.95rem;
+  color: #1e293b;
+  padding: 0.5rem 0.75rem;
+  background: #f1f5f9;
+  border-radius: 6px;
+  font-family: inherit;
+  min-height: 1.5rem;
+  display: flex;
+  align-items: center;
+}
+
+.counter-dock__transcript em {
+  color: #64748b;
+  font-style: italic;
+}
+
+.counter-dock__toast {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.counter-dock__toast--success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+.counter-dock__toast--warning {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.counter-dock__toast--error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+/* Onboarding Live Mic Test Tab Styles */
+.test-tab-group {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 0.5rem;
+}
+
+.test-tab-btn {
+  background: none;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #64748b;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.test-tab-btn--active {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.live-mic-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+}
+
+.live-mic-btn {
+  align-self: center;
+  font-size: 1rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 50px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+}
+
