@@ -14,13 +14,13 @@ export type CounterListenerState = "idle" | "listening" | "processing" | "error"
 
 export interface BoundaryCaptureCandidate {
   readonly transcript: string;
-  readonly type: TransactionType;
+  readonly type: TransactionType | "cancelled";
   readonly closingPhrase: string;
 }
 
 export interface BoundaryDetectionResult {
   readonly detected: boolean;
-  readonly type?: TransactionType | undefined;
+  readonly type?: TransactionType | "cancelled" | undefined;
   readonly closingPhrase?: string | undefined;
   readonly cleanTranscript?: string | undefined;
 }
@@ -188,6 +188,28 @@ export function detectClosingBoundary(
     };
   }
 
+  const cancellationPhrases = [
+    "cancel sale",
+    "cancel the sale",
+    "cancel transaction",
+    "customer cancelled",
+    "customer canceled",
+    "cancel that",
+    "drop that",
+    "never mind",
+    "cancel restock",
+  ];
+  for (const cancelPhrase of cancellationPhrases) {
+    if (normalized === cancelPhrase || normalized.endsWith(" " + cancelPhrase)) {
+      return {
+        detected: true,
+        type: "cancelled",
+        closingPhrase: cancelPhrase,
+        cleanTranscript: trimmed,
+      };
+    }
+  }
+
   return { detected: false };
 }
 
@@ -195,7 +217,7 @@ export function detectClosingBoundary(
  * Synthesizes an immediate audio chime feedback using the Web Audio API.
  * Never throws an error if audio autoplay is restricted.
  */
-export function playAudioFeedback(type: "sale" | "review" | "error" | "start"): void {
+export function playAudioFeedback(type: "sale" | "review" | "error" | "start" | "cancelled"): void {
   try {
     if (typeof window === "undefined") return;
     const AudioContextClass =
@@ -252,6 +274,19 @@ export function playAudioFeedback(type: "sale" | "review" | "error" | "start"): 
       gain.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + 0.3);
+    } else if (type === "cancelled") {
+      // Descending cancel tone (G4 -> E4)
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(392.0, now); // G4
+      osc.frequency.setValueAtTime(329.63, now + 0.1); // E4
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
     } else {
       // Low error buzz
       const osc = ctx.createOscillator();

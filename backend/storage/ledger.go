@@ -76,7 +76,9 @@ func (s *Store) RecordReceiptMovements(ctx context.Context, transactions []model
 	for i, t := range transactions {
 		key := keys[i]
 		fingerprint := fingerprints[i]
-		if key == "" || len(key) > 128 || fingerprint == "" || t.ShopID == "" || t.ShopID != shopID || t.ID == "" || t.Quantity <= 0 || t.Amount.Amount < 0 || !t.Type.Valid() || (t.Status != models.StatusConfirmed && t.Status != models.StatusReviewRequired) {
+		if key == "" || len(key) > 128 || fingerprint == "" || t.ShopID == "" || t.ShopID != shopID || t.ID == "" || t.Amount.Amount < 0 || !t.Type.Valid() ||
+			(t.Status != models.StatusConfirmed && t.Status != models.StatusReviewRequired && t.Status != models.StatusCancelled) ||
+			(t.Status != models.StatusCancelled && t.Quantity <= 0) {
 			return nil, ErrInvalidMovement
 		}
 	}
@@ -158,7 +160,7 @@ func (s *Store) RecordReceiptMovements(ctx context.Context, transactions []model
 			}
 			product = p
 			t.ProductName = product.Name
-		} else {
+		} else if t.Status != models.StatusCancelled {
 			t.Status = models.StatusReviewRequired
 		}
 
@@ -223,10 +225,11 @@ const (
 )
 
 type ReviewCorrections struct {
-	ProductID string        `json:"product_id,omitempty"`
-	Quantity  int           `json:"quantity,omitempty"`
-	Unit      models.Unit   `json:"unit,omitempty"`
-	Amount    *models.Money `json:"amount,omitempty"`
+	ProductID  string          `json:"product_id,omitempty"`
+	Quantity   int             `json:"quantity,omitempty"`
+	Unit       models.Unit     `json:"unit,omitempty"`
+	Amount     *models.Money   `json:"amount,omitempty"`
+	NewProduct *models.Product `json:"new_product,omitempty"`
 }
 
 // ResolveReview resolves a held capture (review_required) by either confirming it
@@ -321,6 +324,48 @@ func (s *Store) ResolveReview(
 
 	wasCorrected := false
 	if corrections != nil {
+		if corrections.NewProduct != nil {
+			np := *corrections.NewProduct
+			if np.ShopID == "" {
+				np.ShopID = shopID
+			}
+			if np.ID == "" {
+				np.ID = fmt.Sprintf("prd_%d", time.Now().UnixNano())
+			}
+			aliasesJSON, err := encodeJSONList("aliases", np.Aliases)
+			if err != nil {
+				return LedgerResult{}, err
+			}
+			packagingJSON, err := encodeJSONList("packaging", np.Packaging)
+			if err != nil {
+				return LedgerResult{}, err
+			}
+			var skuExists int
+			checkSkuQ := s.rebind(`SELECT COUNT(*) FROM products WHERE shop_id = ? AND sku = ?`)
+			if err := tx.QueryRowContext(ctx, checkSkuQ, shopID, np.SKU).Scan(&skuExists); err != nil {
+				return LedgerResult{}, err
+			}
+			if skuExists > 0 {
+				return LedgerResult{}, fmt.Errorf("%w: product with sku %q already exists", ErrConflict, np.SKU)
+			}
+			nowStr := formatTime(time.Now().UTC())
+			insertQ := s.rebind(`
+				INSERT INTO products (
+					id, shop_id, name, sku, aliases, price_amount, price_currency,
+					quantity, base_unit, packaging, low_stock_threshold,
+					created_at, updated_at, archived_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`)
+			if _, err := tx.ExecContext(ctx, insertQ,
+				np.ID, shopID, np.Name, np.SKU,
+				aliasesJSON, np.Price.Amount, np.Price.Currency,
+				0, string(np.BaseUnit), packagingJSON,
+				np.LowStockThreshold, nowStr, nowStr,
+			); err != nil {
+				return LedgerResult{}, fmt.Errorf("storage: insert product for onboard: %w", err)
+			}
+			t.ProductID = np.ID
+			wasCorrected = true
+		}
 		if corrections.ProductID != "" && corrections.ProductID != t.ProductID {
 			t.ProductID = corrections.ProductID
 			wasCorrected = true

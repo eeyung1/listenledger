@@ -132,4 +132,6 @@ type Transaction struct {
 	Transcript string `json:"transcript,omitempty"`
 	// ReceiptID links multiple line items captured from a single spoken receipt.
 	ReceiptID string `json:"receipt_id,omitempty"`
+	// SupplierName attributes the source of delivered stock for restocks (blueprint §18).
+	SupplierName string `json:"supplier_name,omitempty"`
 }

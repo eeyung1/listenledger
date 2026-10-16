@@ -356,3 +356,81 @@ func TestRecordReceiptMovementsAtomicity(t *testing.T) {
 		t.Fatalf("expected nil, nil for empty movements, got: %v, %v", resEmpty, err)
 	}
 }
+
+func TestResolveReviewWithNewProduct(t *testing.T) {
+	s, _ := ledgerFixture(t)
+	ctx := context.Background()
+
+	// 1. Uncatalogued restock capture held in Review Queue
+	uncataloguedTxn := models.Transaction{
+		ID:          "txn_uncat_restock",
+		ShopID:      "a",
+		Type:        models.TypeRestock,
+		ProductID:   "",
+		ProductName: "Chivita 1L",
+		Quantity:    10,
+		Unit:        models.UnitPack,
+		Amount:      models.Money{Amount: 1500000, Currency: "NGN"},
+		Status:      models.StatusReviewRequired,
+		Confidence: models.Confidence{
+			Overall: 0.50,
+		},
+		SupplierName: "Chi Limited",
+	}
+
+	if err := s.InsertTransaction(ctx, uncataloguedTxn); err != nil {
+		t.Fatalf("failed to insert uncatalogued txn: %v", err)
+	}
+
+	// 2. Onboard product and confirm restock in single atomic step
+	newProduct := models.Product{
+		ID:                "prd_chivita_1l",
+		ShopID:            "a",
+		Name:              "Chivita 1L Orange",
+		SKU:               "CHI-1L-ORG",
+		Price:             models.Money{Amount: 180000, Currency: "NGN"},
+		Quantity:          0,
+		BaseUnit:          models.UnitPack,
+		LowStockThreshold: 5,
+	}
+
+	corrections := &ReviewCorrections{
+		ProductID:  newProduct.ID,
+		Quantity:   10,
+		Unit:       models.UnitPack,
+		NewProduct: &newProduct,
+	}
+
+	res, err := s.ResolveReview(ctx, "a", "txn_uncat_restock", ReviewActionConfirm, corrections, "owner", "onboarded uncatalogued product")
+	if err != nil {
+		t.Fatalf("failed to resolve review with new product: %v", err)
+	}
+
+	if res.Transaction.Status != models.StatusConfirmed {
+		t.Fatalf("expected confirmed status, got %s", res.Transaction.Status)
+	}
+	if res.Transaction.ProductID != "prd_chivita_1l" {
+		t.Fatalf("expected product id prd_chivita_1l, got %s", res.Transaction.ProductID)
+	}
+	if res.Product == nil || res.Product.Quantity != 10 {
+		t.Fatalf("expected new product stock to be 10, got %+v", res.Product)
+	}
+
+	// Verify product persisted in store
+	storedProd, err := s.GetProductByID(ctx, "a", "prd_chivita_1l")
+	if err != nil {
+		t.Fatalf("failed to load stored onboarded product: %v", err)
+	}
+	if storedProd.Quantity != 10 || storedProd.SKU != "CHI-1L-ORG" {
+		t.Fatalf("unexpected stored product: %+v", storedProd)
+	}
+
+	// Verify decision audit trail
+	dec, err := s.GetReviewDecision(ctx, "a", "txn_uncat_restock")
+	if err != nil {
+		t.Fatalf("failed to get decision: %v", err)
+	}
+	if dec.Decision != DecisionCorrectedAndConfirmed {
+		t.Fatalf("expected DecisionCorrectedAndConfirmed, got %s", dec.Decision)
+	}
+}

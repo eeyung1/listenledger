@@ -30,6 +30,7 @@ type CaptureRequest struct {
 	Type           models.TransactionType `json:"type,omitempty"`
 	Transcript     string                 `json:"transcript"`
 	ClosingPhrase  string                 `json:"closing_phrase,omitempty"`
+	SupplierName   string                 `json:"supplier_name,omitempty"`
 	OccurredAt     *time.Time             `json:"occurred_at,omitempty"`
 	ExtractedLines []CaptureLineInput     `json:"extracted_lines,omitempty"`
 }
@@ -77,13 +78,22 @@ func (e *Engine) Validate(
 		currency = "NGN"
 	}
 
-	// 1. Determine Transaction Type and Boundary Phrase
+	// 1. Spoken Cancellation and Boundary Detection
+	cancelPhrase, isCancelled := DetectCancellation(req.Transcript)
+
+	// 2. Determine Transaction Type and Boundary Phrase
 	txnType := req.Type
 	closingPhrase := req.ClosingPhrase
 	boundaryFound := false
 	boundaryConf := 1.0
 
-	if txnType == "" || closingPhrase == "" {
+	if isCancelled {
+		closingPhrase = cancelPhrase
+		boundaryFound = true
+		if txnType == "" {
+			txnType = models.TypeSale
+		}
+	} else if txnType == "" || closingPhrase == "" {
 		detectedType, detectedPhrase, found := DetectBoundary(req.Transcript, salePhrase, restockPhrase)
 		if found {
 			if txnType == "" {
@@ -101,17 +111,28 @@ func (e *Engine) Validate(
 		boundaryFound = true
 	}
 
+	// 3. Spoken Supplier Attribution (Blueprint §18)
+	supplier := strings.TrimSpace(req.SupplierName)
+	cleanTranscript := req.Transcript
+	if supplier == "" {
+		extractedSupp, stripped := ExtractSupplier(req.Transcript)
+		if extractedSupp != "" {
+			supplier = extractedSupp
+			cleanTranscript = stripped
+		}
+	}
+
 	occurredAt := time.Now().UTC()
 	if req.OccurredAt != nil {
 		occurredAt = req.OccurredAt.UTC()
 	}
 
-	// 2. Prepare Line Items (either from pre-extracted lines or by parsing transcript)
+	// 4. Prepare Line Items (either from pre-extracted lines or by parsing transcript)
 	var linesToProcess []CaptureLineInput
 	if len(req.ExtractedLines) > 0 {
 		linesToProcess = req.ExtractedLines
 	} else {
-		splitSegments := SplitTranscriptLines(req.Transcript, closingPhrase)
+		splitSegments := SplitTranscriptLines(cleanTranscript, closingPhrase)
 		for _, seg := range splitSegments {
 			anchors := ParseSpokenSegment(seg, currency)
 			if anchors.ProductMention == "" && anchors.Quantity == 0 && anchors.AmountMinor == 0 {
@@ -240,7 +261,10 @@ func (e *Engine) Validate(
 
 		// Status Decision
 		status := models.StatusConfirmed
-		if overallConf < threshold || productID == "" || len(reviewReasons) > 0 {
+		if isCancelled {
+			status = models.StatusCancelled
+			reviewReasons = []string{"spoken_cancellation"}
+		} else if overallConf < threshold || productID == "" || len(reviewReasons) > 0 {
 			status = models.StatusReviewRequired
 			anyReview = true
 		}
@@ -267,11 +291,12 @@ func (e *Engine) Validate(
 				Amount:   amountVal,
 				Currency: amountCurr,
 			},
-			Confidence: conf,
-			Status:     status,
-			OccurredAt: occurredAt,
-			CreatedAt:  time.Now().UTC(),
-			Transcript: transcriptText,
+			Confidence:   conf,
+			Status:       status,
+			OccurredAt:   occurredAt,
+			CreatedAt:    time.Now().UTC(),
+			Transcript:   transcriptText,
+			SupplierName: supplier,
 		}
 
 		validatedLines = append(validatedLines, ValidatedLine{
@@ -280,6 +305,10 @@ func (e *Engine) Validate(
 			MatchedBy:     match.MatchedBy,
 			RawAnchor:     line,
 		})
+	}
+
+	if isCancelled {
+		anyReview = false
 	}
 
 	return ValidationResult{

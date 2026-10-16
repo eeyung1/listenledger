@@ -281,7 +281,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	const createMigrations = `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version    INTEGER PRIMARY KEY,
-			applied_at TEXT NOT NULL
+			applied_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 		)`
 
 	if _, err := s.db.ExecContext(ctx, createMigrations); err != nil {

@@ -34,7 +34,7 @@ func ClampLimit(limit int) int {
 const transactionColumns = `id, shop_id, type, product_id, product_name, quantity,
 	unit, amount_amount, amount_currency, confidence_overall, confidence_product,
 	confidence_quantity, confidence_amount, status, occurred_at, created_at,
-	transcript, receipt_id`
+	transcript, receipt_id, supplier_name`
 
 // InsertTransaction records a stock movement.
 //
@@ -83,8 +83,8 @@ func (s *Store) insertTransaction(ctx context.Context, db executor, transaction 
 			id, shop_id, type, product_id, product_name, quantity, unit,
 			amount_amount, amount_currency, confidence_overall,
 			confidence_product, confidence_quantity, confidence_amount,
-			status, occurred_at, created_at, transcript, receipt_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			status, occurred_at, created_at, transcript, receipt_id, supplier_name
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := db.ExecContext(ctx, s.rebind(query),
 		transaction.ID, transaction.ShopID, string(transaction.Type),
@@ -96,7 +96,7 @@ func (s *Store) insertTransaction(ctx context.Context, db executor, transaction 
 		nullFloat(transaction.Confidence.Quantity),
 		nullFloat(transaction.Confidence.Amount),
 		string(transaction.Status), formatTime(occurredAt), formatTime(createdAt),
-		transaction.Transcript, nullString(transaction.ReceiptID),
+		transaction.Transcript, nullString(transaction.ReceiptID), transaction.SupplierName,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: insert transaction %s: %w", transaction.ID, err)
@@ -281,6 +281,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 		occurredAtRaw      string
 		createdAtRaw       string
 		receiptID          sql.NullString
+		supplierName       sql.NullString
 	)
 
 	err := row.Scan(
@@ -289,6 +290,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 		&amountAmount, &amountCurrency, &transaction.Confidence.Overall,
 		&confidenceProduct, &confidenceQuantity, &confidenceAmount, &status,
 		&occurredAtRaw, &createdAtRaw, &transaction.Transcript, &receiptID,
+		&supplierName,
 	)
 	if err != nil {
 		return models.Transaction{}, err
@@ -303,6 +305,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 	transaction.Confidence.Quantity = floatPointer(confidenceQuantity)
 	transaction.Confidence.Amount = floatPointer(confidenceAmount)
 	transaction.ReceiptID = receiptID.String
+	transaction.SupplierName = supplierName.String
 
 	if transaction.OccurredAt, err = parseTime(occurredAtRaw); err != nil {
 		return models.Transaction{}, err

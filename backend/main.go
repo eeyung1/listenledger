@@ -69,6 +69,11 @@ func run() error {
 		"comma-separated browser origins permitted to open a WebSocket (empty = same-origin only)")
 	flag.Parse()
 
+	// If AUTO_MIGRATE is set (e.g. in cloud deployment settings), execute pending migrations rather than skipping
+	if envAutoMigrate := os.Getenv("AUTO_MIGRATE"); envAutoMigrate == "true" || envAutoMigrate == "1" {
+		cfg.skipMigrations = false
+	}
+
 	// Environment variable fallback for hosting platforms (Render, Supabase, Cloud Run, etc.)
 	if cfg.dbPath == "" {
 		if envDB := os.Getenv("DATABASE_URL"); envDB != "" {
