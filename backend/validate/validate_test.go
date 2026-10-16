@@ -398,3 +398,82 @@ func TestValidateSpokenCancellationAndSupplier(t *testing.T) {
 		t.Fatalf("expected supplier Dangote, got %q", res2.Lines[0].Transaction.SupplierName)
 	}
 }
+
+func TestSplitCompoundUtterance(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{
+			input: "two milo and three indomie",
+			want:  []string{"two milo", "three indomie"},
+		},
+		{
+			input: "5 peak milk, 2 sugar, plus 1 bread",
+			want:  []string{"5 peak milk", "2 sugar", "1 bread"},
+		},
+		{
+			input: "bread and butter",
+			want:  []string{"bread and butter"},
+		},
+		{
+			input: "macaroni and cheese",
+			want:  []string{"macaroni and cheese"},
+		},
+		{
+			input: "ten cartons of indomie and a carton of biscuits",
+			want:  []string{"ten cartons of indomie", "a carton of biscuits"},
+		},
+		{
+			input: "two cartons of indomie with three bottles of coke",
+			want:  []string{"two cartons of indomie", "three bottles of coke"},
+		},
+	}
+
+	for _, tc := range tests {
+		got := validate.SplitCompoundUtterance(tc.input)
+		if len(got) != len(tc.want) {
+			t.Fatalf("SplitCompoundUtterance(%q) length = %d, want %d (%v)", tc.input, len(got), len(tc.want), got)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("SplitCompoundUtterance(%q)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+func TestValidateCompoundMultiItemUtterance(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+
+	req := validate.CaptureRequest{
+		CaptureID:  "cap_compound_01",
+		Transcript: "two milo and three pepsi thank you",
+	}
+
+	res, err := engine.Validate(context.Background(), req, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error validating compound utterance: %v", err)
+	}
+
+	if len(res.Lines) != 2 {
+		t.Fatalf("expected 2 validated lines, got %d", len(res.Lines))
+	}
+
+	line1 := res.Lines[0].Transaction
+	if line1.ProductName != "Milo 500g" || line1.Quantity != 2 {
+		t.Errorf("expected Line 1 to be 2 Milo 500g, got %d %s", line1.Quantity, line1.ProductName)
+	}
+	if line1.Status != models.StatusConfirmed {
+		t.Errorf("expected Line 1 status confirmed, got %s (reasons: %v)", line1.Status, res.Lines[0].ReviewReasons)
+	}
+
+	line2 := res.Lines[1].Transaction
+	if line2.ProductName != "Pepsi 50cl" || line2.Quantity != 3 {
+		t.Errorf("expected Line 2 to be 3 Pepsi 50cl, got %d %s", line2.Quantity, line2.ProductName)
+	}
+	if line2.Status != models.StatusConfirmed {
+		t.Errorf("expected Line 2 status confirmed, got %s (reasons: %v)", line2.Status, res.Lines[1].ReviewReasons)
+	}
+}

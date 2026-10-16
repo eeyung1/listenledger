@@ -263,8 +263,8 @@ func extractSpokenMoney(text string) (int64, bool) {
 func cleanProductMention(raw string, anchors ParsedAnchors) string {
 	s := raw
 	// Remove currency phrases
-	s = regexp.MustCompile(`(?i)\b(?:ngn\s*)?[0-9,]+(?:\.[0-9]+)?\s*(?:naira|kobo)?\b`).ReplaceAllString(s, " ")
-	s = regexp.MustCompile(`(?i)\b(?:thousand|million|hundred|naira|kobo)\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\b(?:ngn\s*)?[0-9,]+(?:\.[0-9]+)?\s*(?:naira|kobo|ngn)?\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\b(?:thousand|million|hundred|naira|kobo|ngn)\b`).ReplaceAllString(s, " ")
 
 	// Remove units
 	for u := range knownUnits {
@@ -282,7 +282,7 @@ func cleanProductMention(raw string, anchors ParsedAnchors) string {
 
 	var b strings.Builder
 	for _, r := range s {
-		if r == ',' || r == '.' || r == ';' || r == '"' || r == '\'' || r == '“' || r == '”' {
+		if r == '-' || r == ',' || r == '.' || r == ';' || r == '"' || r == '\'' || r == '“' || r == '”' {
 			b.WriteRune(' ')
 		} else {
 			b.WriteRune(r)
@@ -318,6 +318,121 @@ func DetectBoundary(transcript, salePhrase, restockPhrase string) (models.Transa
 	return "", "", false
 }
 
+var connectiveRegex = regexp.MustCompile(`(?i)(?:,\s*|\s+)(?:and\s+also|and\s+then|also|plus|and|with|then)\s+|(?:,\s*)`)
+
+func startsWithQuantity(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return false
+	}
+	// 1. Starts with digit: e.g. "2 milo", "30 cartons"
+	if trimmed[0] >= '0' && trimmed[0] <= '9' {
+		return true
+	}
+	// 2. Starts with a known quantity word
+	words := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(trimmed, ",", " "), "-", " "))
+	if len(words) == 0 {
+		return false
+	}
+	w0 := strings.ToLower(words[0])
+	if val, ok := unitsMap[w0]; ok && val > 0 {
+		return true
+	}
+	if w0 == "dozen" || w0 == "half" || w0 == "pair" {
+		return true
+	}
+	// 3. Starts with indefinite article + packaging unit: e.g. "a pack", "a carton", "a bottle", "a tin", "a crate", "a piece"
+	if (w0 == "a" || w0 == "an") && len(words) > 1 {
+		w1 := strings.ToLower(words[1])
+		if _, ok := knownUnits[w1]; ok {
+			return true
+		}
+		if w1 == "loaf" || w1 == "loaves" || w1 == "bag" || w1 == "bags" || w1 == "sachet" || w1 == "sachets" || w1 == "can" || w1 == "cans" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSelfCorrection(s string) bool {
+	lower := strings.ToLower(s)
+	for _, m := range []string{"wait no", "no wait", "sorry", "i mean", "make that", "actually", "correction"} {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+func isMoneyAmount(s string) bool {
+	anchors := ParseSpokenSegment(s, "")
+	cleanProd := strings.Trim(anchors.ProductMention, "- \t\r\n")
+	if anchors.AmountFound && cleanProd == "" {
+		return true
+	}
+	lower := strings.ToLower(strings.TrimSpace(s))
+	if strings.HasSuffix(lower, "ngn") || strings.HasSuffix(lower, "naira") || strings.HasSuffix(lower, "kobo") {
+		cleaned := cleanProductMention(s, anchors)
+		if strings.Trim(cleaned, "- \t\r\n") == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// SplitCompoundUtterance splits continuous compound phrases (e.g. "2 Milo and 3 Indomie", "5 milk, 2 sugar, plus 1 bread")
+// into individual line item clauses while preserving compound product names like "Bread and Butter"
+// and self-corrections like "Two Milo, wait no, three Milo".
+func SplitCompoundUtterance(text string) []string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil
+	}
+
+	if containsSelfCorrection(trimmed) {
+		return []string{trimmed}
+	}
+
+	locs := connectiveRegex.FindAllStringIndex(trimmed, -1)
+	if len(locs) == 0 {
+		return []string{trimmed}
+	}
+
+	var boundaries []int // pairs of [startMatch, endMatch]
+	for _, loc := range locs {
+		afterIdx := loc[1]
+		if afterIdx >= len(trimmed) {
+			continue
+		}
+		afterText := strings.TrimSpace(trimmed[afterIdx:])
+		if startsWithQuantity(afterText) && !isMoneyAmount(afterText) {
+			boundaries = append(boundaries, loc[0], loc[1])
+		}
+	}
+
+	if len(boundaries) == 0 {
+		return []string{trimmed}
+	}
+
+	var segments []string
+	prevEnd := 0
+	for i := 0; i < len(boundaries); i += 2 {
+		startMatch := boundaries[i]
+		endMatch := boundaries[i+1]
+		seg := strings.TrimSpace(trimmed[prevEnd:startMatch])
+		if seg != "" {
+			segments = append(segments, seg)
+		}
+		prevEnd = endMatch
+	}
+	tail := strings.TrimSpace(trimmed[prevEnd:])
+	if tail != "" {
+		segments = append(segments, tail)
+	}
+
+	return segments
+}
+
 // SplitTranscriptLines splits a multi-line spoken receipt into line segments.
 func SplitTranscriptLines(transcript, closingPhrase string) []string {
 	text := transcript
@@ -335,11 +450,13 @@ func SplitTranscriptLines(transcript, closingPhrase string) []string {
 	for _, seg := range rawSegments {
 		trimmed := strings.TrimSpace(seg)
 		if trimmed != "" {
-			lines = append(lines, trimmed)
+			compoundItems := SplitCompoundUtterance(trimmed)
+			lines = append(lines, compoundItems...)
 		}
 	}
 	if len(lines) == 0 && strings.TrimSpace(text) != "" {
-		lines = append(lines, strings.TrimSpace(text))
+		compoundItems := SplitCompoundUtterance(strings.TrimSpace(text))
+		lines = append(lines, compoundItems...)
 	}
 
 	// Merge orphaned amount segments into preceding product line
