@@ -1,7 +1,7 @@
 # Database migration: SQLite to Supabase PostgreSQL
 
-Status: **PostgreSQL implementation complete; live Supabase initialization and Render acceptance pending.**
-Reviewed: 15 October 2026, following PR #28 (`54b1f67`).
+Status: **Supabase initialized through migration 12; restricted runtime migration policy restored.**
+Reviewed: 16 October 2026. Historical implementation notes below are not a current full acceptance record.
 
 Implementation, CI rehearsals and actual deployment are separate gates. The destination project was reachable but had no application tables or runtime role at the start of this deployment-readiness increment. No existing source SQLite database has been identified for transfer.
 
@@ -17,7 +17,7 @@ A Render persistent disk is unnecessary for the application database after this 
 
 ## Current implementation
 
-- `storage.Open` supports SQLite and PostgreSQL via pgx; nine embedded migrations exist for each dialect.
+- `storage.Open` supports SQLite and PostgreSQL via pgx; twelve embedded migrations exist for each dialect.
 - PostgreSQL queries use rebinding and row locking; receipts and stock changes commit together with retry protection.
 - `backend/cmd/schema` applies schema migrations using an administrator connection.
 - `OpenPostgresRuntime` verifies required migration versions without DDL; the deployed image uses `-skip-migrations`.
@@ -30,7 +30,7 @@ A Render persistent disk is unnecessary for the application database after this 
 - [x] Implement PostgreSQL storage support and schema migrations.
 - [x] Preserve current API contracts, ownership checks, and ledger invariants.
 - [x] Test migration and concurrency against a real PostgreSQL test instance (`.github/workflows/ci.yml`, `backend/storage/postgres_integration_test.go`).
-- [x] Implement idempotent restricted-role/RLS setup for all 17 tables (`scripts/supabase_setup.sql`); no password is embedded.
+- [x] Implement idempotent restricted-role/RLS setup for all 18 tables (`scripts/supabase_setup.sql`); no password is embedded.
 - [ ] Apply and verify this configuration on the live Supabase project.
 - [x] Rehearse transfer of any existing SQLite data (`backend/storage/transfer.go`, `backend/cmd/migrate`).
 - [x] Add Render deployment configuration and secret references (`render.yaml`).
@@ -148,7 +148,19 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/supabase_setup.sql
 
 The security script is idempotent. It fails if any expected table is missing, enables RLS on every application table (including pilot tables), revokes access from PUBLIC/anon/authenticated, and grants the server role DML privileges. Migration history is SELECT-only for the runtime role. New roles are NOLOGIN; provision a strong runtime password and enable LOGIN through a secure administrative channel. Do not paste secrets into chat, commit them, or use a placeholder password.
 
-For connector-based initialization, apply the exact seven migration SQL bodies in order, record their versions in the application's `schema_migrations` table, and apply the same security script in one database transaction. Keep managed Supabase migration history distinct from the application's embedded version tracker.
+For connector-based initialization, apply the exact pending embedded PostgreSQL migration SQL bodies in version order, record their versions in the application's `schema_migrations` table, and apply the same security script in one database transaction. Keep managed Supabase migration history distinct from the application's embedded version tracker.
+
+### Release ordering for every schema change
+
+1. Review the migration and compatibility with the currently running application on a feature branch; pass CI against isolated PostgreSQL.
+2. Before merging/deploying schema-dependent code, run `backend/cmd/schema` from that tested revision using a separately supplied administrator connection. For connector execution, apply the exact pending SQL and application migration-version insert atomically.
+3. If tables were added, apply `scripts/supabase_setup.sql`; verify RLS, runtime grants, and all required migration versions.
+4. Merge only after schema preparation succeeds, then verify Render startup and `/readyz` on the deployed commit.
+5. For incompatible migrations, use a separately planned staged rollout; do not apply them to a running service without reviewing compatibility.
+
+The current deployment does not have an automated administrator migration stage. Passing code CI does not migrate live Supabase. A missing migration deliberately blocks startup; port-scan timeout can be a consequence of that failure. Never solve it by granting schema-creation privileges to the web runtime.
+
+Incident evidence, 16 October 2026: Render commit `d15512a` failed because migration 12 was missing, then the fallback failed with SQLSTATE 42501 (permission denied for schema public). The committed `0012_audio_snippet.sql` was applied administratively; schema versions 1–12, `transactions.audio_data` privileges, and RLS were verified. Supabase security advisors returned no findings. This does not establish microphone, audio-retention, or full browser acceptance.
 
 ### Existing data
 
@@ -158,7 +170,7 @@ If real SQLite data exists, first back it up, run `backend/cmd/migrate -dry-run`
 
 - Confirm the user's Render workspace before creation. `render.yaml` proposes a free single-instance Docker web service; approve any paid plan separately.
 - Supply only the restricted role's TLS `DATABASE_URL` to Render. The Docker defaults are `-frontend /app/frontend -require-postgres -skip-migrations`.
-- `render.yaml` specifies `AUTO_MIGRATE: "true"`; if the configured database connection has migration privileges or if pending schema migrations are detected during restricted startup, the orchestrator automatically applies pending migrations instead of failing deployment.
+- `-skip-migrations` is authoritative and always performs read-only schema verification. `AUTO_MIGRATE` no longer overrides it or enables a fallback. Apply migrations with the administrator before release; do not grant CREATE/DDL privileges to the runtime role.
 - Use `/readyz` for readiness (database ping) and `/healthz` for process/WebSocket counters.
 - Use same-origin HTTPS for dashboard/API/WebSockets. Optional `ALLOWED_ORIGINS` is read by the backend; it is normally unnecessary.
 - Keep automatic deploys gated by passing checks. CI builds the exact Dockerfile and verifies restricted-role startup and account persistence after container restart.
