@@ -1372,6 +1372,25 @@ a {
   border: 1px solid #fed7aa;
 }
 
+.badge--offline-queue {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.badge--offline-queue:hover {
+  background: #fde68a;
+}
+
+.badge--offline-queue--syncing {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #7dd3fc;
+}
+
 .counter-dock__transcript {
   font-size: 0.95rem;
   color: #1e293b;

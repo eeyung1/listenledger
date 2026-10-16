@@ -19,6 +19,7 @@ import {
   classifyEnvironmentMode,
 } from "../dist/audio.js";
 import { postCapture } from "../dist/api.js";
+import { clearQueue, getQueuedCount } from "../dist/offline_queue.js";
 import { mountHome } from "../dist/views/home.js";
 
 const HOME_HTML = fs.readFileSync(
@@ -1017,5 +1018,146 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.equal(vadBadge.textContent, "Ambient VAD Idle");
 
     cleanup();
+  });
+
+  await t.test("14. Offline Spoken Capture Queue & Auto-Sync in Home Command Centre", async () => {
+    await clearQueue();
+    let recognitionInstance = null;
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionInstance = this;
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    let isOffline = true;
+    let postCaptureCalls = [];
+    globalThis.fetch = async (url, init = {}) => {
+      const u = String(url);
+      if (u.includes("/api/captures")) {
+        if (isOffline) {
+          throw new TypeError("Failed to fetch"); // Network failure
+        }
+        postCaptureCalls.push(JSON.parse(String(init.body)));
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            capture_id: "cap_synced",
+            shop_id: "shop_test",
+            type: "sale",
+            transactions: [
+              {
+                id: "txn_001",
+                shop_id: "shop_test",
+                type: "sale",
+                product_name: "Milo 500g",
+                quantity: 2,
+                unit: "pack",
+                amount: { amount: 400000, currency: "NGN" },
+                status: "confirmed",
+                occurred_at: new Date().toISOString(),
+                created_at: new Date().toISOString(),
+              },
+            ],
+            requires_review: false,
+          }),
+        };
+      }
+      if (u.includes("/api/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            today_sales_count: 1,
+            today_sales_amount: { amount: 400000, currency: "NGN" },
+            pending_reviews: 0,
+            low_stock_count: 0,
+            active_devices_count: 1,
+            today_expenses_count: 0,
+            today_expenses_amount: { amount: 0, currency: "NGN" },
+            today_net_profit: { amount: 400000, currency: "NGN" },
+          }),
+        };
+      }
+      if (u.includes("/api/transactions")) {
+        return { ok: true, status: 200, json: async () => ({ transactions: [], total: 0, limit: 20, offset: 0 }) };
+      }
+      if (u.includes("/api/inventory")) {
+        return { ok: true, status: 200, json: async () => ({ products: [], low_stock_count: 0 }) };
+      }
+      if (u.includes("/api/onboarding/status")) {
+        return { ok: true, status: 200, json: async () => ({ is_complete: true, steps: {} }) };
+      }
+      if (u.includes("/api/devices")) {
+        return { ok: true, status: 200, json: async () => ({ devices: [] }) };
+      }
+      if (u.includes("/api/customers/credit-summary")) {
+        return { ok: true, status: 200, json: async () => ({ total_outstanding_debt: { amount: 0, currency: "NGN" } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    document.body.innerHTML = HOME_HTML;
+    const cleanup = mountHome(document.body, "shop_test");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const micToggleBtn = document.querySelector("[data-hook='counter-mic-toggle-btn']");
+    const offlineBadge = document.querySelector("[data-hook='counter-offline-badge']");
+    const toast = document.querySelector("[data-hook='counter-capture-toast']");
+
+    assert.notEqual(offlineBadge, null, "offline badge must be mounted");
+    assert.equal(offlineBadge.style.display, "none", "offline badge is initially hidden");
+
+    // Start listening
+    micToggleBtn.dispatchEvent(new MockEvent("click"));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Simulate cashier speaking a sale when network is offline
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [
+        [
+          {
+            transcript: "Two Milo four thousand naira thank you",
+            confidence: 0.95,
+          },
+        ],
+      ],
+    });
+
+    await new Promise((r) => setTimeout(r, 40));
+
+    // Verify capture was saved to offline queue
+    assert.equal(await getQueuedCount(), 1);
+    assert.equal(offlineBadge.style.display, "inline-flex");
+    assert.ok(offlineBadge.textContent.includes("1 Queued Offline"));
+    assert.ok(toast.textContent.includes("Offline Mode: Capture saved to device queue"));
+
+    // Now restore network connection and trigger online sync
+    isOffline = false;
+    window.dispatchEvent(new MockEvent("online"));
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Queue should now be empty and postCapture called
+    assert.equal(await getQueuedCount(), 0);
+    assert.equal(postCaptureCalls.length, 1);
+    assert.equal(postCaptureCalls[0].transcript, "Two Milo four thousand naira thank you");
+    assert.equal(offlineBadge.style.display, "none");
+
+    cleanup();
+    await clearQueue();
   });
 });

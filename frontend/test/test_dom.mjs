@@ -518,6 +518,7 @@ export function setupDOMEnvironment() {
     },
   };
 
+  const winListeners = new Map();
   const window = {
     document,
     prompt: () => null,
@@ -528,10 +529,29 @@ export function setupDOMEnvironment() {
       href: "http://localhost:8080/#/home",
       hash: "#/home",
     },
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => true,
+    addEventListener(type, listener) {
+      if (!winListeners.has(type)) winListeners.set(type, new Set());
+      winListeners.get(type).add(listener);
+    },
+    removeEventListener(type, listener) {
+      winListeners.get(type)?.delete(listener);
+    },
+    dispatchEvent(event) {
+      const set = winListeners.get(event.type);
+      if (set) {
+        for (const l of Array.from(set)) l.call(window, event);
+      }
+      return !event.defaultPrevented;
+    },
   };
+
+  try {
+    if (typeof navigator !== "undefined") {
+      Object.defineProperty(navigator, "onLine", { value: true, configurable: true, writable: true });
+    }
+  } catch {
+    // ignore
+  }
 
   globalThis.document = document;
   globalThis.window = window;
