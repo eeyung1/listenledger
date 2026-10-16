@@ -12,6 +12,11 @@ import {
   speakFeedback,
   CounterSpeechListener,
   playAudioFeedback,
+  calculateAudioRMS,
+  estimateNoiseFloor,
+  calculateSpeechThreshold,
+  calculateAdaptiveSilenceTimeout,
+  classifyEnvironmentMode,
 } from "../dist/audio.js";
 import { postCapture } from "../dist/api.js";
 import { mountHome } from "../dist/views/home.js";
@@ -743,5 +748,274 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     cleanup();
     delete window.speechSynthesis;
     delete window.SpeechSynthesisUtterance;
+  });
+
+  await t.test("11. Ambient VAD Mathematical Algorithms: RMS, noise floor, speech threshold & adaptive silence", () => {
+    // 1. RMS Energy
+    assert.equal(calculateAudioRMS([]), 0);
+    const silence = new Float32Array([0, 0, 0, 0]);
+    assert.equal(calculateAudioRMS(silence), 0);
+    const constantDC = new Float32Array([0.2, 0.2, 0.2, 0.2]);
+    assert.ok(Math.abs(calculateAudioRMS(constantDC) - 0.2) < 0.0001);
+    const wave = new Float32Array([0.1, -0.1, 0.1, -0.1]);
+    assert.ok(Math.abs(calculateAudioRMS(wave) - 0.1) < 0.0001);
+
+    // 2. Noise Floor Estimation (30th percentile filtering)
+    assert.equal(estimateNoiseFloor([]), 0.05);
+    const quietStall = [0.03, 0.04, 0.04, 0.05, 0.06, 0.12, 0.25];
+    const floorQuiet = estimateNoiseFloor(quietStall);
+    assert.ok(floorQuiet <= 0.06 && floorQuiet >= 0.03);
+
+    const noisyMarket = [0.32, 0.35, 0.36, 0.38, 0.40, 0.55, 0.65];
+    const floorNoisy = estimateNoiseFloor(noisyMarket);
+    assert.ok(floorNoisy >= 0.34 && floorNoisy <= 0.40);
+
+    // Clamping limits
+    assert.equal(estimateNoiseFloor([0.001]), 0.02); // min floor clamp
+    assert.equal(estimateNoiseFloor([0.95]), 0.60); // max floor clamp
+
+    // 3. Speech Threshold
+    const speechQuiet = calculateSpeechThreshold(0.04);
+    assert.ok(speechQuiet >= 0.11, "quiet speech threshold should be well above ambient floor");
+    const speechNoisy = calculateSpeechThreshold(0.35);
+    assert.ok(speechNoisy >= 0.54, "noisy speech threshold should guard against market background");
+
+    // 4. Adaptive Silence Timeout
+    // Quiet environment (floor <= 0.06) -> 1200ms
+    assert.equal(calculateAdaptiveSilenceTimeout(0.04), 1200);
+    assert.equal(calculateAdaptiveSilenceTimeout(0.06), 1200);
+    // Noisy market (floor >= 0.40) -> 2500ms
+    assert.equal(calculateAdaptiveSilenceTimeout(0.40), 2500);
+    assert.equal(calculateAdaptiveSilenceTimeout(0.50), 2500);
+    // Moderate noise floor (e.g. 0.23) -> intermediate timeout
+    const moderateTimeout = calculateAdaptiveSilenceTimeout(0.23);
+    assert.ok(moderateTimeout > 1600 && moderateTimeout < 2100);
+
+    // 5. Environment Classification
+    assert.equal(classifyEnvironmentMode(0.05), "quiet");
+    assert.equal(classifyEnvironmentMode(0.18), "moderate");
+    assert.equal(classifyEnvironmentMode(0.35), "noisy");
+  });
+
+  await t.test("12. CounterSpeechListener VAD Engine: Real-time Audio Analyser Calibration, Active Speech Detection & Gating", async () => {
+    let frameCallbacks = [];
+    const origRAF = globalThis.requestAnimationFrame;
+    const origCAF = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = (cb) => {
+      frameCallbacks.push(cb);
+      return frameCallbacks.length;
+    };
+    globalThis.cancelAnimationFrame = (id) => {
+      frameCallbacks[id - 1] = null;
+    };
+
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {
+        this.onend?.(new MockEvent("end"));
+      }
+      stop() {
+        this.onend?.(new MockEvent("end"));
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    let mockAnalyser = null;
+    class MockAnalyserNode {
+      constructor() {
+        mockAnalyser = this;
+        this.frequencyBinCount = 128;
+        this.fftSize = 256;
+        this.samples = new Float32Array(256).fill(0.03); // baseline quiet stall
+      }
+      getFloatTimeDomainData(target) {
+        target.set(this.samples);
+      }
+      getByteFrequencyData(target) {
+        target.fill(15);
+      }
+    }
+
+    class MockAudioContext {
+      constructor() {
+        this.state = "running";
+      }
+      createMediaStreamSource() {
+        return { connect: () => {} };
+      }
+      createAnalyser() {
+        return new MockAnalyserNode();
+      }
+      async resume() {}
+      async close() {
+        this.state = "closed";
+      }
+    }
+    window.AudioContext = MockAudioContext;
+
+    navigator.mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop: () => {} }],
+      }),
+    };
+
+    const vadUpdates = [];
+    const speechActivityEvents = [];
+    const audioLevels = [];
+
+    const listener = new CounterSpeechListener({
+      salePhrase: "thank you",
+      onAudioLevel: (lvl) => audioLevels.push(lvl),
+      onSpeechActivityChange: (active) => speechActivityEvents.push(active),
+      onVADChange: (m) => vadUpdates.push(m),
+    });
+
+    await listener.start();
+    assert.equal(listener.isListening(), true);
+
+    const initialMetrics = listener.getVADMetrics();
+    assert.equal(initialMetrics.isCalibrating, true);
+    assert.equal(listener.isSpeechActive(), false);
+
+    // Run calibration frames (36 frames to satisfy calibration window)
+    for (let f = 0; f < 36; f++) {
+      const cb = frameCallbacks.shift();
+      cb?.();
+    }
+
+    const calibratedMetrics = listener.getVADMetrics();
+    assert.equal(calibratedMetrics.isCalibrating, false);
+    assert.ok(calibratedMetrics.noiseFloor >= 0.02);
+    assert.ok(calibratedMetrics.speechThreshold > calibratedMetrics.noiseFloor);
+    assert.equal(calibratedMetrics.environmentMode, "quiet");
+
+    // Simulate voice onset: cashier begins speaking ("Two Milo...")
+    mockAnalyser.samples.fill(0.25); // high energy above speech threshold
+    for (let f = 0; f < 3; f++) {
+      const cb = frameCallbacks.shift();
+      cb?.();
+    }
+
+    assert.equal(listener.isSpeechActive(), true);
+    assert.ok(speechActivityEvents.includes(true));
+    assert.equal(listener.getVADMetrics().isSpeaking, true);
+
+    // Simulate return to silence (pause between words or finished sentence)
+    mockAnalyser.samples.fill(0.02); // quiet pause
+    for (let f = 0; f < 12; f++) {
+      const cb = frameCallbacks.shift();
+      cb?.();
+    }
+
+    assert.equal(listener.isSpeechActive(), false);
+    assert.equal(speechActivityEvents[speechActivityEvents.length - 1], false);
+
+    // Test calibrateNoiseFloor resets calibration
+    listener.calibrateNoiseFloor();
+    assert.equal(listener.getVADMetrics().isCalibrating, true);
+
+    listener.stop();
+    assert.equal(listener.isSpeechActive(), false);
+    assert.equal(listener.getAudioLevel(), 0);
+
+    globalThis.requestAnimationFrame = origRAF;
+    globalThis.cancelAnimationFrame = origCAF;
+    delete window.AudioContext;
+    delete navigator.mediaDevices;
+  });
+
+  await t.test("13. Home Overview Counter Dock VAD UI: Displays Noise Floor Marker, Active Waveform & Adaptive Silence Badges", async () => {
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes("/api/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            today_sales_count: 2,
+            today_sales_amount: { amount: 1000000, currency: "NGN" },
+            pending_reviews: 0,
+            low_stock_count: 0,
+            active_devices_count: 1,
+            today_expenses_count: 0,
+            today_expenses_amount: { amount: 0, currency: "NGN" },
+            today_net_profit: { amount: 1000000, currency: "NGN" },
+          }),
+        };
+      }
+      if (u.includes("/api/transactions")) {
+        return { ok: true, status: 200, json: async () => ({ transactions: [], total: 0, limit: 20, offset: 0 }) };
+      }
+      if (u.includes("/api/inventory")) {
+        return { ok: true, status: 200, json: async () => ({ products: [], low_stock_count: 0 }) };
+      }
+      if (u.includes("/api/onboarding/status")) {
+        return { ok: true, status: 200, json: async () => ({ is_complete: true, steps: {} }) };
+      }
+      if (u.includes("/api/devices")) {
+        return { ok: true, status: 200, json: async () => ({ devices: [] }) };
+      }
+      if (u.includes("/api/customers/credit-summary")) {
+        return { ok: true, status: 200, json: async () => ({ total_outstanding_debt: { amount: 0, currency: "NGN" } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    document.body.innerHTML = HOME_HTML;
+    const cleanup = mountHome(document.body, "shop_test");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const thresholdMarker = document.querySelector("[data-hook='counter-threshold-marker']");
+    const vadBadge = document.querySelector("[data-hook='counter-vad-badge']");
+    const waveform = document.querySelector("[data-hook='counter-waveform']");
+    const micToggleBtn = document.querySelector("[data-hook='counter-mic-toggle-btn']");
+
+    assert.notEqual(thresholdMarker, null, "VAD noise floor threshold marker must exist");
+    assert.notEqual(vadBadge, null, "VAD status badge must exist");
+    assert.notEqual(waveform, null, "waveform container must exist");
+
+    // Click start listening
+    micToggleBtn.dispatchEvent(new MockEvent("click"));
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.equal(vadBadge.textContent, "Calibrating Ambient Noise…");
+    assert.ok(vadBadge.className.includes("badge--calibrating"));
+
+    // Click stop listening
+    micToggleBtn.dispatchEvent(new MockEvent("click"));
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.equal(vadBadge.textContent, "Ambient VAD Idle");
+
+    cleanup();
   });
 });

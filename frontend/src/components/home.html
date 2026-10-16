@@ -49,12 +49,14 @@
     </div>
     <div class="counter-dock__live-panel" data-hook="counter-live-panel" style="display: none;">
       <div class="counter-dock__meters">
-        <div class="counter-dock__waveform" aria-hidden="true">
+        <div class="counter-dock__waveform" aria-hidden="true" data-hook="counter-waveform">
           <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
         </div>
-        <div class="counter-dock__level-track">
+        <div class="counter-dock__level-track" title="Real-time Audio Energy vs Dynamic Noise Floor">
+          <div class="counter-dock__threshold-marker" data-hook="counter-threshold-marker" title="Ambient Noise Speech Threshold" style="left: 12%;"></div>
           <div class="counter-dock__level-fill" data-hook="counter-level-fill"></div>
         </div>
+        <span class="badge badge--vad badge--calibrating" data-hook="counter-vad-badge">Calibrating…</span>
       </div>
       <div class="counter-dock__transcript" data-hook="counter-live-transcript">
         <em>Say a sale ending with "Thank you" or a restock ending with "Stock received"…</em>

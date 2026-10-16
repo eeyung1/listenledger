@@ -40,6 +40,7 @@ import {
   isSpeechRecognitionSupported,
   playAudioFeedback,
   speakFeedback,
+  type AudioVADMetrics,
   type BoundaryCaptureCandidate,
   type CounterListenerState,
 } from "../audio.js";
@@ -589,6 +590,9 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const micBtnLabel = hook(root, "counter-mic-btn-label");
   const livePanel = hook(root, "counter-live-panel");
   const levelFill = hook(root, "counter-level-fill");
+  const thresholdMarker = hook(root, "counter-threshold-marker");
+  const vadBadge = hook(root, "counter-vad-badge");
+  const waveform = hook(root, "counter-waveform");
   const liveTranscript = hook(root, "counter-live-transcript");
   const captureToast = hook(root, "counter-capture-toast");
 
@@ -677,6 +681,10 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           setText(micBtnLabel, "Stop Listening");
           micToggleBtn.className = "btn counter-dock__toggle-btn counter-dock__toggle-btn--active";
           livePanel.style.display = "flex";
+          if (vadBadge) {
+            vadBadge.className = "badge badge--vad badge--calibrating";
+            setText(vadBadge, "Calibrating Ambient Noise…");
+          }
         } else if (listenerState === "processing") {
           setText(micTitle, "Processing Spoken Capture…");
           setText(micSubtitle, "Validating items against catalogue and recording movement");
@@ -688,6 +696,16 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           setText(micBtnLabel, "Retry Listening");
           micToggleBtn.className = "btn btn--primary counter-dock__toggle-btn";
           if (wakeLockBadge) wakeLockBadge.style.display = "none";
+          if (vadBadge) {
+            vadBadge.className = "badge badge--vad";
+            setText(vadBadge, "Ambient VAD Error");
+          }
+          if (waveform) {
+            waveform.classList.remove("counter-dock__waveform--active");
+          }
+          if (levelFill) {
+            levelFill.classList.remove("counter-dock__level-fill--speaking");
+          }
         } else {
           setText(micTitle, "Counter Microphone");
           setText(micSubtitle, "Idle — Tap to start ambient sales listening on this phone");
@@ -696,6 +714,16 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           micToggleBtn.className = "btn btn--primary counter-dock__toggle-btn";
           livePanel.style.display = "none";
           if (wakeLockBadge) wakeLockBadge.style.display = "none";
+          if (vadBadge) {
+            vadBadge.className = "badge badge--vad";
+            setText(vadBadge, "Ambient VAD Idle");
+          }
+          if (waveform) {
+            waveform.classList.remove("counter-dock__waveform--active");
+          }
+          if (levelFill) {
+            levelFill.classList.remove("counter-dock__level-fill--speaking");
+          }
           if (liveTranscript) {
             liveTranscript.innerHTML = `<em>Say a sale ending with "Thank you" or a restock ending with "Stock received"…</em>`;
           }
@@ -709,6 +737,46 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       onAudioLevel: (level: number) => {
         if (levelFill) {
           levelFill.style.width = `${Math.min(100, Math.round(level * 100))}%`;
+        }
+      },
+      onSpeechActivityChange: (isSpeaking: boolean) => {
+        if (waveform) {
+          if (isSpeaking) {
+            waveform.classList.add("counter-dock__waveform--active");
+          } else {
+            waveform.classList.remove("counter-dock__waveform--active");
+          }
+        }
+        if (levelFill) {
+          if (isSpeaking) {
+            levelFill.classList.add("counter-dock__level-fill--speaking");
+          } else {
+            levelFill.classList.remove("counter-dock__level-fill--speaking");
+          }
+        }
+      },
+      onVADChange: (metrics: AudioVADMetrics) => {
+        if (thresholdMarker) {
+          thresholdMarker.style.left = `${Math.min(95, Math.max(5, Math.round(metrics.speechThreshold * 100)))}%`;
+        }
+        if (vadBadge) {
+          if (metrics.isCalibrating) {
+            vadBadge.className = "badge badge--vad badge--calibrating";
+            setText(vadBadge, "Calibrating Ambient Noise…");
+          } else if (metrics.isSpeaking) {
+            vadBadge.className = "badge badge--vad badge--speaking";
+            setText(vadBadge, "🎙 Voice Active");
+          } else {
+            vadBadge.className = `badge badge--vad badge--${metrics.environmentMode}`;
+            const pauseSec = (metrics.adaptiveSilenceTimeoutMs / 1000).toFixed(1);
+            const label =
+              metrics.environmentMode === "noisy"
+                ? `Market Noise (${pauseSec}s pause)`
+                : metrics.environmentMode === "moderate"
+                ? `Moderate Noise (${pauseSec}s pause)`
+                : `Quiet Stall (${pauseSec}s pause)`;
+            setText(vadBadge, label);
+          }
         }
       },
       onBoundaryDetected: async (candidate: BoundaryCaptureCandidate) => {
