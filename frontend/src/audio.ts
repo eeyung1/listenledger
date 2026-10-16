@@ -25,6 +25,18 @@ export interface BoundaryDetectionResult {
   readonly cleanTranscript?: string | undefined;
 }
 
+export type EnvironmentAudioMode = "quiet" | "moderate" | "noisy";
+
+export interface AudioVADMetrics {
+  readonly currentLevel: number;
+  readonly noiseFloor: number;
+  readonly speechThreshold: number;
+  readonly isSpeaking: boolean;
+  readonly adaptiveSilenceTimeoutMs: number;
+  readonly isCalibrating: boolean;
+  readonly environmentMode: EnvironmentAudioMode;
+}
+
 export interface CounterSpeechListenerOptions {
   readonly salePhrase?: string | undefined;
   readonly restockPhrase?: string | undefined;
@@ -36,6 +48,8 @@ export interface CounterSpeechListenerOptions {
   readonly onError?: ((error: Error) => void) | undefined;
   readonly onAudioLevel?: ((level: number) => void) | undefined;
   readonly onWakeLockChange?: ((active: boolean) => void) | undefined;
+  readonly onSpeechActivityChange?: ((isSpeaking: boolean) => void) | undefined;
+  readonly onVADChange?: ((metrics: AudioVADMetrics) => void) | undefined;
 }
 
 // Minimal browser typing for vendor-prefixed SpeechRecognition
@@ -214,6 +228,63 @@ export function detectClosingBoundary(
 }
 
 /**
+ * Computes Root Mean Square (RMS) energy for audio time-domain samples.
+ */
+export function calculateAudioRMS(samples: Float32Array | number[]): number {
+  if (samples.length === 0) return 0;
+  let sumSquares = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const val = samples[i] ?? 0;
+    sumSquares += val * val;
+  }
+  return Math.sqrt(sumSquares / samples.length);
+}
+
+/**
+ * Estimates ambient background noise floor from historical audio level samples.
+ * Uses 30th percentile filtering to avoid bias from occasional speech or transient sounds.
+ */
+export function estimateNoiseFloor(levels: readonly number[]): number {
+  if (levels.length === 0) return 0.05;
+  const sorted = [...levels].sort((a, b) => a - b);
+  const idx = Math.floor(sorted.length * 0.3);
+  const p30 = sorted[idx] ?? 0.05;
+  return Math.max(0.02, Math.min(0.6, Number(p30.toFixed(3))));
+}
+
+/**
+ * Dynamically computes speech detection threshold above ambient noise floor.
+ */
+export function calculateSpeechThreshold(noiseFloor: number): number {
+  const threshold = Math.max(noiseFloor + 0.07, noiseFloor * 1.55);
+  return Math.min(0.85, Number(threshold.toFixed(3)));
+}
+
+/**
+ * Derives adaptive silence timeout in milliseconds based on ambient noise floor.
+ * Quiet environments: ~1200ms for snappy counter turnover.
+ * Noisy open markets: up to 2500ms to tolerate background interruptions and cashier pauses.
+ */
+export function calculateAdaptiveSilenceTimeout(noiseFloor: number): number {
+  const minFloor = 0.06;
+  const maxFloor = 0.4;
+  const minTimeout = 1200;
+  const maxTimeout = 2500;
+  const clamped = Math.max(minFloor, Math.min(maxFloor, noiseFloor));
+  const ratio = (clamped - minFloor) / (maxFloor - minFloor);
+  return Math.round(minTimeout + ratio * (maxTimeout - minTimeout));
+}
+
+/**
+ * Classifies the acoustic environment profile based on calibrated noise floor.
+ */
+export function classifyEnvironmentMode(noiseFloor: number): EnvironmentAudioMode {
+  if (noiseFloor < 0.12) return "quiet";
+  if (noiseFloor < 0.28) return "moderate";
+  return "noisy";
+}
+
+/**
  * Synthesizes an immediate audio chime feedback using the Web Audio API.
  * Never throws an error if audio autoplay is restricted.
  */
@@ -364,6 +435,18 @@ export class CounterSpeechListener {
   private onVisibilityChangeBound: (() => void) | null = null;
   private catalogueWords: string[] = [];
 
+  // Ambient Voice Activity Detection (VAD) & Adaptive Silence State
+  private vadNoiseFloor = 0.05;
+  private vadSpeechThreshold = 0.12;
+  private vadAdaptiveSilenceTimeoutMs = 1200;
+  private vadIsSpeaking = false;
+  private vadIsCalibrating = false;
+  private vadCalibrationSamples: number[] = [];
+  private vadCalibrationStartTime = 0;
+  private vadSpeechDebounce = 0;
+  private vadSilenceDebounce = 0;
+  private currentAudioLevel = 0;
+
   constructor(options: CounterSpeechListenerOptions = {}) {
     this.options = options;
     if (options.catalogueWords) {
@@ -389,6 +472,51 @@ export class CounterSpeechListener {
 
   public getCatalogueWords(): readonly string[] {
     return this.catalogueWords;
+  }
+
+  /** Returns current voice activity detection (VAD) and noise floor metrics. */
+  public getVADMetrics(): AudioVADMetrics {
+    return {
+      currentLevel: this.currentAudioLevel,
+      noiseFloor: this.vadNoiseFloor,
+      speechThreshold: this.vadSpeechThreshold,
+      isSpeaking: this.vadIsSpeaking,
+      adaptiveSilenceTimeoutMs: this.vadAdaptiveSilenceTimeoutMs,
+      isCalibrating: this.vadIsCalibrating,
+      environmentMode: classifyEnvironmentMode(this.vadNoiseFloor),
+    };
+  }
+
+  /** Returns true if active voice articulation is currently detected above the ambient noise floor. */
+  public isSpeechActive(): boolean {
+    return this.vadIsSpeaking;
+  }
+
+  /** Returns current real-time audio input level (0.0 to 1.0). */
+  public getAudioLevel(): number {
+    return this.currentAudioLevel;
+  }
+
+  /** Returns the dynamically calculated silence pause timeout in milliseconds. */
+  public getAdaptiveSilenceTimeout(): number {
+    return this.vadAdaptiveSilenceTimeoutMs;
+  }
+
+  /**
+   * Resets and triggers an ambient background noise floor calibration cycle.
+   * Useful when market acoustic conditions shift (e.g. generator started or street traffic peak).
+   */
+  public calibrateNoiseFloor(): void {
+    this.vadIsCalibrating = true;
+    this.vadCalibrationStartTime = Date.now();
+    this.vadCalibrationSamples = [];
+    this.vadNoiseFloor = 0.05;
+    this.vadSpeechThreshold = 0.12;
+    this.vadAdaptiveSilenceTimeoutMs = 1200;
+    this.vadIsSpeaking = false;
+    this.vadSpeechDebounce = 0;
+    this.vadSilenceDebounce = 0;
+    this.options.onVADChange?.(this.getVADMetrics());
   }
 
   /**
@@ -429,6 +557,7 @@ export class CounterSpeechListener {
 
     this.isExplicitlyStopped = false;
     this.currentTranscript = "";
+    this.calibrateNoiseFloor();
 
     // 1. Request Screen Wake Lock so mobile phone display doesn't sleep at counter
     await this.requestWakeLock();
@@ -468,6 +597,9 @@ export class CounterSpeechListener {
     void this.releaseWakeLock();
     this.teardownAudioAnalyser();
     this.currentTranscript = "";
+    this.currentAudioLevel = 0;
+    this.vadIsSpeaking = false;
+    this.vadIsCalibrating = false;
     this.setState("idle");
   }
 
@@ -682,22 +814,80 @@ export class CounterSpeechListener {
 
   private startLevelLoop(): void {
     if (!this.analyser) return;
-    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+    const freqData = new Uint8Array(this.analyser.frequencyBinCount);
+    const floatTimeData =
+      typeof this.analyser.getFloatTimeDomainData === "function"
+        ? new Float32Array(this.analyser.fftSize)
+        : null;
 
     const updateLevel = () => {
       if (this.isExplicitlyStopped || !this.analyser) {
         return;
       }
 
-      this.analyser.getByteFrequencyData(dataArray);
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += (dataArray[i] ?? 0);
+      let level = 0;
+      if (floatTimeData && typeof this.analyser.getFloatTimeDomainData === "function") {
+        this.analyser.getFloatTimeDomainData(floatTimeData);
+        const rms = calculateAudioRMS(floatTimeData);
+        // Normalize RMS: 0.35 RMS is typical loud speech peak
+        level = Math.min(1.0, Math.max(0.0, rms / 0.35));
+      } else {
+        this.analyser.getByteFrequencyData(freqData);
+        let sum = 0;
+        for (let i = 0; i < freqData.length; i++) {
+          sum += (freqData[i] ?? 0);
+        }
+        const avg = sum / freqData.length;
+        level = Math.min(1.0, avg / 128.0);
       }
-      const avg = sum / dataArray.length;
-      // Normalize from 0..255 to 0.0..1.0
-      const level = Math.min(1.0, avg / 128.0);
-      this.options.onAudioLevel?.(level);
+
+      this.currentAudioLevel = Number(level.toFixed(3));
+      this.options.onAudioLevel?.(this.currentAudioLevel);
+
+      // 1. Initial Calibration Window (~1200ms or 35 frames)
+      if (this.vadIsCalibrating) {
+        this.vadCalibrationSamples.push(this.currentAudioLevel);
+        const elapsed = Date.now() - this.vadCalibrationStartTime;
+        if (this.vadCalibrationSamples.length >= 35 || elapsed >= 1200) {
+          this.vadIsCalibrating = false;
+          this.vadNoiseFloor = estimateNoiseFloor(this.vadCalibrationSamples);
+          this.vadSpeechThreshold = calculateSpeechThreshold(this.vadNoiseFloor);
+          this.vadAdaptiveSilenceTimeoutMs = calculateAdaptiveSilenceTimeout(this.vadNoiseFloor);
+        } else {
+          this.vadNoiseFloor = estimateNoiseFloor(this.vadCalibrationSamples);
+          this.vadSpeechThreshold = calculateSpeechThreshold(this.vadNoiseFloor);
+          this.vadAdaptiveSilenceTimeoutMs = calculateAdaptiveSilenceTimeout(this.vadNoiseFloor);
+        }
+      } else {
+        // 2. Slow Continuous Ambient Noise Floor Tracking when idle
+        if (!this.vadIsSpeaking && this.currentAudioLevel < this.vadNoiseFloor * 1.35) {
+          this.vadNoiseFloor = Number(
+            (0.985 * this.vadNoiseFloor + 0.015 * this.currentAudioLevel).toFixed(3)
+          );
+          this.vadSpeechThreshold = calculateSpeechThreshold(this.vadNoiseFloor);
+          this.vadAdaptiveSilenceTimeoutMs = calculateAdaptiveSilenceTimeout(this.vadNoiseFloor);
+        }
+
+        // 3. Speech Activity Gating & Debouncing
+        if (this.currentAudioLevel >= this.vadSpeechThreshold) {
+          this.vadSpeechDebounce++;
+          this.vadSilenceDebounce = 0;
+          if (this.vadSpeechDebounce >= 2 && !this.vadIsSpeaking) {
+            this.vadIsSpeaking = true;
+            this.options.onSpeechActivityChange?.(true);
+          }
+        } else {
+          this.vadSilenceDebounce++;
+          this.vadSpeechDebounce = 0;
+          // ~10 frames (~160-250ms) hangover tolerance for pauses between words
+          if (this.vadSilenceDebounce >= 10 && this.vadIsSpeaking) {
+            this.vadIsSpeaking = false;
+            this.options.onSpeechActivityChange?.(false);
+          }
+        }
+      }
+
+      this.options.onVADChange?.(this.getVADMetrics());
 
       this.animFrameId = requestAnimationFrame(updateLevel);
     };
@@ -722,6 +912,11 @@ export class CounterSpeechListener {
     }
 
     this.analyser = null;
+    this.currentAudioLevel = 0;
+    this.vadIsSpeaking = false;
+    this.vadIsCalibrating = false;
     this.options.onAudioLevel?.(0);
+    this.options.onSpeechActivityChange?.(false);
+    this.options.onVADChange?.(this.getVADMetrics());
   }
 }
