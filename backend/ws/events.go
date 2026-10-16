@@ -28,6 +28,8 @@ const (
 	// has been held for a human. Its Data carries the same Transaction shape,
 	// so the Review Queue can render it without a follow-up fetch.
 	EventTransactionReviewRequired EventType = "transaction.review_required"
+	// EventTransactionCancelled announces an in-flight spoken cancellation or voided capture.
+	EventTransactionCancelled EventType = "transaction.cancelled"
 	// EventInventoryUpdated announces that a product's stock level moved.
 	EventInventoryUpdated EventType = "inventory.updated"
 	// EventProductCreated announces a new catalogue entry, including one

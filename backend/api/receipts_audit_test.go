@@ -565,3 +565,159 @@ func TestReviewCorrectionsAndDecisionAuditTrail(t *testing.T) {
 		t.Fatalf("expected stock 8 after confirmation, got %d", prod.Quantity)
 	}
 }
+
+func TestConfirmWithUncataloguedProductOnboarding(t *testing.T) {
+	store, handler, shopID := setupTestApp(t)
+	ctx := context.Background()
+
+	// 1. Spoken restock of an uncatalogued product with spoken supplier
+	capReq := map[string]any{
+		"transcript": "From Golden Penny: 5 cartons spaghetti 18000 naira. stock received",
+	}
+	body, _ := json.Marshal(capReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("unexpected capture status: %d: %s", w.Code, w.Body.String())
+	}
+
+	var capResp struct {
+		Transactions []models.Transaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &capResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(capResp.Transactions) == 0 {
+		t.Fatalf("expected at least 1 held transaction")
+	}
+	heldTxn := capResp.Transactions[0]
+	if heldTxn.Status != models.StatusReviewRequired {
+		t.Fatalf("expected review_required for uncatalogued restock, got %s", heldTxn.Status)
+	}
+	if heldTxn.SupplierName != "Golden Penny" {
+		t.Fatalf("expected supplier Golden Penny, got %q", heldTxn.SupplierName)
+	}
+	if heldTxn.ProductID != "" {
+		t.Fatalf("product_id should be empty for uncatalogued product, got %s", heldTxn.ProductID)
+	}
+
+	// 2. Perform 1-Tap "+ Add to Catalogue & Confirm Restock"
+	confirmPayload := map[string]any{
+		"create_product": map[string]any{
+			"name":      "Golden Penny Spaghetti 500g",
+			"sku":       "GP-SPAG-500",
+			"base_unit": "carton",
+			"price": map[string]any{
+				"amount":   2200000,
+				"currency": "NGN",
+			},
+		},
+		"quantity": 5,
+		"unit":     "carton",
+		"notes":    "Onboarded brand new product from supplier delivery",
+	}
+	confirmBody, _ := json.Marshal(confirmPayload)
+	confirmReq := httptest.NewRequest(http.MethodPost, "/api/transactions/"+heldTxn.ID+"/confirm", bytes.NewReader(confirmBody))
+	confirmReq.Header.Set("Content-Type", "application/json")
+	wConfirm := httptest.NewRecorder()
+	handler.ServeHTTP(wConfirm, confirmReq)
+	if wConfirm.Code != http.StatusOK {
+		t.Fatalf("failed to confirm transaction with product onboard: %d: %s", wConfirm.Code, wConfirm.Body.String())
+	}
+
+	var confirmedTxn models.Transaction
+	if err := json.Unmarshal(wConfirm.Body.Bytes(), &confirmedTxn); err != nil {
+		t.Fatal(err)
+	}
+	if confirmedTxn.Status != models.StatusConfirmed {
+		t.Fatalf("expected confirmed status, got %s", confirmedTxn.Status)
+	}
+	if confirmedTxn.ProductID == "" {
+		t.Fatalf("expected new product ID to be assigned to confirmed transaction")
+	}
+	if confirmedTxn.SupplierName != "Golden Penny" {
+		t.Fatalf("expected supplier Golden Penny preserved on confirmed transaction, got %q", confirmedTxn.SupplierName)
+	}
+
+	// 3. Verify newly created product exists in shop inventory with quantity 5
+	newProd, err := store.GetProductByID(ctx, shopID, confirmedTxn.ProductID)
+	if err != nil {
+		t.Fatalf("failed to load newly onboarded product: %v", err)
+	}
+	if newProd.Name != "Golden Penny Spaghetti 500g" || newProd.SKU != "GP-SPAG-500" {
+		t.Fatalf("unexpected new product details: %+v", newProd)
+	}
+	if newProd.Quantity != 5 {
+		t.Fatalf("expected restocked quantity 5, got %d", newProd.Quantity)
+	}
+}
+
+func TestSpokenCancellationCaptureE2E(t *testing.T) {
+	store, handler, shopID := setupTestApp(t)
+	ctx := context.Background()
+
+	// Seed product
+	_ = store.InsertProduct(ctx, models.Product{
+		ID:        "prd_peak_400",
+		ShopID:    shopID,
+		Name:      "Peak Milk 400g",
+		SKU:       "PEAK-400",
+		Aliases:   []string{"Peak"},
+		Price:     models.Money{Amount: 350000, Currency: "NGN"},
+		Quantity:  10,
+		BaseUnit:  models.UnitPiece,
+		Packaging: []models.PackagingRelation{},
+	})
+
+	// Initial stock of Peak milk is 10
+	prodBefore, err := store.GetProductByID(ctx, shopID, "prd_peak_400")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prodBefore.Quantity != 10 {
+		t.Fatalf("expected initial stock 10, got %d", prodBefore.Quantity)
+	}
+
+	// Capture with spoken cancellation aloud: "2 Peak milk 7000 naira customer cancelled"
+	capReq := map[string]any{
+		"transcript": "2 Peak milk 7000 naira customer cancelled",
+	}
+	body, _ := json.Marshal(capReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("unexpected status: %d: %s", w.Code, w.Body.String())
+	}
+
+	var capResp struct {
+		RequiresReview bool                 `json:"requires_review"`
+		Transactions   []models.Transaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &capResp); err != nil {
+		t.Fatal(err)
+	}
+	if capResp.RequiresReview {
+		t.Fatalf("cancelled transaction should not require review")
+	}
+	if len(capResp.Transactions) == 0 {
+		t.Fatalf("expected cancelled transaction to be recorded")
+	}
+	cancelledTxn := capResp.Transactions[0]
+	if cancelledTxn.Status != models.StatusCancelled {
+		t.Fatalf("expected StatusCancelled, got %s", cancelledTxn.Status)
+	}
+
+	// Verify inventory was NOT mutated (still 10)
+	prodAfter, err := store.GetProductByID(ctx, shopID, "prd_peak_400")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prodAfter.Quantity != 10 {
+		t.Fatalf("expected stock to remain 10 after cancelled sale, got %d", prodAfter.Quantity)
+	}
+}
+

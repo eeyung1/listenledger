@@ -722,9 +722,17 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
             closing_phrase: candidate.closingPhrase,
           });
 
-          if (res.requires_review) {
+          const first = res.transactions[0];
+          const isCancelled = candidate.type === "cancelled" || (first && first.status === "cancelled");
+
+          if (isCancelled) {
+            playAudioFeedback("cancelled");
+            showCaptureToast(`🚫 Cancelled: Transaction cancelled aloud ("${candidate.transcript}")`, "warning");
+            if (voiceFeedbackEnabled) {
+              speakFeedback("Transaction cancelled");
+            }
+          } else if (res.requires_review) {
             playAudioFeedback("review");
-            const first = res.transactions[0];
             const name = first ? first.product_name : "Unrecognized item";
             showCaptureToast(`⚠ Logged for Review: ${name} ("${candidate.transcript}")`, "warning");
             if (voiceFeedbackEnabled) {
@@ -732,15 +740,15 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
             }
           } else {
             playAudioFeedback("sale");
-            const first = res.transactions[0];
             const isRestock = candidate.type === "restock" || (first && first.type === "restock");
             if (isRestock) {
+              const supplierInfo = first?.supplier_name ? ` from ${first.supplier_name}` : "";
               const detail = first
-                ? `${first.quantity} ${first.product_name}`
+                ? `${first.quantity} ${first.product_name}${supplierInfo}`
                 : candidate.transcript;
               showCaptureToast(`✓ Logged Restock: ${detail} (+${first ? first.quantity : ""} stock)`, "success");
               if (voiceFeedbackEnabled && first) {
-                speakFeedback(`Stock received: ${first.quantity} ${first.product_name}`);
+                speakFeedback(`Stock received: ${first.quantity} ${first.product_name}${supplierInfo}`);
               }
             } else {
               const detail = first
@@ -1037,7 +1045,7 @@ function showTestCaptureModal(root: HTMLElement, onDone: () => void): void {
         setText(liveMicBtn, "🎙 Tap to Speak");
         setText(micStatus, `Boundary detected ("${candidate.closingPhrase}")! Evaluating…`);
         liveTranscriptBox.textContent = candidate.transcript;
-        void evaluatePhrase(candidate.transcript, candidate.type);
+        void evaluatePhrase(candidate.transcript, candidate.type === "restock" ? "restock" : "sale");
       },
       onError: (err: Error) => {
         setText(liveMicBtn, "🎙 Tap to Speak");

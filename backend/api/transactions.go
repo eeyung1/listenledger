@@ -474,12 +474,23 @@ func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request, id strin
 	writeJSON(w, http.StatusOK, t)
 }
 
+type createProductOnboard struct {
+	Name              string                     `json:"name"`
+	SKU               string                     `json:"sku,omitempty"`
+	Aliases           []string                   `json:"aliases,omitempty"`
+	Price             models.Money               `json:"price"`
+	BaseUnit          models.Unit                `json:"base_unit"`
+	Packaging         []models.PackagingRelation `json:"packaging,omitempty"`
+	LowStockThreshold int                        `json:"low_stock_threshold,omitempty"`
+}
+
 type confirmTransactionRequest struct {
-	ProductID string        `json:"product_id,omitempty"`
-	Quantity  int           `json:"quantity,omitempty"`
-	Unit      models.Unit   `json:"unit,omitempty"`
-	Amount    *models.Money `json:"amount,omitempty"`
-	Notes     string        `json:"notes,omitempty"`
+	ProductID     string                `json:"product_id,omitempty"`
+	Quantity      int                   `json:"quantity,omitempty"`
+	Unit          models.Unit           `json:"unit,omitempty"`
+	Amount        *models.Money         `json:"amount,omitempty"`
+	Notes         string                `json:"notes,omitempty"`
+	CreateProduct *createProductOnboard `json:"create_product,omitempty"`
 }
 
 func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id string) {
@@ -490,13 +501,91 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 
 	var corrections *storage.ReviewCorrections
 	notes := ""
+	var createProdReq *createProductOnboard
+
 	if r.Body != nil && r.ContentLength > 0 {
 		var req confirmTransactionRequest
 		if !decodeJSON(w, r, &req) {
 			return
 		}
 		notes = strings.TrimSpace(req.Notes)
-		if req.ProductID != "" || req.Quantity > 0 || req.Unit.Valid() || req.Amount != nil {
+		createProdReq = req.CreateProduct
+
+		if req.CreateProduct != nil {
+			origTxn, err := s.store.GetTransactionByID(r.Context(), shopID, id)
+			if err != nil {
+				if errors.Is(err, storage.ErrNotFound) {
+					writeError(w, http.StatusNotFound, "transaction not found")
+					return
+				}
+				s.fail(w, r, "lookup transaction for onboarding", err)
+				return
+			}
+			cp := req.CreateProduct
+			prodName := strings.TrimSpace(cp.Name)
+			if prodName == "" {
+				prodName = strings.TrimSpace(origTxn.ProductName)
+			}
+			if prodName == "" {
+				writeError(w, http.StatusBadRequest, "product name is required for catalogue onboarding")
+				return
+			}
+			sku := strings.TrimSpace(cp.SKU)
+			if sku == "" {
+				sku = generateSKU(prodName)
+			}
+			baseUnit := cp.BaseUnit
+			if !baseUnit.Valid() {
+				if req.Unit.Valid() {
+					baseUnit = req.Unit
+				} else if origTxn.Unit.Valid() {
+					baseUnit = origTxn.Unit
+				} else {
+					baseUnit = models.Unit("piece")
+				}
+			}
+			price := cp.Price
+			if price.Currency == "" {
+				price.Currency = origTxn.Amount.Currency
+			}
+			if price.Currency == "" {
+				price.Currency = "NGN"
+			}
+			if price.Amount < 0 {
+				writeError(w, http.StatusBadRequest, "price cannot be negative")
+				return
+			}
+			prodID, err := newID("prd")
+			if err != nil {
+				s.fail(w, r, "generate product id", err)
+				return
+			}
+
+			if err := models.ValidatePackaging(baseUnit, cp.Packaging); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+
+			newProduct := models.Product{
+				ID:                prodID,
+				ShopID:            shopID,
+				Name:              prodName,
+				SKU:               sku,
+				Aliases:           cp.Aliases,
+				Price:             price,
+				Quantity:          0,
+				BaseUnit:          baseUnit,
+				Packaging:         cp.Packaging,
+				LowStockThreshold: cp.LowStockThreshold,
+			}
+			corrections = &storage.ReviewCorrections{
+				ProductID:  prodID,
+				Quantity:   req.Quantity,
+				Unit:       req.Unit,
+				Amount:     req.Amount,
+				NewProduct: &newProduct,
+			}
+		} else if req.ProductID != "" || req.Quantity > 0 || req.Unit.Valid() || req.Amount != nil {
 			if req.ProductID != "" {
 				prod, err := s.store.GetProductByID(r.Context(), shopID, strings.TrimSpace(req.ProductID))
 				if err != nil {
@@ -537,7 +626,7 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 		case errors.Is(err, storage.ErrNotFound):
 			writeError(w, http.StatusNotFound, "transaction not found")
 		case errors.Is(err, storage.ErrConflict):
-			writeError(w, http.StatusConflict, "transaction is not awaiting review")
+			writeError(w, http.StatusConflict, "transaction is not awaiting review or conflict exists")
 		case errors.Is(err, storage.ErrInsufficientStock):
 			writeError(w, http.StatusConflict, err.Error())
 		case errors.Is(err, storage.ErrCurrency), errors.Is(err, models.ErrPackaging), errors.Is(err, storage.ErrInvalidMovement):
@@ -548,11 +637,35 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
+	if createProdReq != nil && result.Product != nil {
+		s.publish(w, r, shopID, ws.EventProductCreated, *result.Product)
+	}
 	if result.Product != nil {
 		s.publish(w, r, shopID, ws.EventInventoryUpdated, *result.Product)
 	}
 	s.publish(w, r, shopID, ws.EventTransactionUpdated, result.Transaction)
 	writeJSON(w, http.StatusOK, result.Transaction)
+}
+
+func generateSKU(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(name) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else if r == ' ' || r == '-' || r == '_' {
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "-") {
+				b.WriteRune('-')
+			}
+		}
+	}
+	res := strings.Trim(b.String(), "-")
+	if len(res) > 16 {
+		res = res[:16]
+	}
+	if res == "" {
+		res = "SKU"
+	}
+	return fmt.Sprintf("%s-%d", res, (time.Now().UnixNano()/1e6)%10000)
 }
 
 type rejectTransactionRequest struct {

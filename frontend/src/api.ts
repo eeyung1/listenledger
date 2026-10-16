@@ -59,6 +59,7 @@ export interface Transaction {
   readonly created_at: string;
   readonly transcript?: string;
   readonly receipt_id?: string | undefined;
+  readonly supplier_name?: string | undefined;
 }
 
 export interface Product {
@@ -311,12 +312,23 @@ export function fetchSummary(shopId: string, signal?: AbortSignal): Promise<Dail
   return getJSON<DailySummary>("/api/summary", { shop_id: shopId }, signal);
 }
 
+export interface CreateProductOnboard {
+  readonly name: string;
+  readonly sku?: string | undefined;
+  readonly aliases?: readonly string[] | undefined;
+  readonly price: Money;
+  readonly base_unit: Unit;
+  readonly packaging?: readonly PackagingRelation[] | undefined;
+  readonly low_stock_threshold?: number | undefined;
+}
+
 export interface ReviewCorrections {
   readonly product_id?: string | undefined;
   readonly quantity?: number | undefined;
   readonly unit?: Unit | undefined;
   readonly amount?: Money | undefined;
   readonly notes?: string | undefined;
+  readonly create_product?: CreateProductOnboard | undefined;
 }
 
 export type ReviewDecisionType = "confirmed" | "corrected_and_confirmed" | "rejected";
@@ -1223,9 +1235,10 @@ export interface CaptureLineInput {
 export interface CaptureInput {
   readonly capture_id?: string;
   readonly device_id?: string;
-  readonly type?: TransactionType;
+  readonly type?: TransactionType | "cancelled";
   readonly transcript: string;
   readonly closing_phrase?: string;
+  readonly supplier_name?: string;
   readonly occurred_at?: string;
   readonly extracted_lines?: readonly CaptureLineInput[];
 }

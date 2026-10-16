@@ -222,6 +222,8 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 			eventType := ws.EventTransactionCreated
 			if stored.Status == models.StatusReviewRequired {
 				eventType = ws.EventTransactionReviewRequired
+			} else if stored.Status == models.StatusCancelled {
+				eventType = ws.EventTransactionCancelled
 			}
 			s.publish(w, r, shopID, eventType, stored)
 		}

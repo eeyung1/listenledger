@@ -295,3 +295,107 @@ func TestDigitsAndCurrencyFormatting(t *testing.T) {
 		t.Fatalf("expected 2 qty and 400000 amount, got %d and %d", res.Lines[0].Transaction.Quantity, res.Lines[0].Transaction.Amount.Amount)
 	}
 }
+
+func TestExtractSupplier(t *testing.T) {
+	tests := []struct {
+		input        string
+		wantSupplier string
+	}{
+		{
+			input:        "From Dangote: 50 bags sugar 400,000 naira. stock received",
+			wantSupplier: "Dangote",
+		},
+		{
+			input:        "Delivery from Chi Limited, 10 cartons chivita 25,000 naira. stock received",
+			wantSupplier: "Chi Limited",
+		},
+		{
+			input:        "Supplier Golden Penny: 5 cartons spaghetti. stock received",
+			wantSupplier: "Golden Penny",
+		},
+		{
+			input:        "Restock from BUA: 20 bags flour. stock received",
+			wantSupplier: "BUA",
+		},
+		{
+			input:        "From Unilever 10 cartons knorr. stock received",
+			wantSupplier: "Unilever",
+		},
+		{
+			input:        "2 Milo 4000 naira. thank you",
+			wantSupplier: "",
+		},
+	}
+
+	for _, tc := range tests {
+		supp, remaining := validate.ExtractSupplier(tc.input)
+		if supp != tc.wantSupplier {
+			t.Errorf("ExtractSupplier(%q): got supplier %q, want %q", tc.input, supp, tc.wantSupplier)
+		}
+		if tc.wantSupplier != "" && remaining == tc.input {
+			t.Errorf("ExtractSupplier(%q): remaining text was not stripped", tc.input)
+		}
+	}
+}
+
+func TestDetectCancellation(t *testing.T) {
+	tests := []struct {
+		input     string
+		wantMatch bool
+	}{
+		{"cancel sale", true},
+		{"Customer cancelled the purchase", true},
+		{"Please cancel transaction", true},
+		{"Never mind, drop that", true},
+		{"Cancel that", true},
+		{"Two milo 4000 naira thank you", false},
+	}
+
+	for _, tc := range tests {
+		_, got := validate.DetectCancellation(tc.input)
+		if got != tc.wantMatch {
+			t.Errorf("DetectCancellation(%q) = %v, want %v", tc.input, got, tc.wantMatch)
+		}
+	}
+}
+
+func TestValidateSpokenCancellationAndSupplier(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+
+	// 1. Spoken cancellation aloud
+	cancelReq := validate.CaptureRequest{
+		CaptureID:  "cap_cancel_01",
+		Transcript: "Two milo 4000 naira wait customer cancelled",
+	}
+	res, err := engine.Validate(context.Background(), cancelReq, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error on cancel validate: %v", err)
+	}
+	if res.RequiresReview {
+		t.Fatalf("cancelled transaction should not require review, got RequiresReview=true")
+	}
+	if len(res.Lines) == 0 {
+		t.Fatalf("expected at least 1 validated line")
+	}
+	if res.Lines[0].Transaction.Status != models.StatusCancelled {
+		t.Fatalf("expected StatusCancelled, got %s", res.Lines[0].Transaction.Status)
+	}
+
+	// 2. Spoken restock with supplier
+	restockReq := validate.CaptureRequest{
+		CaptureID:  "cap_restock_01",
+		Transcript: "From Dangote: 10 cartons milo 200,000 naira. stock received",
+	}
+	res2, err := engine.Validate(context.Background(), restockReq, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error on restock validate: %v", err)
+	}
+	if len(res2.Lines) == 0 {
+		t.Fatalf("expected at least 1 line for restock")
+	}
+	if res2.Lines[0].Transaction.SupplierName != "Dangote" {
+		t.Fatalf("expected supplier Dangote, got %q", res2.Lines[0].Transaction.SupplierName)
+	}
+}
+

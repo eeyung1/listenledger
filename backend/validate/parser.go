@@ -277,8 +277,8 @@ func cleanProductMention(raw string, anchors ParsedAnchors) string {
 	}
 	s = regexp.MustCompile(`\b[0-9]+\b`).ReplaceAllString(s, " ")
 
-	// Remove conversational greetings, correction markers, fillers, and noise words
-	s = regexp.MustCompile(`(?i)\b(?:good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|how\s+far|hello|hi|welcome|sorry|wait\s+no|no\s+wait|wait|no|i\s+mean|make\s+that|actually|correction|uh|um|ah|er|eh|okay|alright|of|and|please|for|at|that\s+is\s+all)\b`).ReplaceAllString(s, " ")
+	// Remove conversational greetings, correction markers, fillers, supplier prefixes, and noise words
+	s = regexp.MustCompile(`(?i)\b(?:good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|how\s+far|hello|hi|welcome|sorry|wait\s+no|no\s+wait|wait|no|i\s+mean|make\s+that|actually|correction|uh|um|ah|er|eh|okay|alright|of|and|please|for|at|that\s+is\s+all|delivery\s+from|received\s+from|restock\s+from|from\s+supplier|supplier|delivery|restock)\b`).ReplaceAllString(s, " ")
 
 	var b strings.Builder
 	for _, r := range s {
@@ -358,3 +358,66 @@ func SplitTranscriptLines(transcript, closingPhrase string) []string {
 
 	return merged
 }
+
+var cancellationPhrases = []string{
+	"cancel sale",
+	"cancel the sale",
+	"cancel transaction",
+	"cancel this transaction",
+	"customer cancelled",
+	"customer canceled",
+	"cancel that",
+	"cancel this",
+	"drop that",
+	"never mind",
+	"don't record",
+	"do not record",
+	"cancel restock",
+	"scratch that",
+	"stop recording",
+}
+
+// DetectCancellation checks if the spoken transcript contains an in-flight cancellation phrase (blueprint §18).
+func DetectCancellation(transcript string) (string, bool) {
+	lower := strings.ToLower(transcript)
+	for _, phrase := range cancellationPhrases {
+		if strings.Contains(lower, phrase) {
+			return phrase, true
+		}
+	}
+	return "", false
+}
+
+var supplierPrefixRegex = regexp.MustCompile(`(?i)^(?:delivery\s+from|received\s+from|restock\s+from|from\s+supplier|supplier|from)\s+([A-Za-z0-9&'.\s-]+?)(?::|\s*[-–—]\s*|\s*,\s*|\s+(?:we\s+got|got|received|brought|delivered|items?|products?|[0-9]+|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|hundred)\b))`)
+
+// ExtractSupplier parses spoken supplier attribution from restock utterances (blueprint §18).
+// Returns the clean supplier name and the transcript with the supplier clause stripped.
+func ExtractSupplier(text string) (string, string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", text
+	}
+
+	match := supplierPrefixRegex.FindStringSubmatchIndex(trimmed)
+	if len(match) >= 4 {
+		nameStart, nameEnd := match[2], match[3]
+		candidate := strings.TrimSpace(trimmed[nameStart:nameEnd])
+		lower := strings.ToLower(candidate)
+		// Discard noise matches like "today", "yesterday", "the store"
+		if candidate != "" && lower != "today" && lower != "yesterday" && lower != "the" && lower != "warehouse" && lower != "store" {
+			prefixSlice := trimmed[match[0]:match[1]]
+			sepIdx := strings.IndexAny(prefixSlice, ":-–—,")
+			var remaining string
+			if sepIdx >= 0 {
+				remaining = strings.TrimSpace(trimmed[match[0]+sepIdx+1:])
+			} else {
+				remaining = strings.TrimSpace(trimmed[nameEnd:])
+			}
+			cleanName := strings.Trim(candidate, ":-–—, \t\r\n")
+			return cleanName, remaining
+		}
+	}
+
+	return "", text
+}
+

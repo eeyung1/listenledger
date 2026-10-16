@@ -92,6 +92,10 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         `${formatQuantity(transaction.quantity, transaction.unit)} · ${formatMoney(transaction.amount)}`,
       ),
     );
+    if (transaction.supplier_name) {
+      const supp = el("span", "badge badge--accent", `Supplier: ${transaction.supplier_name}`);
+      head.append(supp);
+    }
     if (transaction.receipt_id) {
       const rcpt = el("span", "badge badge--mono", `Receipt: ${transaction.receipt_id}`);
       head.append(rcpt);
@@ -111,14 +115,23 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     scores.title = "Recognition confidence per anchor; the weakest one held this capture";
 
     const actions = el("div", "review-card__actions");
+    let onboardBtn: HTMLButtonElement | null = null;
     const confirmBtn = el("button", "button button--primary button--sm", "Confirm");
     const editBtn = el("button", "button button--secondary button--sm", "Edit & Confirm");
     const rejectBtn = el("button", "button button--secondary button--sm", "Reject");
     const errorMsg = el("span", "review-card__error");
     errorMsg.hidden = true;
 
+    if (!transaction.product_id) {
+      onboardBtn = el("button", "button button--primary button--sm", "+ Add to Catalogue & Confirm");
+      onboardBtn.addEventListener("click", () => {
+        showOnboardProductModal(transaction);
+      });
+    }
+
     confirmBtn.addEventListener("click", async () => {
       confirmBtn.disabled = true;
+      if (onboardBtn) onboardBtn.disabled = true;
       editBtn.disabled = true;
       rejectBtn.disabled = true;
       confirmBtn.textContent = "Confirming…";
@@ -129,6 +142,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         applyLedgerTransaction(updated, false);
       } catch (err: unknown) {
         confirmBtn.disabled = false;
+        if (onboardBtn) onboardBtn.disabled = false;
         editBtn.disabled = false;
         rejectBtn.disabled = false;
         confirmBtn.textContent = "Confirm";
@@ -147,6 +161,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       );
       if (notes === null) return;
       confirmBtn.disabled = true;
+      if (onboardBtn) onboardBtn.disabled = true;
       editBtn.disabled = true;
       rejectBtn.disabled = true;
       rejectBtn.textContent = "Rejecting…";
@@ -157,6 +172,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         applyLedgerTransaction(updated, false);
       } catch (err: unknown) {
         confirmBtn.disabled = false;
+        if (onboardBtn) onboardBtn.disabled = false;
         editBtn.disabled = false;
         rejectBtn.disabled = false;
         rejectBtn.textContent = "Reject";
@@ -165,7 +181,11 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       }
     });
 
-    actions.append(confirmBtn, editBtn, rejectBtn, errorMsg);
+    if (onboardBtn) {
+      actions.append(onboardBtn, confirmBtn, editBtn, rejectBtn, errorMsg);
+    } else {
+      actions.append(confirmBtn, editBtn, rejectBtn, errorMsg);
+    }
     card.append(head, transcript, scores, actions);
     return card;
   }
@@ -194,6 +214,11 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     const direction = cell(`table__cell table__cell--${transaction.type}`, formatDirection(transaction.type));
     const product = cell("table__cell");
     product.append(document.createTextNode(transaction.product_name));
+    if (transaction.supplier_name) {
+      const suppBadge = el("span", "badge badge--accent", `From: ${transaction.supplier_name}`);
+      suppBadge.style.marginLeft = "0.5rem";
+      product.append(suppBadge);
+    }
     if (transaction.receipt_id) {
       const rcptBadge = el("span", "badge badge--mono", "Receipt");
       rcptBadge.title = `Receipt: ${transaction.receipt_id} (click to filter)`;
@@ -413,6 +438,161 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         ledgerBody.append(row);
       }
     }
+  }
+
+  function showOnboardProductModal(transaction: Transaction): void {
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal-dialog");
+
+    const header = el("div", "modal-header");
+    const title = el("h3", "modal-title", "1-Tap Add Product to Catalogue & Confirm");
+    const closeBtn = el("button", "button button--secondary button--sm", "✕");
+    closeBtn.type = "button";
+    header.append(title, closeBtn);
+
+    const form = el("form", "modal-form");
+    const help = el(
+      "p",
+      "modal-help",
+      "Create this uncatalogued product in your shop catalogue and confirm the stock movement in one atomic step.",
+    );
+
+    const transcriptInfo = el(
+      "div",
+      "review-card__transcript",
+      transaction.transcript ? `Spoken: “${transaction.transcript}”` : `Captured: ${transaction.product_name}`,
+    );
+
+    const nameLabel = el("label", "form-field", "Product Name *");
+    const nameInput = el("input", "input") as HTMLInputElement;
+    nameInput.type = "text";
+    nameInput.required = true;
+    nameInput.value = transaction.product_name || "";
+    nameLabel.append(nameInput);
+
+    const skuLabel = el("label", "form-field", "SKU *");
+    const skuInput = el("input", "input") as HTMLInputElement;
+    skuInput.type = "text";
+    skuInput.required = true;
+    const cleanName = (transaction.product_name || "PROD")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 15);
+    skuInput.value = `${cleanName || "SKU"}-${Math.floor(1000 + Math.random() * 9000)}`;
+    skuLabel.append(skuInput);
+
+    const unitLabel = el("label", "form-field", "Base Unit *");
+    const unitSelect = el("select", "input") as HTMLSelectElement;
+    for (const u of ["piece", "pack", "carton", "bottle", "crate", "tin"] as const) {
+      const opt = new Option(u, u);
+      if (transaction.unit === u) opt.selected = true;
+      unitSelect.append(opt);
+    }
+    unitLabel.append(unitSelect);
+
+    const priceLabel = el("label", "form-field", `Retail Selling Price in kobo (${transaction.amount.currency}) *`);
+    const priceInput = el("input", "input") as HTMLInputElement;
+    priceInput.type = "number";
+    priceInput.min = "0";
+    const unitCost =
+      transaction.quantity > 0
+        ? Math.round(transaction.amount.amount / transaction.quantity)
+        : transaction.amount.amount;
+    priceInput.value = String(unitCost > 0 ? Math.round(unitCost * 1.25) : 100000);
+    priceLabel.append(priceInput);
+
+    const qtyLabel = el("label", "form-field", "Restock Quantity *");
+    const qtyInput = el("input", "input") as HTMLInputElement;
+    qtyInput.type = "number";
+    qtyInput.min = "1";
+    qtyInput.value = String(transaction.quantity > 0 ? transaction.quantity : 1);
+    qtyLabel.append(qtyInput);
+
+    let supplierSection: HTMLElement | null = null;
+    if (transaction.supplier_name) {
+      supplierSection = el("p", "modal-help", `Spoken Supplier: ${transaction.supplier_name}`);
+    }
+
+    const formError = el("p", "form-error");
+    formError.hidden = true;
+
+    const actions = el("div", "modal-actions");
+    const cancelBtn = el("button", "button button--secondary", "Cancel");
+    cancelBtn.type = "button";
+    const submitBtn = el("button", "button button--primary", "Add Product & Confirm Restock");
+    submitBtn.type = "submit";
+    actions.append(cancelBtn, submitBtn);
+
+    const closeModal = () => {
+      overlay.remove();
+    };
+
+    closeBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = nameInput.value.trim();
+      const sku = skuInput.value.trim();
+      const baseUnit = unitSelect.value as Unit;
+      const priceAmount = Number(priceInput.value);
+      const qty = Number(qtyInput.value);
+
+      if (!name) {
+        formError.textContent = "Product name is required.";
+        formError.hidden = false;
+        return;
+      }
+      if (!sku) {
+        formError.textContent = "SKU is required.";
+        formError.hidden = false;
+        return;
+      }
+
+      submitBtn.disabled = true;
+      cancelBtn.disabled = true;
+      submitBtn.textContent = "Onboarding & Confirming…";
+      formError.hidden = true;
+
+      try {
+        const updated = await confirmTransaction(transaction.id, {
+          create_product: {
+            name,
+            sku,
+            base_unit: baseUnit,
+            price: {
+              amount: priceAmount,
+              currency: transaction.amount.currency,
+            },
+          },
+          quantity: qty,
+          unit: baseUnit,
+          notes: `1-Tap product onboarding for ${name}`,
+        });
+        removeHeldTransaction(updated.id);
+        applyLedgerTransaction(updated, false);
+        closeModal();
+      } catch (err: unknown) {
+        submitBtn.disabled = false;
+        cancelBtn.disabled = false;
+        submitBtn.textContent = "Add Product & Confirm Restock";
+        formError.hidden = false;
+        formError.textContent = err instanceof Error ? err.message : "Onboarding failed";
+      }
+    });
+
+    form.append(help, transcriptInfo, nameLabel, skuLabel, unitLabel, priceLabel, qtyLabel);
+    if (supplierSection) form.append(supplierSection);
+    form.append(formError, actions);
+    modal.append(header, form);
+    overlay.append(modal);
+    document.body.append(overlay);
+    nameInput.focus();
   }
 
   function showEditConfirmModal(transaction: Transaction): void {
