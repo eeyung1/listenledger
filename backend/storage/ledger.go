@@ -26,11 +26,13 @@ const (
 )
 
 type ReviewValuesSnapshot struct {
-	ProductID   string       `json:"product_id,omitempty"`
-	ProductName string       `json:"product_name"`
-	Quantity    int          `json:"quantity"`
-	Unit        models.Unit  `json:"unit"`
-	Amount      models.Money `json:"amount"`
+	ProductID    string       `json:"product_id,omitempty"`
+	ProductName  string       `json:"product_name"`
+	Quantity     int          `json:"quantity"`
+	Unit         models.Unit  `json:"unit"`
+	Amount       models.Money `json:"amount"`
+	CustomerID   string       `json:"customer_id,omitempty"`
+	CustomerName string       `json:"customer_name,omitempty"`
 }
 
 type ReviewDecision struct {
@@ -225,11 +227,13 @@ const (
 )
 
 type ReviewCorrections struct {
-	ProductID  string          `json:"product_id,omitempty"`
-	Quantity   int             `json:"quantity,omitempty"`
-	Unit       models.Unit     `json:"unit,omitempty"`
-	Amount     *models.Money   `json:"amount,omitempty"`
-	NewProduct *models.Product `json:"new_product,omitempty"`
+	ProductID    string          `json:"product_id,omitempty"`
+	Quantity     int             `json:"quantity,omitempty"`
+	Unit         models.Unit     `json:"unit,omitempty"`
+	Amount       *models.Money   `json:"amount,omitempty"`
+	NewProduct   *models.Product `json:"new_product,omitempty"`
+	CustomerID   string          `json:"customer_id,omitempty"`
+	CustomerName string          `json:"customer_name,omitempty"`
 }
 
 // ResolveReview resolves a held capture (review_required) by either confirming it
@@ -277,11 +281,13 @@ func (s *Store) ResolveReview(
 	}
 
 	originalSnapshot := ReviewValuesSnapshot{
-		ProductID:   t.ProductID,
-		ProductName: t.ProductName,
-		Quantity:    t.Quantity,
-		Unit:        t.Unit,
-		Amount:      t.Amount,
+		ProductID:    t.ProductID,
+		ProductName:  t.ProductName,
+		Quantity:     t.Quantity,
+		Unit:         t.Unit,
+		Amount:       t.Amount,
+		CustomerID:   t.CustomerID,
+		CustomerName: t.CustomerName,
 	}
 
 	if action == ReviewActionReject {
@@ -387,6 +393,14 @@ func (s *Store) ResolveReview(
 				wasCorrected = true
 			}
 		}
+		if corrections.CustomerID != "" && corrections.CustomerID != t.CustomerID {
+			t.CustomerID = corrections.CustomerID
+			wasCorrected = true
+		}
+		if corrections.CustomerName != "" && corrections.CustomerName != t.CustomerName {
+			t.CustomerName = corrections.CustomerName
+			wasCorrected = true
+		}
 	}
 
 	if t.ProductID == "" {
@@ -440,8 +454,8 @@ func (s *Store) ResolveReview(
 	}
 
 	t.Status = models.StatusConfirmed
-	res, err := tx.ExecContext(ctx, s.rebind(`UPDATE transactions SET status=?, product_id=?, product_name=?, quantity=?, unit=?, amount_amount=?, amount_currency=? WHERE shop_id=? AND id=? AND status=?`),
-		string(models.StatusConfirmed), t.ProductID, t.ProductName, t.Quantity, string(t.Unit), t.Amount.Amount, t.Amount.Currency, shopID, t.ID, string(models.StatusReviewRequired))
+	res, err := tx.ExecContext(ctx, s.rebind(`UPDATE transactions SET status=?, product_id=?, product_name=?, quantity=?, unit=?, amount_amount=?, amount_currency=?, customer_id=?, customer_name=? WHERE shop_id=? AND id=? AND status=?`),
+		string(models.StatusConfirmed), t.ProductID, t.ProductName, t.Quantity, string(t.Unit), t.Amount.Amount, t.Amount.Currency, t.CustomerID, t.CustomerName, shopID, t.ID, string(models.StatusReviewRequired))
 	if err != nil {
 		return LedgerResult{}, err
 	}
@@ -467,11 +481,13 @@ func (s *Store) ResolveReview(
 		DecidedAt:      decidedNow,
 		OriginalValues: originalSnapshot,
 		CorrectedValues: ReviewValuesSnapshot{
-			ProductID:   t.ProductID,
-			ProductName: t.ProductName,
-			Quantity:    t.Quantity,
-			Unit:        t.Unit,
-			Amount:      t.Amount,
+			ProductID:    t.ProductID,
+			ProductName:  t.ProductName,
+			Quantity:     t.Quantity,
+			Unit:         t.Unit,
+			Amount:       t.Amount,
+			CustomerID:   t.CustomerID,
+			CustomerName: t.CustomerName,
 		},
 		Notes: notes,
 	}

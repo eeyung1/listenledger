@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/eeyung1/listenledger-backend/models"
 	"github.com/eeyung1/listenledger-backend/storage"
@@ -107,6 +108,15 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	customers, _, err := s.store.ListCustomers(r.Context(), storage.CustomerQuery{
+		ShopID: shopID,
+		Limit:  200,
+	})
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		s.fail(w, r, "load customers for capture", err)
+		return
+	}
+
 	// 3. Run validation engine
 	validationRes, err := s.validateEngine.Validate(
 		r.Context(),
@@ -117,6 +127,7 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 		salePhrase,
 		restockPhrase,
 		catalogue,
+		customers,
 	)
 	if err != nil {
 		s.fail(w, r, "validate capture", err)
@@ -226,6 +237,47 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 				eventType = ws.EventTransactionCancelled
 			}
 			s.publish(w, r, shopID, eventType, stored)
+		}
+	}
+
+	// Spoken Customer Credit Book Integration (Blueprint §18)
+	if !allReplayed && validationRes.IsCreditSale && validationRes.CustomerID != "" {
+		var totalCreditAmount int64
+		for _, result := range results {
+			if !result.Replayed && result.Transaction.Status == models.StatusConfirmed &&
+				result.Transaction.Type == models.TypeSale &&
+				result.Transaction.CustomerID == validationRes.CustomerID {
+				totalCreditAmount += result.Transaction.Amount.Amount
+			}
+		}
+
+		if totalCreditAmount > 0 {
+			debtID := fmt.Sprintf("dbt_cap_%s", req.CaptureID)
+			debtDesc := fmt.Sprintf("Voice credit purchase (%s)", req.CaptureID)
+			debtOccurredAt := time.Now().UTC()
+			if len(storedTransactions) > 0 && !storedTransactions[0].OccurredAt.IsZero() {
+				debtOccurredAt = storedTransactions[0].OccurredAt
+			}
+			recordedDebt, err := s.store.RecordCustomerDebt(r.Context(), models.CustomerDebt{
+				ID:          debtID,
+				ShopID:      shopID,
+				CustomerID:  validationRes.CustomerID,
+				Type:        models.DebtTypeCreditSale,
+				Amount:      models.Money{Amount: totalCreditAmount, Currency: currency},
+				Description: debtDesc,
+				ReceiptRef:  req.CaptureID,
+				OccurredAt:  debtOccurredAt,
+				CreatedBy:   "voice_intake",
+			})
+			if err == nil {
+				updatedCust, err := s.store.GetCustomerByID(r.Context(), shopID, validationRes.CustomerID)
+				if err == nil {
+					s.publish(w, r, shopID, ws.EventCustomerDebtRecorded, map[string]any{
+						"debt":     recordedDebt,
+						"customer": updatedCust,
+					})
+				}
+			}
 		}
 	}
 

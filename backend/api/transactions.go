@@ -93,6 +93,10 @@ func parseTransactionFilter(r *http.Request) (storage.TransactionFilter, error) 
 		filter.ReceiptID = receiptID
 	}
 
+	if customerID := strings.TrimSpace(q.Get("customer_id")); customerID != "" {
+		filter.CustomerID = customerID
+	}
+
 	if rawFrom := strings.TrimSpace(q.Get("from")); rawFrom != "" {
 		t, err := time.Parse(time.RFC3339, rawFrom)
 		if err != nil {
@@ -489,6 +493,8 @@ type confirmTransactionRequest struct {
 	Quantity      int                   `json:"quantity,omitempty"`
 	Unit          models.Unit           `json:"unit,omitempty"`
 	Amount        *models.Money         `json:"amount,omitempty"`
+	CustomerID    string                `json:"customer_id,omitempty"`
+	CustomerName  string                `json:"customer_name,omitempty"`
 	Notes         string                `json:"notes,omitempty"`
 	CreateProduct *createProductOnboard `json:"create_product,omitempty"`
 }
@@ -617,6 +623,29 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 				Amount:    req.Amount,
 			}
 		}
+
+		if req.CustomerID != "" {
+			cust, err := s.store.GetCustomerByID(r.Context(), shopID, strings.TrimSpace(req.CustomerID))
+			if err != nil {
+				if errors.Is(err, storage.ErrNotFound) {
+					writeError(w, http.StatusBadRequest, "customer_id does not exist in shop credit book")
+					return
+				}
+				s.fail(w, r, "lookup customer for confirmation", err)
+				return
+			}
+			if req.CustomerName == "" {
+				req.CustomerName = cust.Name
+			}
+		}
+
+		if corrections == nil && (req.CustomerID != "" || req.CustomerName != "") {
+			corrections = &storage.ReviewCorrections{}
+		}
+		if corrections != nil && (req.CustomerID != "" || req.CustomerName != "") {
+			corrections.CustomerID = strings.TrimSpace(req.CustomerID)
+			corrections.CustomerName = strings.TrimSpace(req.CustomerName)
+		}
 	}
 
 	decidedBy := s.callerIdentity(r)
@@ -644,6 +673,47 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 		s.publish(w, r, shopID, ws.EventInventoryUpdated, *result.Product)
 	}
 	s.publish(w, r, shopID, ws.EventTransactionUpdated, result.Transaction)
+
+	// Attribute credit sale to customer's tab if not already recorded
+	if result.Transaction.Status == models.StatusConfirmed && result.Transaction.Type == models.TypeSale && result.Transaction.CustomerID != "" {
+		lowerTranscript := strings.ToLower(result.Transaction.Transcript)
+		isCredit := strings.Contains(lowerTranscript, "credit") || strings.Contains(lowerTranscript, "tab") || strings.Contains(lowerTranscript, "debt") || strings.Contains(lowerTranscript, "account")
+		if isCredit {
+			debts, _, _ := s.store.ListCustomerDebts(r.Context(), shopID, result.Transaction.CustomerID, 50, 0)
+			alreadyRecorded := false
+			for _, d := range debts {
+				if d.ReceiptRef == result.Transaction.ID || (result.Transaction.ReceiptID != "" && d.ReceiptRef == result.Transaction.ReceiptID) {
+					alreadyRecorded = true
+					break
+				}
+			}
+			if !alreadyRecorded && result.Transaction.Amount.Amount > 0 {
+				debtID := fmt.Sprintf("dbt_rev_%s", result.Transaction.ID)
+				debtDesc := fmt.Sprintf("Confirmed credit sale (%s)", result.Transaction.ID)
+				recordedDebt, err := s.store.RecordCustomerDebt(r.Context(), models.CustomerDebt{
+					ID:          debtID,
+					ShopID:      shopID,
+					CustomerID:  result.Transaction.CustomerID,
+					Type:        models.DebtTypeCreditSale,
+					Amount:      result.Transaction.Amount,
+					Description: debtDesc,
+					ReceiptRef:  result.Transaction.ID,
+					OccurredAt:  result.Transaction.OccurredAt,
+					CreatedBy:   decidedBy,
+				})
+				if err == nil {
+					updatedCust, err := s.store.GetCustomerByID(r.Context(), shopID, result.Transaction.CustomerID)
+					if err == nil {
+						s.publish(w, r, shopID, ws.EventCustomerDebtRecorded, map[string]any{
+							"debt":     recordedDebt,
+							"customer": updatedCust,
+						})
+					}
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, result.Transaction)
 }
 

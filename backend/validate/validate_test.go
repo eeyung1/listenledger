@@ -477,3 +477,141 @@ func TestValidateCompoundMultiItemUtterance(t *testing.T) {
 		t.Errorf("expected Line 2 status confirmed, got %s (reasons: %v)", line2.Status, res.Lines[1].ReviewReasons)
 	}
 }
+
+func TestExtractCustomer(t *testing.T) {
+	tests := []struct {
+		input        string
+		wantCustomer string
+		wantCredit   bool
+	}{
+		{
+			input:        "two milo for Emeka on credit thank you",
+			wantCustomer: "Emeka",
+			wantCredit:   true,
+		},
+		{
+			input:        "three peak milk to Mama Ngozi on tab thank you",
+			wantCustomer: "Mama Ngozi",
+			wantCredit:   true,
+		},
+		{
+			input:        "two milo on credit for Emeka thank you",
+			wantCustomer: "Emeka",
+			wantCredit:   true,
+		},
+		{
+			input:        "Put on Emeka's tab: 2 Milo 500 naira",
+			wantCustomer: "Emeka",
+			wantCredit:   true,
+		},
+		{
+			input:        "Credit sale for Baba Tunde: 5 Indomie",
+			wantCustomer: "Baba Tunde",
+			wantCredit:   true,
+		},
+		{
+			input:        "Customer: Chinedu, 2 Milo thank you",
+			wantCustomer: "Chinedu",
+			wantCredit:   false,
+		},
+		{
+			input:        "2 Milo 500 naira on credit thank you",
+			wantCustomer: "",
+			wantCredit:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		cust, isCredit, _ := validate.ExtractCustomer(tc.input)
+		if cust != tc.wantCustomer {
+			t.Errorf("ExtractCustomer(%q) customer = %q, want %q", tc.input, cust, tc.wantCustomer)
+		}
+		if isCredit != tc.wantCredit {
+			t.Errorf("ExtractCustomer(%q) isCredit = %v, want %v", tc.input, isCredit, tc.wantCredit)
+		}
+	}
+}
+
+func TestMatchCustomer(t *testing.T) {
+	customers := []models.Customer{
+		{
+			ID:   "cust_1",
+			Name: "Emeka Okafor",
+		},
+		{
+			ID:   "cust_2",
+			Name: "Mama Ngozi",
+		},
+		{
+			ID:   "cust_3",
+			Name: "Baba Tunde",
+		},
+	}
+
+	// Exact Name match
+	m1 := validate.MatchCustomer("Mama Ngozi", customers)
+	if m1.Customer == nil || m1.Customer.ID != "cust_2" || m1.Confidence < 0.95 {
+		t.Errorf("expected exact match for Mama Ngozi, got %+v", m1)
+	}
+
+	// Token match: "Emeka" matches "Emeka Okafor"
+	m2 := validate.MatchCustomer("Emeka", customers)
+	if m2.Customer == nil || m2.Customer.ID != "cust_1" || m2.Confidence < 0.90 {
+		t.Errorf("expected token match for Emeka -> Emeka Okafor, got %+v", m2)
+	}
+
+	// Unknown customer
+	m3 := validate.MatchCustomer("Unknown Guy", customers)
+	if m3.Customer != nil || m3.Confidence > 0.50 {
+		t.Errorf("expected no match for Unknown Guy, got %+v", m3)
+	}
+}
+
+func TestValidateCustomerCreditAttribution(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+	customers := []models.Customer{
+		{
+			ID:   "cust_emeka",
+			Name: "Emeka Okafor",
+		},
+	}
+
+	// 1. Matched customer on credit sale
+	req1 := validate.CaptureRequest{
+		CaptureID:  "cap_credit_01",
+		Transcript: "two milo for Emeka on credit thank you",
+	}
+	res1, err := engine.Validate(context.Background(), req1, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue, customers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res1.IsCreditSale {
+		t.Errorf("expected IsCreditSale true, got false")
+	}
+	if res1.CustomerID != "cust_emeka" || res1.CustomerName != "Emeka Okafor" {
+		t.Errorf("expected attributed to Emeka Okafor (cust_emeka), got %s (%s)", res1.CustomerName, res1.CustomerID)
+	}
+	if len(res1.Lines) != 1 || res1.Lines[0].Transaction.Status != models.StatusConfirmed {
+		t.Errorf("expected 1 confirmed line, got %+v", res1.Lines)
+	}
+
+	// 2. Unmatched customer on credit sale -> review required
+	req2 := validate.CaptureRequest{
+		CaptureID:  "cap_credit_02",
+		Transcript: "two milo for Stranger on credit thank you",
+	}
+	res2, err := engine.Validate(context.Background(), req2, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue, customers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res2.IsCreditSale {
+		t.Errorf("expected IsCreditSale true, got false")
+	}
+	if !res2.RequiresReview {
+		t.Errorf("expected review required for unmatched credit customer, got false")
+	}
+	if len(res2.Lines) != 1 || res2.Lines[0].Transaction.Status != models.StatusReviewRequired {
+		t.Errorf("expected line status review_required, got %s", res2.Lines[0].Transaction.Status)
+	}
+}
