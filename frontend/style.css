@@ -63,28 +63,92 @@ body {
   border: 0;
 }
 
-.app-header {
+/* Shell: a desktop sidebar beside a content column holding the top bar and the
+   mounted view. Below 768px the sidebar is dropped and .app-nav--mobile takes
+   over; F03 replaces that bar with the bottom navigation and More menu. */
+.app-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.app-sidebar {
+  flex: 0 0 15rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-4);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+}
+
+.app-shell__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-topbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.5rem;
+  gap: var(--space-3);
   align-items: center;
-  padding: 1rem 2rem;
+  justify-content: space-between;
+  padding: var(--space-3) clamp(1rem, 3vw, 2rem);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+}
+
+.app-topbar__shop {
+  font-weight: 700;
+  font-size: 1.0625rem;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.app-topbar__account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
 }
 
 .app-brand {
   font-weight: 800;
   font-size: 1.25rem;
   color: var(--color-brand);
+  text-decoration: none;
 }
 
 .app-nav {
   display: flex;
-  gap: 1rem;
+  gap: var(--space-1);
+}
+
+.app-nav--sidebar {
+  /* nowrap matters: the shared .app-nav rule wraps, and a wrapped column would
+     spill into a second column instead of scrolling the sidebar. */
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+/* The bar that stands in for navigation at phone widths until F03. */
+.app-nav--mobile {
+  display: none;
 }
 
 .app-nav a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   text-decoration: none;
   color: var(--color-muted);
   font-weight: 600;
@@ -93,21 +157,30 @@ body {
   transition: background 0.15s, color 0.15s;
 }
 
-.app-nav a:hover,
-.app-nav a.is-active {
-  background: var(--color-brand-soft);
+.app-nav a:hover {
+  background: var(--color-subtle);
   color: var(--color-brand);
 }
 
+/* Weight as well as colour: the current page must not be signalled by hue alone. */
+.app-nav a.is-active {
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+  font-weight: 700;
+}
+
 .account-name {
-  margin-left: auto;
   font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .app-main {
+  /* Grows so the mobile navigation sits at the foot of a short view. */
+  flex: 1 1 auto;
+  width: 100%;
   padding: 1.5rem;
   max-width: 1200px;
   margin: 0 auto;
@@ -1615,9 +1688,7 @@ a {
 
 /* Shared component sizing and legacy aliases. No business behaviour lives here. */
 .app-main { width: 100%; padding: clamp(1rem, 3vw, 2rem); }
-.app-header { gap: var(--space-4); padding: var(--space-4) clamp(1rem, 3vw, 2rem); }
 .app-nav { flex-wrap: wrap; gap: var(--space-1); }
-.app-nav a { display: inline-flex; align-items: center; min-height: 44px; }
 .app-brand { letter-spacing: -0.04em; }
 .account-name { overflow-wrap: anywhere; min-width: 0; }
 .view, .panel, .modal, .modal-dialog, .kpi, .form__field, .form-field,
@@ -1680,9 +1751,20 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .auth-panel h1 { font-size: var(--text-title); letter-spacing: -0.035em; }
 
 @media (max-width: 767px) {
-  .app-nav { order: 3; flex-basis: 100%; }
-  .app-nav a { flex: 1 1 auto; justify-content: center; padding: 0.5rem; font-size: var(--text-small); }
-  .account-name { flex: 1 1 auto; font-size: var(--text-small); }
+  /* The sidebar is a desktop surface; the mobile bar below carries navigation. */
+  .app-shell { display: block; }
+  .app-sidebar { display: none; }
+  .app-nav--mobile {
+    display: flex;
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3) max(var(--space-2), env(safe-area-inset-bottom));
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+  }
+  .app-nav--mobile a { flex: 1 1 auto; justify-content: center; padding: 0.5rem; font-size: var(--text-small); }
   .view__header { flex-direction: column; }
   .view__header-badges { width: 100%; }
   .view__header-badges > button { flex: 1 1 140px; }
@@ -1697,8 +1779,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 
 @media (max-width: 420px) {
-  .app-header { gap: var(--space-2); }
+  .app-topbar { gap: var(--space-2); }
   .app-brand { font-size: 1.1rem; }
+  .app-nav--mobile a { padding: 0.5rem 0.25rem; }
   .kpis { grid-template-columns: 1fr; }
   .onboarding-card { padding: var(--space-4); }
   .onboarding-card__title { font-size: 1.1rem; }

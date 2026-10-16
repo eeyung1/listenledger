@@ -10,25 +10,43 @@
   </head>
   <body>
     <!--
-      Application shell. The router owns #app and swaps in the view template
-      for the current route; the nav below is static and the router only
-      toggles its active state.
-    -->
-    <header class="app-header">
-      <span class="app-brand">ListenLedger</span>
-      <nav class="app-nav" aria-label="Main">
-        <a href="#/home" data-route="/home">Overview</a>
-        <a href="#/transactions" data-route="/transactions">Transactions</a>
-        <a href="#/inventory" data-route="/inventory">Inventory</a>
-        <a href="#/settings" data-route="/settings">Settings</a>
-      </nav>
-    </header>
+      Application shell. The router owns #app and swaps in the view template for
+      the current route. The navigation containers are filled by src/nav.ts and
+      the account bar by src/auth.ts, so neither the router nor this markup has
+      to know what a destination is called or which one is active.
 
-    <main id="app" class="app-main" aria-live="polite">
-      <!-- Current view is rendered here. -->
-    </main>
+      Elements marked as shell chrome describe a signed-in shop and are hidden
+      while the sign-in panel is showing.
+    -->
+    <div class="app-shell">
+      <aside class="app-sidebar" data-shell-chrome>
+        <a class="app-brand" href="#/home">ListenLedger</a>
+        <nav class="app-nav app-nav--sidebar" aria-label="Main" data-hook="nav-sidebar"></nav>
+      </aside>
+
+      <div class="app-shell__content">
+        <header class="app-topbar" data-shell-chrome>
+          <span class="app-topbar__shop" data-hook="account-shop-name"></span>
+          <div class="app-topbar__account" data-hook="account-controls"></div>
+        </header>
+
+        <main id="app" class="app-main" aria-live="polite">
+          <!-- Current view is rendered here. -->
+        </main>
+
+        <!--
+          Mobile navigation. F03 replaces this with the bottom bar and its More
+          menu; it stays here until then so phone widths keep a way to navigate.
+        -->
+        <nav
+          class="app-nav app-nav--mobile"
+          aria-label="Main"
+          data-shell-chrome
+          data-hook="nav-mobile"
+        ></nav>
+      </div>
+    </div>
 
     <script type="module" src="./dist/app.js"></script>
   </body>
 </html>
-
