@@ -24,6 +24,38 @@
     </div>
   </header>
 
+  <section class="counter-dock" data-hook="counter-dock" aria-label="Mobile Counter Microphone">
+    <div class="counter-dock__main">
+      <div class="counter-dock__indicator-group">
+        <span class="counter-dock__status-dot" data-hook="counter-mic-dot" aria-hidden="true"></span>
+        <div class="counter-dock__meta">
+          <h2 class="counter-dock__title" data-hook="counter-mic-title">Counter Microphone</h2>
+          <p class="counter-dock__subtitle" data-hook="counter-mic-subtitle">Idle — Tap to start ambient sales listening on this phone</p>
+        </div>
+      </div>
+      <div class="counter-dock__actions">
+        <button type="button" class="btn btn--primary counter-dock__toggle-btn" data-hook="counter-mic-toggle-btn">
+          <span class="counter-dock__btn-icon" data-hook="counter-mic-btn-icon">🎙</span>
+          <span data-hook="counter-mic-btn-label">Start Listening</span>
+        </button>
+      </div>
+    </div>
+    <div class="counter-dock__live-panel" data-hook="counter-live-panel" style="display: none;">
+      <div class="counter-dock__meters">
+        <div class="counter-dock__waveform" aria-hidden="true">
+          <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
+        </div>
+        <div class="counter-dock__level-track">
+          <div class="counter-dock__level-fill" data-hook="counter-level-fill"></div>
+        </div>
+      </div>
+      <div class="counter-dock__transcript" data-hook="counter-live-transcript">
+        <em>Say a sale ending with "Thank you"…</em>
+      </div>
+    </div>
+    <div class="counter-dock__toast" data-hook="counter-capture-toast" style="display: none;"></div>
+  </section>
+
   <div class="onboarding-container" data-hook="onboarding-checklist-container"></div>
 
   <section class="kpis" aria-label="Today at a glance">

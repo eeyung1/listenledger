@@ -12,11 +12,11 @@ The intended result is one sale for two Milo at NGN 4,000, a stock reduction of 
 
 Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 
-**Stage: ledger/dashboard ready for controlled deployment preparation; live hosting and genuine voice/shop acceptance are pending.** Authentication, atomic receipts and stock movements, retries, review correction/rejection, reversals, catalogue forms/import, manual entry, daily summaries, settings, device pairing, CSV exports, pilot reconciliation tooling, operational expense tracking, and customer credit & debt ledger ("Customer Book" / "Gbese") are implemented.
+**Stage: ledger/dashboard and mobile counter speech capture ready for controlled deployment preparation; live hosting and genuine voice/shop acceptance are pending.** Authentication, atomic receipts and stock movements, retries, review correction/rejection, reversals, catalogue forms/import, manual entry, daily summaries, settings, device pairing, CSV exports, pilot reconciliation tooling, operational expense tracking, customer credit & debt ledger ("Customer Book" / "Gbese"), and in-browser mobile counter microphone speech capture are implemented.
 
 **Database:** SQLite and PostgreSQL are supported. Nine embedded PostgreSQL migrations and transfer tooling exist. The production image requires PostgreSQL and uses read-only schema validation (`-require-postgres -skip-migrations`); initialize schema with an administrator, then run with the restricted application role. See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md).
 
-**Voice limitation:** the Rust executable accepts WAV or synthetic audio, not a wired hardware microphone. A command STT adapter exists, but the bundled runner can fall back to canned transcripts based on duration/volume. Never connect that fallback to real trading data. Initial cloud deployment is the ledger/dashboard with manual entry; the edge runner is not included in the production image.
+**Voice capture:** In-browser counter audio listening is implemented via the Web Speech API on mobile Chrome/Android and Safari/iOS with automatic boundary phrase detection ("Thank you", "Stock received") and direct session-authenticated ledger ingestion. The optional standalone Rust edge runner accepts WAV or synthetic audio for external hardware hubs; it is not required for mobile phone counter operation and is excluded from the cloud container.
 
 **Validation:** the baseline above passed backend race tests/build, frontend checks/tests and Rust checks in [CI run 38725198112](https://github.com/eeyung1/listenledger/actions/runs/38725198112). Deployment-readiness changes add a PostgreSQL 17 container smoke test covering missing-database rejection, repeated security setup, restricted-role startup, signup/login and persistence after a container restart. Read the exact PR/main CI result before treating these changes as verified. CI is not evidence of a live Render deployment or real-shop accuracy.
 
@@ -68,6 +68,7 @@ Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 - [x] Dual-dialect database storage engine (SQLite & PostgreSQL) with embedded migrations, pgx connection pooling, query rebinding, row-level locking, and DATABASE_URL support.
 - [x] Operational expense tracking (`models.Expense`, `storage.Expense`, `POST /api/expenses`), category breakdown aggregations, and daily net operating profit calculations.
 - [x] Customer credit and debt ledger ("Customer Book" / I-Owe-You / "Gbese" tracking): customer registration, accounts receivable overview, credit sales, cash repayments, debt forgiveness/discounts, and real-time dashboard updates.
+- [x] In-browser mobile counter microphone audio capture and real-time speech recognition interface (`frontend/src/audio.ts`): Web Speech API continuous listening, closing boundary detection, Counter Audio Dock with animated sound meter, and tabbed live microphone sound test modal.
 
 #### Backend and persistence
 

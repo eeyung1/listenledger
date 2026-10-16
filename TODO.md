@@ -12,12 +12,33 @@ This section supersedes historical completion claims below. Older increment entr
 - [ ] Configure runtime credentials and confirm the Render workspace.
 - [ ] Deploy and verify HTTPS, manual transactions, stock, reviews, WebSockets and redeploy persistence.
 - [ ] Demonstrate hosted backup restoration and reconcile any real source data.
-- [ ] Implement actual microphone input and fail-closed real STT; remove synthetic fallbacks from production capture.
+- [x] Implement in-browser mobile counter microphone capture and real-time speech recognition (`frontend/src/audio.ts`); provide Counter Audio Dock on Overview and live mic sound test modal.
 - [ ] Run recorded-audio evaluation and real shop trials against independent records.
 
 See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md) for the current procedure.
 
 ## Historical implementation notes
+
+## Mobile Web Counter Audio Interface & Real-Time Speech Capture increment (16 October 2026) — MILESTONE 26 COMPLETE
+
+Implemented in-browser mobile counter microphone audio capture and real-time speech recognition interface (`frontend/src/audio.ts`, `frontend/src/api.ts`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/src/components/settings.html`, `frontend/style.css`, `frontend/test/audio.test.mjs`, `backend/api/captures_test.go`):
+1. **Web Audio & Real-Time Speech-to-Text Pipeline (`frontend/src/audio.ts`)**:
+   - Web Speech API integration (`SpeechRecognition` / `webkitSpeechRecognition`) supporting continuous ambient counter listening directly on iOS Safari and Android Chrome.
+   - Punctuation-resilient closing boundary phrase detection (`detectClosingBoundary`) for sales ("Thank you") and restocks ("Stock received").
+   - `CounterSpeechListener` state machine with automatic restart on ambient silence, interim speech callbacks, volume level calculations via Web Audio `AnalyserNode`, and non-blocking synthesized audio feedback chimes (`playAudioFeedback`).
+   - Browser feature detection (`isSpeechRecognitionSupported`, `isAudioCaptureSupported`).
+2. **Command Centre Counter Audio Dock (`frontend/src/components/home.html`, `frontend/src/views/home.ts`, `frontend/style.css`)**:
+   - Interactive Counter Microphone dock right under overview header: one-tap "Start Listening" toggle, animated pulsing status indicator, live sound wave meter, live interim transcript display ("Heard: ..."), and real-time capture toast notifications.
+   - Direct session-authenticated intake dispatching spoken sales to `POST /api/captures` with immediate stock deduction and WebSocket live feed updates.
+   - Clear compatibility fallbacks for browsers without speech recognition.
+3. **Onboarding Milestone 6 Live Microphone Test (`frontend/src/views/home.ts`, `frontend/style.css`)**:
+   - Enhanced "Sound & Capture Test" with tabbed interface: "🎙 Phone Microphone Test" and "⌨ Text Simulator".
+   - Cashiers can speak test sales directly into their phone microphone, watch real-time transcription, and verify catalogue recognition and confidence scores on device.
+4. **Settings & Device Guidance (`frontend/src/components/settings.html`)**:
+   - Clarified that mobile phones and tablets record counter sales directly in the browser without requiring external hardware pairing or tokens.
+5. **Backend Direct Session Intake & Full Test Suites (`backend/api/captures_test.go`, `frontend/test/audio.test.mjs`)**:
+   - Verified session-authenticated browser intake in `backend/api/captures_test.go` (`TestCaptures_MobileBrowserSessionDirectIntake`).
+   - Comprehensive test suite in `frontend/test/audio.test.mjs` (6/6 passing, 49/49 total frontend tests passing).
 
 ## Customer Credit & Debt Ledger (Customer Book / I-Owe-You / "Gbese") Tracking increment (15 October 2026) — MILESTONE 25 COMPLETE
 

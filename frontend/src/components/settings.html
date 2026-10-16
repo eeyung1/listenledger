@@ -68,8 +68,13 @@
     <section class="panel" aria-labelledby="devices-heading">
       <h2 class="panel__title" id="devices-heading">Paired Capture Devices</h2>
       <p class="panel__hint">
-        Physical microphones and edge hubs authenticated to record transactions for this shop.
+        Physical microphones and external edge hubs authenticated to record transactions for this shop.
       </p>
+
+      <div class="panel__notice" style="background: #edf7f7; border-left: 4px solid #135b59; padding: 0.85rem; border-radius: 4px; margin-bottom: 1rem;">
+        <strong>📱 Mobile Phone &amp; Tablet Microphone:</strong>
+        When using your phone or counter tablet, you do not need to pair an external device. Simply open the <strong>Overview</strong> dashboard and tap <strong>"Start Listening"</strong> on the Counter Microphone dock. The device pairing below is for optional dedicated hardware hubs (such as Raspberry Pi or Linux counter PCs).
+      </div>
 
       <form class="pair-device-form" data-hook="pair-device-form">
         <div class="form__row">

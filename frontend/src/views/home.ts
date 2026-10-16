@@ -22,6 +22,7 @@ import {
   fetchShopCreditSummary,
   fetchSummary,
   fetchTransactions,
+  postCapture,
   runTestCapture,
   runTrainingDrill,
   type DailySummary,
@@ -34,6 +35,13 @@ import {
   type ShopCreditSummary,
   type Transaction,
 } from "../api.js";
+import {
+  CounterSpeechListener,
+  isSpeechRecognitionSupported,
+  playAudioFeedback,
+  type BoundaryCaptureCandidate,
+  type CounterListenerState,
+} from "../audio.js";
 import {
   clear,
   computeKPIs,
@@ -534,6 +542,143 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     });
   }
 
+  // Counter Audio Dock Hooks
+  const counterDock = hook(root, "counter-dock");
+  const micDot = hook(root, "counter-mic-dot");
+  const micTitle = hook(root, "counter-mic-title");
+  const micSubtitle = hook(root, "counter-mic-subtitle");
+  const micToggleBtn = hook<HTMLButtonElement>(root, "counter-mic-toggle-btn");
+  const micBtnIcon = hook(root, "counter-mic-btn-icon");
+  const micBtnLabel = hook(root, "counter-mic-btn-label");
+  const livePanel = hook(root, "counter-live-panel");
+  const levelFill = hook(root, "counter-level-fill");
+  const liveTranscript = hook(root, "counter-live-transcript");
+  const captureToast = hook(root, "counter-capture-toast");
+
+  let toastTimeout: ReturnType<typeof setTimeout> | null = null;
+  function showCaptureToast(text: string, type: "success" | "warning" | "error"): void {
+    if (!captureToast) return;
+    if (toastTimeout) clearTimeout(toastTimeout);
+    captureToast.className = `counter-dock__toast counter-dock__toast--${type}`;
+    captureToast.textContent = text;
+    captureToast.style.display = "flex";
+    toastTimeout = setTimeout(() => {
+      if (captureToast) captureToast.style.display = "none";
+    }, 6000);
+  }
+
+  let counterListener: CounterSpeechListener | null = null;
+  const isAudioSupported = isSpeechRecognitionSupported();
+
+  if (!isAudioSupported) {
+    if (micSubtitle) {
+      micSubtitle.textContent =
+        "Speech recognition is not supported in this browser. Use Chrome on Android or Safari on iOS for live counter listening.";
+    }
+    if (micToggleBtn) {
+      micToggleBtn.disabled = true;
+      micToggleBtn.title = "Use Google Chrome on Android or Safari on iOS for live counter microphone";
+    }
+  } else {
+    counterListener = new CounterSpeechListener({
+      salePhrase: "thank you",
+      restockPhrase: "stock received",
+      onStateChange: (listenerState: CounterListenerState) => {
+        if (!counterDock || !micDot || !micToggleBtn || !micBtnIcon || !micBtnLabel || !livePanel) return;
+
+        counterDock.className = `counter-dock counter-dock--${listenerState}`;
+        micDot.className = `counter-dock__status-dot counter-dock__status-dot--${listenerState}`;
+
+        if (listenerState === "listening") {
+          setText(micTitle, "Counter Microphone: Active");
+          setText(micSubtitle, "Listening for sales at counter. Conclude with 'Thank you'");
+          setText(micBtnIcon, "⏹");
+          setText(micBtnLabel, "Stop Listening");
+          micToggleBtn.className = "btn counter-dock__toggle-btn counter-dock__toggle-btn--active";
+          livePanel.style.display = "flex";
+        } else if (listenerState === "processing") {
+          setText(micTitle, "Processing Spoken Sale…");
+          setText(micSubtitle, "Validating items against catalogue and recording movement");
+          setText(micBtnIcon, "⏳");
+          setText(micBtnLabel, "Processing…");
+        } else if (listenerState === "error") {
+          setText(micTitle, "Counter Microphone: Error");
+          setText(micBtnIcon, "🎙");
+          setText(micBtnLabel, "Retry Listening");
+          micToggleBtn.className = "btn btn--primary counter-dock__toggle-btn";
+        } else {
+          setText(micTitle, "Counter Microphone");
+          setText(micSubtitle, "Idle — Tap to start ambient sales listening on this phone");
+          setText(micBtnIcon, "🎙");
+          setText(micBtnLabel, "Start Listening");
+          micToggleBtn.className = "btn btn--primary counter-dock__toggle-btn";
+          livePanel.style.display = "none";
+          if (liveTranscript) {
+            liveTranscript.innerHTML = `<em>Say a sale ending with "Thank you"…</em>`;
+          }
+        }
+      },
+      onInterimTranscript: (text: string) => {
+        if (liveTranscript) {
+          liveTranscript.textContent = `Heard: "${text}"`;
+        }
+      },
+      onAudioLevel: (level: number) => {
+        if (levelFill) {
+          levelFill.style.width = `${Math.min(100, Math.round(level * 100))}%`;
+        }
+      },
+      onBoundaryDetected: async (candidate: BoundaryCaptureCandidate) => {
+        try {
+          if (liveTranscript) {
+            liveTranscript.textContent = `Processing: "${candidate.transcript}"…`;
+          }
+          const res = await postCapture({
+            transcript: candidate.transcript,
+            type: candidate.type,
+            closing_phrase: candidate.closingPhrase,
+          });
+
+          if (res.requires_review) {
+            playAudioFeedback("review");
+            const first = res.transactions[0];
+            const name = first ? first.product_name : "Unrecognized item";
+            showCaptureToast(`⚠ Logged for Review: ${name} ("${candidate.transcript}")`, "warning");
+          } else {
+            playAudioFeedback("sale");
+            const first = res.transactions[0];
+            const detail = first
+              ? `${first.quantity} ${first.product_name} (${formatMoney(first.amount)})`
+              : candidate.transcript;
+            showCaptureToast(`✓ Logged Sale: ${detail}`, "success");
+          }
+          void refetch();
+        } catch (err) {
+          playAudioFeedback("error");
+          const msg = err instanceof Error ? err.message : "Failed to record capture";
+          showCaptureToast(`❌ Capture Error: ${msg}`, "error");
+        }
+      },
+      onError: (err: Error) => {
+        if (micSubtitle) {
+          micSubtitle.textContent = err.message;
+        }
+        showCaptureToast(`Mic notice: ${err.message}`, "error");
+      },
+    });
+
+    micToggleBtn?.addEventListener("click", () => {
+      if (!counterListener) return;
+      if (counterListener.isListening()) {
+        counterListener.stop();
+      } else {
+        counterListener.start().catch(() => {
+          // Handled via onError
+        });
+      }
+    });
+  }
+
   window.addEventListener("ll:transaction-received", onTransactionReceived);
   window.addEventListener("ll:transaction-review-required", onTransactionReceived);
   window.addEventListener("ll:transaction-updated", onTransactionUpdated);
@@ -550,6 +695,12 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   return () => {
     disposed = true;
     abortController.abort();
+    if (counterListener) {
+      counterListener.stop();
+    }
+    if (toastTimeout) {
+      clearTimeout(toastTimeout);
+    }
     window.removeEventListener("ll:transaction-received", onTransactionReceived);
     window.removeEventListener("ll:transaction-review-required", onTransactionReceived);
     window.removeEventListener("ll:transaction-updated", onTransactionUpdated);
@@ -576,13 +727,52 @@ function showTestCaptureModal(root: HTMLElement, onDone: () => void): void {
     el(
       "p",
       "modal__subtitle",
-      "Simulate spoken counter phrases to test catalogue matching, boundary detection, and confidence scoring.",
+      "Test speech recognition and validation against your shop catalogue using either your phone microphone or simulated text.",
     ),
   );
 
+  let activeTestListener: CounterSpeechListener | null = null;
+  const isSpeechSupported = isSpeechRecognitionSupported();
+
+  // Tab switchers
+  const tabGroup = el("div", "test-tab-group");
+  const micTabBtn = el("button", `test-tab-btn ${isSpeechSupported ? "test-tab-btn--active" : ""}`, "🎙 Phone Microphone Test");
+  micTabBtn.type = "button";
+  const textTabBtn = el("button", `test-tab-btn ${!isSpeechSupported ? "test-tab-btn--active" : ""}`, "⌨ Text Simulator");
+  textTabBtn.type = "button";
+  tabGroup.append(micTabBtn, textTabBtn);
+
+  // Panels
+  const micPanel = el("div", "live-mic-panel");
   const form = el("form", "modal__form");
   form.setAttribute("novalidate", "");
 
+  if (!isSpeechSupported) {
+    micPanel.style.display = "none";
+    form.style.display = "block";
+  } else {
+    micPanel.style.display = "flex";
+    form.style.display = "none";
+  }
+
+  // --- Mic Panel Setup ---
+  const micPrompt = el(
+    "p",
+    "hint",
+    'Tap the microphone button, speak a sales phrase naturally into your phone, and finish with your closing boundary phrase (e.g. "Two Peak Milk, seven thousand naira. Thank you").',
+  );
+  const liveMicBtn = el("button", "button button--primary live-mic-btn", "🎙 Tap to Speak");
+  liveMicBtn.type = "button";
+
+  const liveTranscriptBox = el("div", "counter-dock__transcript");
+  liveTranscriptBox.style.minHeight = "2.5rem";
+  liveTranscriptBox.innerHTML = `<em>Waiting for speech…</em>`;
+
+  const micStatus = el("p", "field__hint", "Microphone is idle.");
+
+  micPanel.append(micPrompt, liveMicBtn, liveTranscriptBox, micStatus);
+
+  // --- Text Form Setup ---
   const transcriptLabel = el("label", "field");
   transcriptLabel.append(el("span", "field__label", "Spoken Counter Phrase"));
   const transcriptInput = document.createElement("textarea");
@@ -616,42 +806,58 @@ function showTestCaptureModal(root: HTMLElement, onDone: () => void): void {
   typeSelect.innerHTML = `<option value="sale">Sale ("Thank you")</option><option value="restock">Restock ("Stock received")</option>`;
   typeLabel.append(typeSelect);
 
-  const resultContainer = el("div", "test-capture-result");
-  resultContainer.style.display = "none";
+  const textSubmitBtn = el("button", "button button--primary", "Verify Recognition");
+  textSubmitBtn.type = "submit";
 
   const actions = el("div", "modal__actions");
   const cancelBtn = el("button", "button button--secondary", "Close");
   cancelBtn.type = "button";
-  cancelBtn.addEventListener("click", () => {
+
+  const cleanupModal = (): void => {
+    if (activeTestListener) {
+      activeTestListener.stop();
+      activeTestListener = null;
+    }
     backdrop.remove();
     onDone();
-  });
+  };
+  cancelBtn.addEventListener("click", cleanupModal);
+  actions.append(cancelBtn, textSubmitBtn);
 
-  const submitBtn = el("button", "button button--primary", "Verify Recognition");
-  submitBtn.type = "submit";
-
-  actions.append(cancelBtn, submitBtn);
+  const resultContainer = el("div", "test-capture-result");
+  resultContainer.style.display = "none";
 
   form.append(transcriptLabel, typeLabel, resultContainer, actions);
-  modal.append(header, form);
-  backdrop.append(modal);
-  root.append(backdrop);
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const text = transcriptInput.value.trim();
-    if (!text) return;
+  // Tab switching logic
+  micTabBtn.addEventListener("click", () => {
+    micTabBtn.className = "test-tab-btn test-tab-btn--active";
+    textTabBtn.className = "test-tab-btn";
+    micPanel.style.display = "flex";
+    form.style.display = "none";
+  });
 
-    submitBtn.disabled = true;
-    setText(submitBtn, "Verifying…");
+  textTabBtn.addEventListener("click", () => {
+    if (activeTestListener) {
+      activeTestListener.stop();
+      activeTestListener = null;
+      setText(liveMicBtn, "🎙 Tap to Speak");
+    }
+    textTabBtn.className = "test-tab-btn test-tab-btn--active";
+    micTabBtn.className = "test-tab-btn";
+    micPanel.style.display = "none";
+    form.style.display = "block";
+  });
+
+  async function evaluatePhrase(phrase: string, expectedType: "sale" | "restock"): Promise<void> {
     clear(resultContainer);
     resultContainer.style.display = "block";
     resultContainer.append(el("p", "hint", "Analyzing transcript through validation engine…"));
 
     try {
       const res = await runTestCapture({
-        transcript: text,
-        type: typeSelect.value as "sale" | "restock",
+        transcript: phrase,
+        type: expectedType,
       });
 
       clear(resultContainer);
@@ -689,17 +895,77 @@ function showTestCaptureModal(root: HTMLElement, onDone: () => void): void {
         resultContainer.append(linesList);
       }
 
-      setText(submitBtn, "Test Again");
-      submitBtn.disabled = false;
+      playAudioFeedback(res.recognized ? "sale" : "review");
       cancelBtn.textContent = "Done & Close";
+      setText(textSubmitBtn, "Test Again");
+      textSubmitBtn.disabled = false;
     } catch (err: unknown) {
       clear(resultContainer);
       const msg = err instanceof Error ? err.message : String(err);
       resultContainer.append(el("p", "error", `Verification error: ${msg}`));
-      submitBtn.disabled = false;
-      setText(submitBtn, "Verify Recognition");
+      playAudioFeedback("error");
+      textSubmitBtn.disabled = false;
+      setText(textSubmitBtn, "Verify Recognition");
     }
+  }
+
+  // Mic Button handler
+  liveMicBtn.addEventListener("click", () => {
+    if (activeTestListener && activeTestListener.isListening()) {
+      activeTestListener.stop();
+      activeTestListener = null;
+      setText(liveMicBtn, "🎙 Tap to Speak");
+      setText(micStatus, "Microphone stopped.");
+      return;
+    }
+
+    setText(liveMicBtn, "⏹ Listening… Tap to Finish");
+    setText(micStatus, "Listening… Speak your counter phrase now.");
+    liveTranscriptBox.innerHTML = `<em>Listening to microphone…</em>`;
+
+    activeTestListener = new CounterSpeechListener({
+      salePhrase: "thank you",
+      restockPhrase: "stock received",
+      onInterimTranscript: (text: string) => {
+        liveTranscriptBox.textContent = `Heard: "${text}"`;
+      },
+      onBoundaryDetected: (candidate: BoundaryCaptureCandidate) => {
+        if (activeTestListener) {
+          activeTestListener.stop();
+          activeTestListener = null;
+        }
+        setText(liveMicBtn, "🎙 Tap to Speak");
+        setText(micStatus, `Boundary detected ("${candidate.closingPhrase}")! Evaluating…`);
+        liveTranscriptBox.textContent = candidate.transcript;
+        void evaluatePhrase(candidate.transcript, candidate.type);
+      },
+      onError: (err: Error) => {
+        setText(liveMicBtn, "🎙 Tap to Speak");
+        setText(micStatus, `Microphone notice: ${err.message}`);
+        activeTestListener = null;
+      },
+    });
+
+    activeTestListener.start().catch((err: Error) => {
+      setText(liveMicBtn, "🎙 Tap to Speak");
+      setText(micStatus, err.message);
+      activeTestListener = null;
+    });
   });
+
+  // Text form submission handler
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = transcriptInput.value.trim();
+    if (!text) return;
+    textSubmitBtn.disabled = true;
+    setText(textSubmitBtn, "Verifying…");
+    void evaluatePhrase(text, typeSelect.value as "sale" | "restock");
+  });
+
+  modal.append(header, tabGroup, micPanel, form);
+  backdrop.append(modal);
+  root.append(backdrop);
 }
 
 function showTrainingDrillModal(root: HTMLElement, onDone: () => void): void {

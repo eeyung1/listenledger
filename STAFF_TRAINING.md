@@ -25,6 +25,14 @@ When serving a customer at the counter:
 - **Transaction Demarcation**: The system treats the closing phrase as the definitive boundary of the transaction.
 - **Noise Rejection**: Casual counter conversation, banter, phone calls, or general chatter without the phrase are discarded automatically by the local edge engine.
 
+### Using Your Mobile Phone as the Counter Microphone
+1. Open the ListenLedger web application on your smartphone (Google Chrome on Android or Safari on iOS).
+2. On the **Overview** dashboard (`#/home`), locate the **Counter Microphone** dock right under the header.
+3. Tap **"Start Listening"** and tap **"Allow"** when prompted by your browser for microphone permissions.
+4. Place the phone on the cash counter or on a desk stand with the microphone unblocked.
+5. Speak sales phrases naturally as you conclude transactions with customers.
+6. When you say **"Thank you"**, the phone immediately validates the sale, logs the transaction in the ledger, updates the live feed, and plays a brief confirmation chime.
+
 ---
 
 ## 2. Storekeeper Restock Protocol
