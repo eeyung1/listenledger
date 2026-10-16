@@ -14,3 +14,5 @@ services:
         sync: false # Restricted listenledger_app PostgreSQL URL with TLS; never commit it.
       - key: PORT
         value: "8080"
+      - key: AUTO_MIGRATE
+        value: "true"
