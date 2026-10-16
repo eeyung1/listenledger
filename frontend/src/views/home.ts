@@ -63,6 +63,13 @@ import {
   type ConnectionStatus,
   type ConnectionStatusDetail,
 } from "../ws.js";
+import {
+  enqueueCapture,
+  getQueuedCount,
+  isNetworkError,
+  isOnline,
+  syncOfflineQueue,
+} from "../offline_queue.js";
 import { showCustomerBookModal } from "./customers.js";
 import type { ViewCleanup } from "./index.js";
 
@@ -533,6 +540,10 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       connectionLabel.dataset.status = detail.status;
     }
 
+    if (detail.status === "open") {
+      void triggerOfflineSync();
+    }
+
     // The view cannot know which events it missed while disconnected, so it
     // refetches rather than assuming it only needs to apply future ones.
     if (detail.resyncRequired) {
@@ -595,6 +606,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const waveform = hook(root, "counter-waveform");
   const liveTranscript = hook(root, "counter-live-transcript");
   const captureToast = hook(root, "counter-capture-toast");
+  const offlineBadge = hook(root, "counter-offline-badge");
 
   let voiceFeedbackEnabled = false;
   try {
@@ -645,6 +657,71 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       if (captureToast) captureToast.style.display = "none";
     }, 6000);
   }
+
+  async function updateOfflineQueueBadge(): Promise<void> {
+    if (!offlineBadge) return;
+    try {
+      const count = await getQueuedCount();
+      if (count > 0) {
+        offlineBadge.style.display = "inline-flex";
+        setText(offlineBadge, `📦 ${count} Queued Offline`);
+        offlineBadge.title = `${count} counter capture(s) queued offline. Tap to sync now.`;
+      } else {
+        offlineBadge.style.display = "none";
+      }
+    } catch {
+      offlineBadge.style.display = "none";
+    }
+  }
+
+  let isSyncRunning = false;
+  async function triggerOfflineSync(): Promise<void> {
+    if (isSyncRunning || !isOnline()) return;
+    const count = await getQueuedCount();
+    if (count === 0) return;
+
+    isSyncRunning = true;
+    if (offlineBadge) {
+      offlineBadge.className = "badge badge--offline-queue badge--offline-queue--syncing";
+      setText(offlineBadge, `🔄 Syncing ${count} offline…`);
+    }
+
+    try {
+      const { synced, failed } = await syncOfflineQueue((item, result) => {
+        if (result) {
+          showCaptureToast(`✓ Synced offline capture: "${item.transcript}"`, "success");
+        }
+      });
+
+      if (synced > 0) {
+        showCaptureToast(`✓ Replayed & synced ${synced} offline counter capture(s)`, "success");
+        if (voiceFeedbackEnabled) {
+          speakFeedback(`Synced ${synced} offline sales to ledger`);
+        }
+        void refetch();
+      }
+      if (failed > 0) {
+        showCaptureToast(`⚠ ${failed} offline capture(s) pending retry`, "warning");
+      }
+    } finally {
+      isSyncRunning = false;
+      if (offlineBadge) {
+        offlineBadge.className = "badge badge--offline-queue";
+      }
+      void updateOfflineQueueBadge();
+    }
+  }
+
+  offlineBadge?.addEventListener("click", () => {
+    void triggerOfflineSync();
+  });
+
+  const onOnlineEvent = (): void => {
+    showCaptureToast("📶 Network restored — syncing offline captures…", "success");
+    void triggerOfflineSync();
+  };
+  window.addEventListener("online", onOnlineEvent);
+  void updateOfflineQueueBadge();
 
   let counterListener: CounterSpeechListener | null = null;
   const isAudioSupported = isSpeechRecognitionSupported();
@@ -780,6 +857,34 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
         }
       },
       onBoundaryDetected: async (candidate: BoundaryCaptureCandidate) => {
+        async function handleOfflineCapture(): Promise<void> {
+          try {
+            await enqueueCapture({
+              shop_id: shopId,
+              transcript: candidate.transcript,
+              type: candidate.type,
+              closing_phrase: candidate.closingPhrase,
+            });
+            playAudioFeedback("start");
+            showCaptureToast(
+              `📦 Offline Mode: Capture saved to device queue ("${candidate.transcript}")`,
+              "warning",
+            );
+            if (voiceFeedbackEnabled) {
+              speakFeedback("Offline capture saved. Will sync when network returns.");
+            }
+            void updateOfflineQueueBadge();
+          } catch {
+            playAudioFeedback("error");
+            showCaptureToast("❌ Could not save capture offline", "error");
+          }
+        }
+
+        if (!isOnline()) {
+          await handleOfflineCapture();
+          return;
+        }
+
         try {
           if (liveTranscript) {
             liveTranscript.textContent = `Processing: "${candidate.transcript}"…`;
@@ -847,6 +952,10 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           }
           void refetch();
         } catch (err) {
+          if (isNetworkError(err)) {
+            await handleOfflineCapture();
+            return;
+          }
           playAudioFeedback("error");
           const msg = err instanceof Error ? err.message : "Failed to record capture";
           showCaptureToast(`❌ Capture Error: ${msg}`, "error");
@@ -904,6 +1013,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     window.removeEventListener("ll:customer-created", onCustomerEvent);
     window.removeEventListener("ll:customer-debt-recorded", onCustomerEvent);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
+    window.removeEventListener("online", onOnlineEvent);
   };
 }
 
