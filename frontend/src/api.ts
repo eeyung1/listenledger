@@ -20,7 +20,36 @@ export type TransactionType = "sale" | "restock";
 
 export type TransactionStatus = "confirmed" | "review_required" | "rejected" | "cancelled";
 
-export type Unit = "piece" | "pack" | "carton" | "bottle" | "crate";
+export type Unit =
+  | "piece"
+  | "pack"
+  | "carton"
+  | "bottle"
+  | "crate"
+  | "tin"
+  | "bag"
+  | "sachet"
+  | "roll"
+  | "painter"
+  | "mudu"
+  | "derica"
+  | "rubber";
+
+export const ALL_UNITS: readonly Unit[] = [
+  "piece",
+  "pack",
+  "carton",
+  "bottle",
+  "crate",
+  "tin",
+  "bag",
+  "sachet",
+  "roll",
+  "painter",
+  "mudu",
+  "derica",
+  "rubber",
+];
 
 /**
  * Per-anchor recognition scores, as fractions between 0 and 1.

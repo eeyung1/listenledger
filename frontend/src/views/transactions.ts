@@ -23,6 +23,7 @@ import {
   getExportTransactionsUrl,
   rejectTransaction,
   reverseTransaction,
+  ALL_UNITS,
   type ManualTransactionInput,
   type ReviewCorrections,
   type ReviewDecision,
@@ -523,7 +524,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
 
     const unitLabel = el("label", "form-field", "Base Unit *");
     const unitSelect = el("select", "input") as HTMLSelectElement;
-    for (const u of ["piece", "pack", "carton", "bottle", "crate", "tin"] as const) {
+    for (const u of ALL_UNITS) {
       const opt = new Option(u, u);
       if (transaction.unit === u) opt.selected = true;
       unitSelect.append(opt);
@@ -670,7 +671,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
 
     const unitLabel = el("label", "form-field", "Unit *");
     const unitSelect = el("select", "input") as HTMLSelectElement;
-    for (const u of ["piece", "pack", "carton", "bottle", "crate"] as const) {
+    for (const u of ALL_UNITS) {
       const opt = new Option(u, u);
       if (transaction.unit === u) opt.selected = true;
       unitSelect.append(opt);
@@ -925,7 +926,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
 
     const unitLabel = el("label", "form-field", "Unit");
     const unitSelect = el("select", "input") as HTMLSelectElement;
-    for (const u of ["piece", "pack", "carton", "bottle", "crate"]) {
+    for (const u of ALL_UNITS) {
       unitSelect.append(new Option(u, u));
     }
     unitLabel.append(unitSelect);

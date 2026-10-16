@@ -426,3 +426,130 @@ func TestCaptures_MobileBrowserSessionDirectIntake(t *testing.T) {
 		t.Errorf("expected Milo stock 18, got %d", milo.Quantity)
 	}
 }
+
+func TestCaptures_NigerianMarketColloquialIntake(t *testing.T) {
+	store, handler, shopID := setupCaptureTest(t)
+	ctx := context.Background()
+
+	// Add Indomie and Garri products to catalogue
+	extraProducts := []models.Product{
+		{
+			ID:       "prd_indomie",
+			ShopID:   shopID,
+			Name:     "Indomie Instant Noodles",
+			SKU:      "IND-70G",
+			Aliases:  []string{"Indomie", "Indomie noodles"},
+			Price:    models.Money{Amount: 41666, Currency: "NGN"},
+			Quantity: 100,
+			BaseUnit: "piece",
+		},
+		{
+			ID:       "prd_garri",
+			ShopID:   shopID,
+			Name:     "Ijebu Garri",
+			SKU:      "GARRI-IJEBU",
+			Aliases:  []string{"garri", "ijebu garri"},
+			Price:    models.Money{Amount: 300000, Currency: "NGN"}, // 3,000 NGN per painter
+			Quantity: 50,
+			BaseUnit: "painter",
+		},
+	}
+	for _, p := range extraProducts {
+		if err := store.InsertProduct(ctx, p); err != nil {
+			t.Fatalf("InsertProduct: %v", err)
+		}
+	}
+
+	tests := []struct {
+		name         string
+		captureID    string
+		transcript   string
+		expectedProd string
+		expectedQty  int
+		expectedUnit models.Unit
+		expectedAmt  int64
+	}{
+		{
+			name:         "Suffix k notation (Two k Milo)",
+			captureID:    "cap_coll_1",
+			transcript:   "Two k Milo thank you",
+			expectedProd: "Milo 500g",
+			expectedQty:  1,
+			expectedUnit: "pack",
+			expectedAmt:  200000, // 2,000 NGN in kobo
+		},
+		{
+			name:         "Prefix k-fifty with cartons",
+			captureID:    "cap_coll_2",
+			transcript:   "Three cartons Milo k-fifty thank you",
+			expectedProd: "Milo 500g",
+			expectedQty:  3,
+			expectedUnit: "carton",
+			expectedAmt:  5000000, // 50,000 NGN in kobo
+		},
+		{
+			name:         "Half dozen with two-five shorthand",
+			captureID:    "cap_coll_3",
+			transcript:   "Half dozen Indomie two-five thank you",
+			expectedProd: "Indomie Instant Noodles",
+			expectedQty:  6,
+			expectedUnit: "piece",
+			expectedAmt:  250000, // 2,500 NGN in kobo
+		},
+		{
+			name:         "Traditional market measure painter of garri",
+			captureID:    "cap_coll_4",
+			transcript:   "Two painters of garri six thousand naira thank you",
+			expectedProd: "Ijebu Garri",
+			expectedQty:  2,
+			expectedUnit: "painter",
+			expectedAmt:  600000, // 6,000 NGN in kobo
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := map[string]string{
+				"capture_id": tc.captureID,
+				"transcript": tc.transcript,
+			}
+			body, _ := json.Marshal(payload)
+			req := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-ListenLedger-Request", "1")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
+			}
+
+			var capRes struct {
+				CaptureID    string               `json:"capture_id"`
+				Transactions []models.Transaction `json:"transactions"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &capRes); err != nil {
+				t.Fatalf("json unmarshal: %v", err)
+			}
+
+			if len(capRes.Transactions) != 1 {
+				t.Fatalf("expected 1 transaction, got %d", len(capRes.Transactions))
+			}
+
+			txn := capRes.Transactions[0]
+			if txn.ProductName != tc.expectedProd {
+				t.Errorf("product = %q, want %q", txn.ProductName, tc.expectedProd)
+			}
+			if txn.Quantity != tc.expectedQty {
+				t.Errorf("quantity = %d, want %d", txn.Quantity, tc.expectedQty)
+			}
+			if txn.Unit != tc.expectedUnit {
+				t.Errorf("unit = %q, want %q", txn.Unit, tc.expectedUnit)
+			}
+			if txn.Amount.Amount != tc.expectedAmt {
+				t.Errorf("amount = %d, want %d", txn.Amount.Amount, tc.expectedAmt)
+			}
+		})
+	}
+}
+

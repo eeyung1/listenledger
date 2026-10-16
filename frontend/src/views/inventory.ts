@@ -19,6 +19,7 @@ import {
   importCatalogue,
   unarchiveProduct,
   updateProduct,
+  ALL_UNITS,
   type CreateProductInput,
   type Product,
   type Unit,
@@ -111,8 +112,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
 
     const unitLabel = el("label", "form-field", "Base Unit *");
     const unitSelect = el("select", "select") as HTMLSelectElement;
-    const units: Unit[] = ["piece", "pack", "carton", "bottle", "crate"];
-    for (const u of units) {
+    for (const u of ALL_UNITS) {
       const opt = el("option", "", u) as HTMLOptionElement;
       opt.value = u;
       if (existing && existing.base_unit === u) opt.selected = true;

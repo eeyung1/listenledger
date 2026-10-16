@@ -27,21 +27,61 @@ var (
 	}
 
 	knownUnits = map[string]models.Unit{
-		"carton":  models.Unit("carton"),
-		"cartons": models.Unit("carton"),
-		"pack":    models.Unit("pack"),
-		"packs":   models.Unit("pack"),
-		"bottle":  models.Unit("bottle"),
-		"bottles": models.Unit("bottle"),
-		"piece":   models.Unit("piece"),
-		"pieces":  models.Unit("piece"),
-		"tin":     models.Unit("tin"),
-		"tins":    models.Unit("tin"),
-		"crate":   models.Unit("crate"),
-		"crates":  models.Unit("crate"),
+		"carton":   models.Unit("carton"),
+		"cartons":  models.Unit("carton"),
+		"pack":     models.Unit("pack"),
+		"packs":    models.Unit("pack"),
+		"packet":   models.Unit("pack"),
+		"packets":  models.Unit("pack"),
+		"bottle":   models.Unit("bottle"),
+		"bottles":  models.Unit("bottle"),
+		"piece":    models.Unit("piece"),
+		"pieces":   models.Unit("piece"),
+		"tin":      models.Unit("tin"),
+		"tins":     models.Unit("tin"),
+		"crate":    models.Unit("crate"),
+		"crates":   models.Unit("crate"),
+		"bag":      models.Unit("bag"),
+		"bags":     models.Unit("bag"),
+		"sachet":   models.Unit("sachet"),
+		"sachets":  models.Unit("sachet"),
+		"roll":     models.Unit("roll"),
+		"rolls":    models.Unit("roll"),
+		"painter":  models.Unit("painter"),
+		"painters": models.Unit("painter"),
+		"paint":    models.Unit("painter"),
+		"paints":   models.Unit("painter"),
+		"mudu":     models.Unit("mudu"),
+		"mudus":    models.Unit("mudu"),
+		"mudo":     models.Unit("mudu"),
+		"derica":   models.Unit("derica"),
+		"dericas":  models.Unit("derica"),
+		"derika":   models.Unit("derica"),
+		"tier":     models.Unit("derica"),
+		"tiers":    models.Unit("derica"),
+		"rubber":   models.Unit("rubber"),
+		"rubbers":  models.Unit("rubber"),
+		"basin":    models.Unit("rubber"),
+		"basins":   models.Unit("rubber"),
 	}
 
 	amountRegex = regexp.MustCompile(`(?i)\b(?:ngn\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)|([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*(?:naira|kobo|ngn)|([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?))\b`)
+
+	prefixKRegex        = regexp.MustCompile(`(?i)\bk[- ]?(fifty|forty|thirty|twenty|ten|five|hundred|[0-9]+)(?:\s*(?:naira|kobo|ngn))?\b`)
+	suffixKRegex        = regexp.MustCompile(`(?i)\b([0-9]+(?:\.[0-9]+)?)\s*k(?:\s*(?:naira|kobo|ngn))?\b`)
+	wordKRegex          = regexp.MustCompile(`(?i)\b((?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|hundred)(?:\s+(?:point\s+five|and\s+(?:a\s+)?half|[0-9]+))?)\s*k(?:\s*(?:naira|kobo|ngn))?\b`)
+	shorthandFiveRegex  = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)[- ]five(?:\s*(?:naira|kobo|ngn))?\b`)
+	shorthandFiftyRegex = regexp.MustCompile(`(?i)\b(one|two|three|four|five|six|seven|eight|nine|ten)[- ]fifty(?:\s*(?:naira|kobo|ngn))?\b`)
+
+	prefixKWordMap = map[string]int64{
+		"hundred": 100000,
+		"fifty":   50000,
+		"forty":   40000,
+		"thirty":  30000,
+		"twenty":  20000,
+		"ten":     10000,
+		"five":    5000,
+	}
 )
 
 // ParsedAnchors contains raw tokens extracted from a spoken segment.
@@ -52,6 +92,7 @@ type ParsedAnchors struct {
 	Unit           models.Unit
 	UnitFound      bool
 	AmountMinor    int64
+	AmountPhrase   string
 	AmountFound    bool
 	Currency       string
 }
@@ -68,8 +109,9 @@ func ParseSpokenSegment(text string, defaultCurrency string) ParsedAnchors {
 		return res
 	}
 
-	// 1. Extract Unit
 	lower := strings.ToLower(cleaned)
+
+	// 1. Extract Unit
 	for word, unit := range knownUnits {
 		// match standalone word boundary
 		pattern := `\b` + regexp.QuoteMeta(word) + `\b`
@@ -81,33 +123,10 @@ func ParseSpokenSegment(text string, defaultCurrency string) ParsedAnchors {
 	}
 
 	// 2. Extract Amount
-	// Check for numeric amount with or without currency indicator
-	matches := amountRegex.FindAllStringSubmatch(cleaned, -1)
-	for _, m := range matches {
-		numStr := ""
-		for idx := 1; idx < len(m); idx++ {
-			if m[idx] != "" {
-				numStr = m[idx]
-				break
-			}
-		}
-		if numStr != "" {
-			rawNum := strings.ReplaceAll(numStr, ",", "")
-			if val, err := strconv.ParseFloat(rawNum, 64); err == nil && val > 0 {
-				// Amount in kobo (x100)
-				res.AmountMinor = int64(val * 100)
-				res.AmountFound = true
-				break
-			}
-		}
-	}
-
-	// If no numeric amount was matched, check spoken words: e.g. "four thousand naira", "forty-five thousand naira"
-	if !res.AmountFound {
-		if amt, ok := extractSpokenMoney(lower); ok {
-			res.AmountMinor = amt
-			res.AmountFound = true
-		}
+	if amt, phrase, ok := extractSpokenAmount(cleaned, lower); ok {
+		res.AmountMinor = amt
+		res.AmountPhrase = phrase
+		res.AmountFound = true
 	}
 
 	// 3. Extract Quantity with self-correction handling
@@ -124,13 +143,139 @@ func ParseSpokenSegment(text string, defaultCurrency string) ParsedAnchors {
 	return res
 }
 
+func parseNumberWords(str string) int64 {
+	words := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(str, ",", " "), "-", " "))
+	var current int64
+	var total int64
+	found := false
+	for _, w := range words {
+		if val, ok := unitsMap[w]; ok {
+			current += val
+			found = true
+		} else if scale, ok := scalesMap[w]; ok {
+			if current == 0 {
+				current = 1
+			}
+			if scale == 100 {
+				current *= 100
+			} else {
+				total += current * scale
+				current = 0
+			}
+			found = true
+		}
+	}
+	total += current
+	if found {
+		return total
+	}
+	return 0
+}
+
+func extractSpokenAmount(cleaned, lower string) (int64, string, bool) {
+	// 1. Prefix "k" with words or digits (e.g. "k-fifty", "k fifty", "k-20", "k-50", "k-hundred")
+	if m := prefixKRegex.FindStringSubmatchIndex(lower); len(m) >= 4 {
+		fullMatch := lower[m[0]:m[1]]
+		token := lower[m[2]:m[3]]
+		if val, ok := prefixKWordMap[token]; ok {
+			return val * 100, fullMatch, true
+		}
+		if num, err := strconv.ParseFloat(token, 64); err == nil && num > 0 {
+			return int64(num * 1000 * 100), fullMatch, true
+		}
+	}
+
+	// 2. Suffix "k" on digits (e.g. "2k", "1.5k", "50k", "100k")
+	if m := suffixKRegex.FindStringSubmatchIndex(lower); len(m) >= 4 {
+		fullMatch := lower[m[0]:m[1]]
+		numStr := lower[m[2]:m[3]]
+		if num, err := strconv.ParseFloat(numStr, 64); err == nil && num > 0 {
+			return int64(num * 1000 * 100), fullMatch, true
+		}
+	}
+
+	// 3. Word(s) with "k" (e.g. "two k", "one point five k", "two and half k", "fifty k")
+	if m := wordKRegex.FindStringSubmatchIndex(lower); len(m) >= 4 {
+		fullMatch := lower[m[0]:m[1]]
+		wordPart := strings.TrimSpace(lower[m[2]:m[3]])
+		if strings.Contains(wordPart, "point five") {
+			baseWord := strings.Fields(wordPart)[0]
+			if baseVal, ok := unitsMap[baseWord]; ok {
+				return int64((float64(baseVal) + 0.5) * 1000 * 100), fullMatch, true
+			}
+		} else if strings.Contains(wordPart, "and half") || strings.Contains(wordPart, "and a half") {
+			baseWord := strings.Fields(wordPart)[0]
+			if baseVal, ok := unitsMap[baseWord]; ok {
+				return int64((float64(baseVal) + 0.5) * 1000 * 100), fullMatch, true
+			}
+		} else {
+			val := parseNumberWords(wordPart)
+			if val > 0 {
+				return val * 1000 * 100, fullMatch, true
+			}
+		}
+	}
+
+	// 4. Shorthand <base>-five (e.g. "two-five", "one-five", "ten-five")
+	if m := shorthandFiveRegex.FindStringSubmatchIndex(lower); len(m) >= 4 {
+		fullMatch := lower[m[0]:m[1]]
+		baseWord := lower[m[2]:m[3]]
+		if baseVal, ok := unitsMap[baseWord]; ok && baseVal > 0 {
+			return (baseVal*1000 + 500) * 100, fullMatch, true
+		}
+	}
+
+	// 5. Shorthand <base>-fifty (e.g. "two fifty", "two-fifty", "seven fifty")
+	if m := shorthandFiftyRegex.FindStringSubmatchIndex(lower); len(m) >= 4 {
+		fullMatch := lower[m[0]:m[1]]
+		baseWord := lower[m[2]:m[3]]
+		if baseVal, ok := unitsMap[baseWord]; ok && baseVal > 0 {
+			return (baseVal*100 + 50) * 100, fullMatch, true
+		}
+	}
+
+	// 6. Standard amountRegex (numeric figures with currency markers or commas)
+	matches := amountRegex.FindAllStringSubmatchIndex(cleaned, -1)
+	for _, m := range matches {
+		fullMatch := cleaned[m[0]:m[1]]
+		numStr := ""
+		for idx := 2; idx < len(m); idx += 2 {
+			if m[idx] >= 0 && m[idx+1] >= 0 {
+				numStr = cleaned[m[idx]:m[idx+1]]
+				break
+			}
+		}
+		if numStr != "" {
+			rawNum := strings.ReplaceAll(numStr, ",", "")
+			if val, err := strconv.ParseFloat(rawNum, 64); err == nil && val > 0 {
+				return int64(val * 100), fullMatch, true
+			}
+		}
+	}
+
+	// 7. Spoken money words with naira/kobo or scale words
+	if amt, phrase, ok := extractSpokenMoneyWithPhrase(lower); ok {
+		return amt, phrase, true
+	}
+
+	return 0, "", false
+}
+
 func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool) {
+	cleanLower := lower
+	cleanCleaned := cleaned
+	if res.AmountPhrase != "" {
+		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(res.AmountPhrase) + `\b`)
+		cleanLower = re.ReplaceAllString(cleanLower, " ")
+		cleanCleaned = re.ReplaceAllString(cleanCleaned, " ")
+	}
+
 	// If self-correction phrases exist ("wait no", "sorry", "i mean", etc.), prefer the corrected value after the marker
 	markers := []string{"wait no", "no wait", "sorry", "i mean", "make that", "actually", "correction"}
 	var lastMarkerIdx = -1
 	var lastMarkerLen = 0
 	for _, m := range markers {
-		idx := strings.LastIndex(lower, m)
+		idx := strings.LastIndex(cleanLower, m)
 		if idx > lastMarkerIdx {
 			lastMarkerIdx = idx
 			lastMarkerLen = len(m)
@@ -138,7 +283,7 @@ func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool)
 	}
 
 	if lastMarkerIdx >= 0 {
-		afterClean := cleaned[lastMarkerIdx+lastMarkerLen:]
+		afterClean := cleanCleaned[lastMarkerIdx+lastMarkerLen:]
 		afterLower := strings.ToLower(afterClean)
 
 		// Check digits after marker
@@ -160,7 +305,7 @@ func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool)
 
 	// Standard check: digits first
 	qtyPattern := regexp.MustCompile(`\b([0-9]+)\b`)
-	qtyMatches := qtyPattern.FindAllStringSubmatch(cleaned, -1)
+	qtyMatches := qtyPattern.FindAllStringSubmatch(cleanCleaned, -1)
 	for _, qm := range qtyMatches {
 		if val, err := strconv.Atoi(qm[1]); err == nil && val > 0 {
 			if res.AmountFound && int64(val*100) == res.AmountMinor {
@@ -170,23 +315,94 @@ func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool)
 		}
 	}
 
-	// Fallback to words
-	return extractSpokenQuantity(lower)
+	// Words check
+	if qty, ok := extractSpokenQuantity(cleanLower); ok {
+		return qty, true
+	}
+
+	// If no explicit quantity was extracted, but an amount was found (e.g. "Two k Peak milk thank you"):
+	// default quantity to 1 for the mentioned item only if a product mention exists.
+	if res.AmountFound {
+		prod := cleanProductMention(cleaned, res)
+		if strings.Trim(prod, "- \t\r\n") != "" {
+			return 1, true
+		}
+	}
+
+	return 0, false
 }
 
 func extractSpokenQuantity(text string) (int, bool) {
+	lower := strings.ToLower(text)
+	// Check multi-word colloquial quantity phrases
+	if strings.Contains(lower, "half dozen") {
+		return 6, true
+	}
+	if strings.Contains(lower, "two dozen") {
+		return 24, true
+	}
+	if strings.Contains(lower, "three dozen") {
+		return 36, true
+	}
+	if strings.Contains(lower, "four dozen") {
+		return 48, true
+	}
+	if strings.Contains(lower, "five dozen") {
+		return 60, true
+	}
+	if strings.Contains(lower, "one dozen") || strings.Contains(lower, "a dozen") || regexp.MustCompile(`\bdozen\b`).MatchString(lower) {
+		return 12, true
+	}
+	if strings.Contains(lower, "two score") {
+		return 40, true
+	}
+	if strings.Contains(lower, "one score") || strings.Contains(lower, "a score") || regexp.MustCompile(`\bscore\b`).MatchString(lower) {
+		return 20, true
+	}
+
 	// e.g. "two milo", "three cartons", "five packs"
 	words := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(text, ",", " "), "-", " "))
 	for i, w := range words {
 		// Stop if we hit currency indicators
-		if w == "naira" || w == "kobo" || w == "thousand" || w == "million" {
+		if w == "naira" || w == "kobo" || w == "thousand" || w == "million" || w == "k" {
 			continue
 		}
+
+		// Check indefinite article before known unit: e.g. "a pack", "a carton", "a painter", "a mudu", "a derica", "a bottle"
+		if (w == "a" || w == "an") && i+1 < len(words) {
+			wNext := words[i+1]
+			if _, ok := knownUnits[wNext]; ok {
+				return 1, true
+			}
+			if wNext == "loaf" || wNext == "loaves" || wNext == "can" || wNext == "cans" {
+				return 1, true
+			}
+		}
+
 		if val, ok := unitsMap[w]; ok && val > 0 {
-			// Skip if this word precedes a monetary scale or currency word (e.g. "four thousand", "four naira")
-			if i+1 < len(words) && (words[i+1] == "thousand" || words[i+1] == "million" || words[i+1] == "hundred" || words[i+1] == "naira" || words[i+1] == "kobo") {
+			// Skip if this word precedes a monetary scale or currency word (e.g. "four thousand", "four naira", "two k")
+			if i+1 < len(words) && (words[i+1] == "thousand" || words[i+1] == "million" || words[i+1] == "hundred" || words[i+1] == "naira" || words[i+1] == "kobo" || words[i+1] == "k") {
 				continue
 			}
+			// Skip if preceded by "k" (e.g. "k fifty")
+			if i > 0 && words[i-1] == "k" {
+				continue
+			}
+			// Skip if this is part of shorthand hundreds (e.g. "two fifty")
+			if w == "fifty" && i > 0 {
+				prev := words[i-1]
+				if prev == "one" || prev == "two" || prev == "three" || prev == "four" || prev == "five" || prev == "six" || prev == "seven" || prev == "eight" || prev == "nine" || prev == "ten" {
+					continue
+				}
+			}
+			// Skip if this is part of shorthand thousands (e.g. "two five")
+			if w == "five" && i > 0 {
+				prev := words[i-1]
+				if prev == "one" || prev == "two" || prev == "three" || prev == "four" || prev == "five" || prev == "six" || prev == "seven" || prev == "eight" || prev == "nine" || prev == "ten" || prev == "twelve" || prev == "fifteen" {
+					continue
+				}
+			}
+
 			// Check compound e.g. "twenty five"
 			if i+1 < len(words) {
 				if nextVal, ok2 := unitsMap[words[i+1]]; ok2 && val >= 20 && nextVal < 10 {
@@ -200,13 +416,43 @@ func extractSpokenQuantity(text string) (int, bool) {
 }
 
 func extractSpokenMoney(text string) (int64, bool) {
+	amt, _, ok := extractSpokenMoneyWithPhrase(text)
+	return amt, ok
+}
+
+func extractSpokenMoneyWithPhrase(text string) (int64, string, bool) {
 	// Look for "... naira" or "... kobo"
 	idx := strings.Index(text, "naira")
+	hasCurrencyWord := true
+	currencyWord := "naira"
 	if idx < 0 {
 		idx = strings.Index(text, "kobo")
+		currencyWord = "kobo"
 	}
 	if idx < 0 {
-		return 0, false
+		hasCurrencyWord = false
+		// If neither naira nor kobo, check if text contains scale words like "thousand", "million"
+		// or "hundred"
+		for _, scale := range []string{"thousand", "million", "hundred"} {
+			sIdx := strings.LastIndex(text, scale)
+			if sIdx >= 0 {
+				endIdx := sIdx + len(scale)
+				afterScale := text[endIdx:]
+				afterWords := strings.Fields(afterScale)
+				for _, aw := range afterWords {
+					if _, isU := unitsMap[aw]; isU {
+						endIdx = strings.Index(text[endIdx:], aw) + endIdx + len(aw)
+					} else {
+						break
+					}
+				}
+				idx = endIdx
+				break
+			}
+		}
+	}
+	if idx < 0 {
+		return 0, "", false
 	}
 	target := text[:idx]
 
@@ -227,7 +473,7 @@ func extractSpokenMoney(text string) (int64, bool) {
 	}
 
 	if len(numWords) == 0 {
-		return 0, false
+		return 0, "", false
 	}
 
 	var current int64
@@ -254,31 +500,47 @@ func extractSpokenMoney(text string) (int64, bool) {
 	total += current
 
 	if foundNumber && total > 0 {
+		phrase := strings.Join(numWords, " ")
+		if hasCurrencyWord {
+			phrase = phrase + " " + currencyWord
+		}
 		// Convert whole currency to minor units (x100)
-		return total * 100, true
+		return total * 100, phrase, true
 	}
-	return 0, false
+	return 0, "", false
 }
 
 func cleanProductMention(raw string, anchors ParsedAnchors) string {
 	s := raw
+	if anchors.AmountPhrase != "" {
+		s = regexp.MustCompile(`(?i)\b`+regexp.QuoteMeta(anchors.AmountPhrase)+`\b`).ReplaceAllString(s, " ")
+	}
+
 	// Remove currency phrases
 	s = regexp.MustCompile(`(?i)\b(?:ngn\s*)?[0-9,]+(?:\.[0-9]+)?\s*(?:naira|kobo|ngn)?\b`).ReplaceAllString(s, " ")
 	s = regexp.MustCompile(`(?i)\b(?:thousand|million|hundred|naira|kobo|ngn)\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\bk[- ]?(?:fifty|forty|thirty|twenty|ten|five|hundred|[0-9]+)\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\b[0-9]+(?:\.[0-9]+)?\s*k\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|hundred)\s+k\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)[- ]five\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five|six|seven|eight|nine|ten)[- ]fifty\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five)\s+point\s+five(?:\s+k)?\b`).ReplaceAllString(s, " ")
+	s = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five)\s+and\s+(?:a\s+)?half(?:\s+k)?\b`).ReplaceAllString(s, " ")
 
 	// Remove units
 	for u := range knownUnits {
 		s = regexp.MustCompile(`(?i)\b`+regexp.QuoteMeta(u)+`\b`).ReplaceAllString(s, " ")
 	}
 
-	// Remove quantity words at word boundaries
+	// Remove quantity words and phrases at word boundaries
+	s = regexp.MustCompile(`(?i)\b(?:half\s+dozen|a\s+dozen|one\s+dozen|dozen|two\s+dozen|three\s+dozen|four\s+dozen|five\s+dozen|two\s+score|one\s+score|a\s+score|score|pair|pairs)\b`).ReplaceAllString(s, " ")
 	for w := range unitsMap {
 		s = regexp.MustCompile(`(?i)\b`+regexp.QuoteMeta(w)+`\b`).ReplaceAllString(s, " ")
 	}
 	s = regexp.MustCompile(`\b[0-9]+\b`).ReplaceAllString(s, " ")
 
-	// Remove conversational greetings, correction markers, fillers, supplier prefixes, customer/credit words, and noise words
-	s = regexp.MustCompile(`(?i)\b(?:good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|how\s+far|hello|hi|welcome|sorry|wait\s+no|no\s+wait|wait|no|i\s+mean|make\s+that|actually|correction|uh|um|ah|er|eh|okay|alright|of|and|please|for|at|that\s+is\s+all|delivery\s+from|received\s+from|restock\s+from|from\s+supplier|supplier|delivery|restock|credit|tab|debt|account|customer|cust)\b`).ReplaceAllString(s, " ")
+	// Remove conversational greetings, correction markers, fillers, supplier prefixes, customer/credit words, boundaries, articles, and noise words
+	s = regexp.MustCompile(`(?i)\b(?:good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|how\s+far|hello|hi|welcome|sorry|wait\s+no|no\s+wait|wait|no|i\s+mean|make\s+that|actually|correction|uh|um|ah|er|eh|okay|alright|of|and|a|an|the|please|for|at|that\s+is\s+all|delivery\s+from|received\s+from|restock\s+from|from\s+supplier|supplier|delivery|restock|credit|tab|debt|account|customer|cust|thank\s+you|thanks|stock\s+received|restock\s+complete|purchase\s+received)\b`).ReplaceAllString(s, " ")
 
 	var b strings.Builder
 	for _, r := range s {
@@ -338,7 +600,7 @@ func startsWithQuantity(s string) bool {
 	if val, ok := unitsMap[w0]; ok && val > 0 {
 		return true
 	}
-	if w0 == "dozen" || w0 == "half" || w0 == "pair" {
+	if w0 == "dozen" || w0 == "half" || w0 == "pair" || w0 == "score" {
 		return true
 	}
 	// 3. Starts with indefinite article + packaging unit: e.g. "a pack", "a carton", "a bottle", "a tin", "a crate", "a piece"
@@ -371,7 +633,7 @@ func isMoneyAmount(s string) bool {
 		return true
 	}
 	lower := strings.ToLower(strings.TrimSpace(s))
-	if strings.HasSuffix(lower, "ngn") || strings.HasSuffix(lower, "naira") || strings.HasSuffix(lower, "kobo") {
+	if strings.HasSuffix(lower, "ngn") || strings.HasSuffix(lower, "naira") || strings.HasSuffix(lower, "kobo") || strings.HasSuffix(lower, "k") {
 		cleaned := cleanProductMention(s, anchors)
 		if strings.Trim(cleaned, "- \t\r\n") == "" {
 			return true
@@ -465,7 +727,7 @@ func SplitTranscriptLines(transcript, closingPhrase string) []string {
 		if len(merged) > 0 {
 			prevAnchors := ParseSpokenSegment(merged[len(merged)-1], "")
 			curAnchors := ParseSpokenSegment(l, "")
-			if curAnchors.AmountFound && curAnchors.ProductMention == "" && curAnchors.Quantity == 0 && !prevAnchors.AmountFound {
+			if curAnchors.AmountFound && curAnchors.ProductMention == "" && !prevAnchors.AmountFound {
 				merged[len(merged)-1] = merged[len(merged)-1] + ", " + l
 				continue
 			}

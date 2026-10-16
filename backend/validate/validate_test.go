@@ -615,3 +615,291 @@ func TestValidateCustomerCreditAttribution(t *testing.T) {
 		t.Errorf("expected line status review_required, got %s", res2.Lines[0].Transaction.Status)
 	}
 }
+
+func TestNigerianMarketColloquialNumbersAndUnits(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := []models.Product{
+		{
+			ID:       "prd_peak",
+			ShopID:   "shop_1",
+			Name:     "Peak Milk 400g",
+			SKU:      "PEAK-400",
+			Aliases:  []string{"Peak", "Peak milk", "Peak tin"},
+			Price:    models.Money{Amount: 200000, Currency: "NGN"}, // 2,000 NGN
+			Quantity: 20,
+			BaseUnit: "tin",
+		},
+		{
+			ID:       "prd_milo",
+			ShopID:   "shop_1",
+			Name:     "Milo 500g",
+			SKU:      "MILO-500",
+			Aliases:  []string{"Milo", "Nestle Milo"},
+			Price:    models.Money{Amount: 138889, Currency: "NGN"},
+			Quantity: 15,
+			BaseUnit: "pack",
+			Packaging: []models.PackagingRelation{
+				{From: "carton", To: "pack", Factor: 12},
+			},
+		},
+		{
+			ID:       "prd_indomie",
+			ShopID:   "shop_1",
+			Name:     "Indomie Instant Noodles",
+			SKU:      "IND-70G",
+			Aliases:  []string{"Indomie", "Indomie noodles"},
+			Price:    models.Money{Amount: 41666, Currency: "NGN"},
+			Quantity: 100,
+			BaseUnit: "piece",
+			Packaging: []models.PackagingRelation{
+				{From: "carton", To: "piece", Factor: 40},
+			},
+		},
+		{
+			ID:       "prd_garri",
+			ShopID:   "shop_1",
+			Name:     "Ijebu Garri",
+			SKU:      "GARRI-IJEBU",
+			Aliases:  []string{"garri", "ijebu garri", "white garri"},
+			Price:    models.Money{Amount: 300000, Currency: "NGN"}, // 3,000 NGN per painter
+			Quantity: 50,
+			BaseUnit: "painter",
+			Packaging: []models.PackagingRelation{
+				{From: "bag", To: "painter", Factor: 15},
+				{From: "painter", To: "mudu", Factor: 4},
+			},
+		},
+	}
+
+	// 1. "Two k Peak milk thank you" -> 2,000 NGN (200,000 kobo)
+	req1 := validate.CaptureRequest{
+		CaptureID:  "cap_colloquial_01",
+		Transcript: "Two k Peak milk thank you",
+	}
+	res1, err := engine.Validate(context.Background(), req1, "shop_1", "NGN", 0.75, "thank you", "stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if len(res1.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(res1.Lines))
+	}
+	l1 := res1.Lines[0].Transaction
+	if l1.ProductID != "prd_peak" {
+		t.Errorf("expected product prd_peak, got %q", l1.ProductID)
+	}
+	if l1.Amount.Amount != 200000 { // 2,000 NGN = 200,000 kobo
+		t.Errorf("expected amount 200000 kobo (2,000 NGN), got %d", l1.Amount.Amount)
+	}
+	if l1.Quantity != 1 {
+		t.Errorf("expected quantity 1, got %d", l1.Quantity)
+	}
+	if l1.Status != models.StatusConfirmed {
+		t.Errorf("expected status confirmed, got %s (reasons: %v)", l1.Status, res1.Lines[0].ReviewReasons)
+	}
+
+	// 2. "Three cartons Milo k-fifty thank you" -> quantity 3, carton, 50,000 NGN (5,000,000 kobo)
+	req2 := validate.CaptureRequest{
+		CaptureID:  "cap_colloquial_02",
+		Transcript: "Three cartons Milo k-fifty thank you",
+	}
+	res2, err := engine.Validate(context.Background(), req2, "shop_1", "NGN", 0.75, "thank you", "stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if len(res2.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(res2.Lines))
+	}
+	l2 := res2.Lines[0].Transaction
+	if l2.ProductID != "prd_milo" {
+		t.Errorf("expected product prd_milo, got %q", l2.ProductID)
+	}
+	if l2.Quantity != 3 {
+		t.Errorf("expected quantity 3, got %d", l2.Quantity)
+	}
+	if l2.Unit != "carton" {
+		t.Errorf("expected unit carton, got %q", l2.Unit)
+	}
+	if l2.Amount.Amount != 5000000 { // 50,000 NGN = 5,000,000 kobo
+		t.Errorf("expected amount 5000000 kobo (50,000 NGN), got %d", l2.Amount.Amount)
+	}
+	if l2.Status != models.StatusConfirmed {
+		t.Errorf("expected status confirmed, got %s (reasons: %v)", l2.Status, res2.Lines[0].ReviewReasons)
+	}
+
+	// 3. "Half dozen Indomie two-five thank you" -> quantity 6, 2,500 NGN (250,000 kobo)
+	req3 := validate.CaptureRequest{
+		CaptureID:  "cap_colloquial_03",
+		Transcript: "Half dozen Indomie two-five thank you",
+	}
+	res3, err := engine.Validate(context.Background(), req3, "shop_1", "NGN", 0.75, "thank you", "stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if len(res3.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(res3.Lines))
+	}
+	l3 := res3.Lines[0].Transaction
+	if l3.ProductID != "prd_indomie" {
+		t.Errorf("expected product prd_indomie, got %q", l3.ProductID)
+	}
+	if l3.Quantity != 6 {
+		t.Errorf("expected quantity 6 for half dozen, got %d", l3.Quantity)
+	}
+	if l3.Amount.Amount != 250000 { // 2,500 NGN = 250,000 kobo
+		t.Errorf("expected amount 250000 kobo (2,500 NGN), got %d", l3.Amount.Amount)
+	}
+	if l3.Status != models.StatusConfirmed {
+		t.Errorf("expected status confirmed, got %s (reasons: %v)", l3.Status, res3.Lines[0].ReviewReasons)
+	}
+
+	// 4. "Two painters of garri six thousand naira thank you" -> quantity 2, unit "painter", 6,000 NGN (600,000 kobo)
+	req4 := validate.CaptureRequest{
+		CaptureID:  "cap_colloquial_04",
+		Transcript: "Two painters of garri six thousand naira thank you",
+	}
+	res4, err := engine.Validate(context.Background(), req4, "shop_1", "NGN", 0.75, "thank you", "stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if len(res4.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(res4.Lines))
+	}
+	l4 := res4.Lines[0].Transaction
+	if l4.ProductID != "prd_garri" {
+		t.Errorf("expected product prd_garri, got %q", l4.ProductID)
+	}
+	if l4.Quantity != 2 {
+		t.Errorf("expected quantity 2, got %d", l4.Quantity)
+	}
+	if l4.Unit != "painter" {
+		t.Errorf("expected unit painter, got %q", l4.Unit)
+	}
+	if l4.Amount.Amount != 600000 { // 6,000 NGN = 600,000 kobo
+		t.Errorf("expected amount 600000 kobo (6,000 NGN), got %d", l4.Amount.Amount)
+	}
+	if l4.Status != models.StatusConfirmed {
+		t.Errorf("expected status confirmed, got %s (reasons: %v)", l4.Status, res4.Lines[0].ReviewReasons)
+	}
+}
+
+func TestColloquialParserVariants(t *testing.T) {
+	tests := []struct {
+		input       string
+		wantQty     int
+		wantUnit    models.Unit
+		wantAmount  int64
+		wantProduct string
+	}{
+		{
+			input:       "2k Peak milk thank you",
+			wantQty:     1,
+			wantAmount:  200000,
+			wantProduct: "Peak milk",
+		},
+		{
+			input:       "1.5k Peak milk thank you",
+			wantQty:     1,
+			wantAmount:  150000,
+			wantProduct: "Peak milk",
+		},
+		{
+			input:       "two and half k Peak milk thank you",
+			wantQty:     1,
+			wantAmount:  250000,
+			wantProduct: "Peak milk",
+		},
+		{
+			input:       "k-twenty Milo thank you",
+			wantQty:     1,
+			wantAmount:  2000000,
+			wantProduct: "Milo",
+		},
+		{
+			input:       "k-hundred Milo thank you",
+			wantQty:     1,
+			wantAmount:  10000000,
+			wantProduct: "Milo",
+		},
+		{
+			input:       "one-five Indomie thank you",
+			wantQty:     1,
+			wantAmount:  150000,
+			wantProduct: "Indomie",
+		},
+		{
+			input:       "ten-five Milo thank you",
+			wantQty:     1,
+			wantAmount:  1050000,
+			wantProduct: "Milo",
+		},
+		{
+			input:       "two fifty Indomie thank you",
+			wantQty:     1,
+			wantAmount:  25000,
+			wantProduct: "Indomie",
+		},
+		{
+			input:       "seven fifty Indomie thank you",
+			wantQty:     1,
+			wantAmount:  75000,
+			wantProduct: "Indomie",
+		},
+		{
+			input:       "a dozen eggs two-five thank you",
+			wantQty:     12,
+			wantAmount:  250000,
+			wantProduct: "eggs",
+		},
+		{
+			input:       "a score of baskets fifty k thank you",
+			wantQty:     20,
+			wantAmount:  5000000,
+			wantProduct: "baskets",
+		},
+		{
+			input:       "a painter of garri three-five thank you",
+			wantQty:     1,
+			wantUnit:    models.Unit("painter"),
+			wantAmount:  350000,
+			wantProduct: "garri",
+		},
+		{
+			input:       "three mudus of rice six thousand naira thank you",
+			wantQty:     3,
+			wantUnit:    models.Unit("mudu"),
+			wantAmount:  600000,
+			wantProduct: "rice",
+		},
+		{
+			input:       "two dericas of beans one-five thank you",
+			wantQty:     2,
+			wantUnit:    models.Unit("derica"),
+			wantAmount:  150000,
+			wantProduct: "beans",
+		},
+		{
+			input:       "four rubbers of palm oil k-twenty thank you",
+			wantQty:     4,
+			wantUnit:    models.Unit("rubber"),
+			wantAmount:  2000000,
+			wantProduct: "palm oil",
+		},
+	}
+
+	for _, tc := range tests {
+		anchors := validate.ParseSpokenSegment(tc.input, "NGN")
+		if anchors.AmountMinor != tc.wantAmount {
+			t.Errorf("ParseSpokenSegment(%q) amount = %d, want %d", tc.input, anchors.AmountMinor, tc.wantAmount)
+		}
+		if tc.wantQty > 0 && anchors.Quantity != tc.wantQty {
+			t.Errorf("ParseSpokenSegment(%q) quantity = %d, want %d", tc.input, anchors.Quantity, tc.wantQty)
+		}
+		if tc.wantUnit != "" && anchors.Unit != tc.wantUnit {
+			t.Errorf("ParseSpokenSegment(%q) unit = %q, want %q", tc.input, anchors.Unit, tc.wantUnit)
+		}
+		if tc.wantProduct != "" && anchors.ProductMention != tc.wantProduct {
+			t.Errorf("ParseSpokenSegment(%q) product = %q, want %q", tc.input, anchors.ProductMention, tc.wantProduct)
+		}
+	}
+}
+

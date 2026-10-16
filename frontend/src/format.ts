@@ -72,6 +72,14 @@ const UNIT_LABELS: Readonly<Record<Unit, string>> = {
   carton: "carton",
   bottle: "bottle",
   crate: "crate",
+  tin: "tin",
+  bag: "bag",
+  sachet: "sachet",
+  roll: "roll",
+  painter: "painter",
+  mudu: "mudu",
+  derica: "derica",
+  rubber: "rubber",
 };
 
 export function formatUnit(unit: Unit, quantity: number): string {
