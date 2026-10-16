@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -70,10 +69,7 @@ func run() error {
 		"comma-separated browser origins permitted to open a WebSocket (empty = same-origin only)")
 	flag.Parse()
 
-	// If AUTO_MIGRATE is set (e.g. in cloud deployment settings), execute pending migrations rather than skipping
-	if envAutoMigrate := os.Getenv("AUTO_MIGRATE"); envAutoMigrate == "true" || envAutoMigrate == "1" {
-		cfg.skipMigrations = false
-	}
+	// -skip-migrations is authoritative: runtime startup must never perform DDL.
 
 	// Environment variable fallback for hosting platforms (Render, Supabase, Cloud Run, etc.)
 	if cfg.dbPath == "" {
@@ -125,25 +121,11 @@ func redactDSN(dsn string) string {
 	return u.Redacted()
 }
 
-func initStore(logger *slog.Logger, cfg config) (*storage.Store, error) {
-	openStore := storage.Open
+func initStore(_ *slog.Logger, cfg config) (*storage.Store, error) {
 	if cfg.skipMigrations {
-		openStore = storage.OpenPostgresRuntime
+		return storage.OpenPostgresRuntime(cfg.dbPath)
 	}
-	store, err := openStore(cfg.dbPath)
-	if err != nil && cfg.skipMigrations && os.Getenv("AUTO_MIGRATE") != "false" && os.Getenv("AUTO_MIGRATE") != "0" && strings.Contains(err.Error(), "apply migrations with an administrator") {
-		logger.Warn("pending schema migrations detected in restricted runtime mode; attempting auto-migration",
-			"target", redactDSN(cfg.dbPath), "cause", err)
-		store, err = storage.Open(cfg.dbPath)
-		if err != nil {
-			return nil, fmt.Errorf("storage: auto-migration fallback failed (%w); apply migrations with an administrator before deploying", err)
-		}
-		logger.Info("pending migrations successfully auto-applied", "target", redactDSN(cfg.dbPath))
-	}
-	if err != nil {
-		return nil, err
-	}
-	return store, nil
+	return storage.Open(cfg.dbPath)
 }
 
 func serve(logger *slog.Logger, cfg config) error {

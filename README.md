@@ -12,13 +12,17 @@ The intended result is one sale for two Milo at NGN 4,000, a stock reduction of 
 
 The staged redesign is tracked in [frontreadme.md](frontreadme.md). F01 establishes a shared light/teal visual system, consistent legacy/new controls and dialogs, responsive forms, and keyboard-focusable table scroll regions. The existing four routes and capture behaviour are preserved; a dedicated Counter page and the new navigation remain planned. Local typecheck/build and 63 frontend tests passed, with Chromium layout checks at 360, 390, 768, and 1440px using controlled empty responses. This is not evidence of real microphone or complete hosted workflow acceptance.
 
+## Deployment migration policy — 16 October 2026
+
+Supabase schema versions 1–12 are applied. The Render runtime uses `-require-postgres -skip-migrations` with the restricted application role. This mode never applies DDL, and `AUTO_MIGRATE` does not override it. Apply and verify pending migrations with an administrator before merging/deploying schema-dependent code; see [the release sequence](DATABASE_MIGRATION.md#release-ordering-for-every-schema-change). There is currently no automatic administrator migration stage. Missing migrations deliberately stop startup rather than expanding runtime privileges.
+
 ## Current status
 
 Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 
 **Stage: ledger/dashboard and mobile counter speech capture ready for controlled deployment preparation; live hosting and genuine voice/shop acceptance are pending.** Authentication, atomic receipts and stock movements, retries, review correction/rejection, reversals, catalogue forms/import, manual entry, daily summaries, settings, device pairing, CSV exports, pilot reconciliation tooling, operational expense tracking, customer credit & debt ledger ("Customer Book" / "Gbese"), and in-browser mobile counter microphone speech capture are implemented.
 
-**Database:** SQLite and PostgreSQL are supported. Nine embedded PostgreSQL migrations and transfer tooling exist. The production image requires PostgreSQL and uses read-only schema validation (`-require-postgres -skip-migrations`); initialize schema with an administrator, then run with the restricted application role. See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md).
+**Database:** SQLite and PostgreSQL are supported. Twelve embedded PostgreSQL migrations and transfer tooling exist. The production image requires PostgreSQL and uses read-only schema validation (`-require-postgres -skip-migrations`); initialize schema with an administrator, then run with the restricted application role. See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md).
 
 **Voice capture:** In-browser counter audio listening is implemented via the Web Speech API on mobile Chrome/Android and Safari/iOS with automatic boundary phrase detection ("Thank you", "Stock received") and direct session-authenticated ledger ingestion. The optional standalone Rust edge runner accepts WAV or synthetic audio for external hardware hubs; it is not required for mobile phone counter operation and is excluded from the cloud container.
 

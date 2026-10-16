@@ -7,15 +7,19 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -277,34 +281,65 @@ func TestInitStore_SQLite(t *testing.T) {
 	}
 }
 
-func TestAutoMigrateEnvironmentFlag(t *testing.T) {
-	// Verify AUTO_MIGRATE=true overrides skipMigrations
+// Exercise the production startup path against an isolated CI PostgreSQL schema.
+// Even an administrator-capable connection must not run DDL in restricted mode.
+func TestRestrictedStartupNeverAutoMigrates(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_URL")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_URL is required for PostgreSQL integration")
+	}
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { admin.Close() })
+	schema := fmt.Sprintf("runtime_guard_%d", time.Now().UnixNano())
+	if _, err := admin.Exec("CREATE SCHEMA " + schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec("DROP SCHEMA " + schema + " CASCADE"); err != nil {
+			t.Errorf("clean up isolated schema: %v", err)
+		}
+	})
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := u.Query()
+	query.Set("search_path", schema)
+	u.RawQuery = query.Encode()
+	cfg := config{dbPath: u.String(), requirePostgres: true, skipMigrations: true}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, value := range []string{"", "true", "1", "false", "0"} {
+		t.Run("AUTO_MIGRATE="+value, func(t *testing.T) {
+			t.Setenv("AUTO_MIGRATE", value)
+			store, err := initStore(logger, cfg)
+			if store != nil {
+				store.Close()
+				t.Fatal("restricted startup unexpectedly opened an uninitialized schema")
+			}
+			if err == nil || !strings.Contains(err.Error(), "schema unavailable") {
+				t.Fatalf("expected read-only schema validation error, got %v", err)
+			}
+			var tables int
+			if err := admin.QueryRow("SELECT count(*) FROM information_schema.tables WHERE table_schema = $1", schema).Scan(&tables); err != nil {
+				t.Fatal(err)
+			}
+			if tables != 0 {
+				t.Fatalf("restricted startup created %d tables", tables)
+			}
+		})
+	}
+	migrator, err := storage.OpenPostgres(cfg.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrator.Close()
 	t.Setenv("AUTO_MIGRATE", "true")
-	cfg := config{skipMigrations: true}
-	if envAutoMigrate := os.Getenv("AUTO_MIGRATE"); envAutoMigrate == "true" || envAutoMigrate == "1" {
-		cfg.skipMigrations = false
+	store, err := initStore(logger, cfg)
+	if err != nil {
+		t.Fatalf("administrator-initialized schema must start: %v", err)
 	}
-	if cfg.skipMigrations {
-		t.Errorf("expected skipMigrations to be false when AUTO_MIGRATE=true")
-	}
-
-	// Verify AUTO_MIGRATE=1 overrides skipMigrations
-	t.Setenv("AUTO_MIGRATE", "1")
-	cfg = config{skipMigrations: true}
-	if envAutoMigrate := os.Getenv("AUTO_MIGRATE"); envAutoMigrate == "true" || envAutoMigrate == "1" {
-		cfg.skipMigrations = false
-	}
-	if cfg.skipMigrations {
-		t.Errorf("expected skipMigrations to be false when AUTO_MIGRATE=1")
-	}
-
-	// Verify AUTO_MIGRATE=false retains skipMigrations
-	t.Setenv("AUTO_MIGRATE", "false")
-	cfg = config{skipMigrations: true}
-	if envAutoMigrate := os.Getenv("AUTO_MIGRATE"); envAutoMigrate == "true" || envAutoMigrate == "1" {
-		cfg.skipMigrations = false
-	}
-	if !cfg.skipMigrations {
-		t.Errorf("expected skipMigrations to remain true when AUTO_MIGRATE=false")
-	}
+	store.Close()
 }
