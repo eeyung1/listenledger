@@ -8,6 +8,10 @@ ListenLedger is a voice-driven sales and inventory system for small businesses. 
 
 The intended result is one sale for two Milo at NGN 4,000, a stock reduction of two units, and an updated dashboard. These end-to-end capabilities are the MVP goal, not a claim that the current prototype already delivers them.
 
+## Frontend redesign
+
+The staged redesign is tracked in [frontreadme.md](frontreadme.md). F01 establishes a shared light/teal visual system, consistent legacy/new controls and dialogs, responsive forms, and keyboard-focusable table scroll regions. The existing four routes and capture behaviour are preserved; a dedicated Counter page and the new navigation remain planned. Local typecheck/build and 63 frontend tests passed, with Chromium layout checks at 360, 390, 768, and 1440px using controlled empty responses. This is not evidence of real microphone or complete hosted workflow acceptance.
+
 ## Current status
 
 Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
