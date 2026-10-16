@@ -54,6 +54,7 @@ interface Filters {
   type: string;
   status: string;
   receipt_id: string;
+  customer_id?: string;
 }
 
 export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanup {
@@ -67,7 +68,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   let totalCount = 0;
   let pendingNewCount = 0;
 
-  const filters: Filters = { type: "", status: "", receipt_id: "" };
+  const filters: Filters = { type: "", status: "", receipt_id: "", customer_id: "" };
 
   const ledgerBody = hook(root, "ledger-body");
   const reviewQueue = hook(root, "review-queue");
@@ -95,6 +96,10 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     if (transaction.supplier_name) {
       const supp = el("span", "badge badge--accent", `Supplier: ${transaction.supplier_name}`);
       head.append(supp);
+    }
+    if (transaction.customer_name) {
+      const cust = el("span", "badge badge--warning", `Tab: ${transaction.customer_name}`);
+      head.append(cust);
     }
     if (transaction.receipt_id) {
       const rcpt = el("span", "badge badge--mono", `Receipt: ${transaction.receipt_id}`);
@@ -219,6 +224,20 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       suppBadge.style.marginLeft = "0.5rem";
       product.append(suppBadge);
     }
+    if (transaction.customer_name) {
+      const custBadge = el("span", "badge badge--warning", `Tab: ${transaction.customer_name}`);
+      custBadge.title = `Customer Credit Tab: ${transaction.customer_name}${transaction.customer_id ? ` (${transaction.customer_id})` : ""}`;
+      custBadge.style.marginLeft = "0.5rem";
+      if (transaction.customer_id) {
+        custBadge.style.cursor = "pointer";
+        custBadge.addEventListener("click", () => {
+          filters.customer_id = transaction.customer_id || "";
+          pageOffset = 0;
+          void refetch();
+        });
+      }
+      product.append(custBadge);
+    }
     if (transaction.receipt_id) {
       const rcptBadge = el("span", "badge badge--mono", "Receipt");
       rcptBadge.title = `Receipt: ${transaction.receipt_id} (click to filter)`;
@@ -278,6 +297,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         type: filters.type || undefined,
         status: filters.status || undefined,
         receipt_id: filters.receipt_id || undefined,
+        customer_id: filters.customer_id || undefined,
       });
     }
   }
@@ -330,6 +350,23 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   function renderLedger(): void {
     if (ledgerBody === null) return;
     clear(ledgerBody);
+
+    if (filters.customer_id) {
+      const bannerRow = el("tr", "table__row");
+      const bannerCell = cell("table__cell", `Filtered by Customer Tab: ${filters.customer_id} `);
+      bannerCell.colSpan = 8;
+      const clearBtn = el("button", "button button--secondary button--sm", "Clear Filter");
+      clearBtn.style.marginLeft = "0.75rem";
+      clearBtn.addEventListener("click", () => {
+        filters.customer_id = "";
+        pageOffset = 0;
+        pendingNewCount = 0;
+        void refetch();
+      });
+      bannerCell.append(clearBtn);
+      bannerRow.append(bannerCell);
+      ledgerBody.append(bannerRow);
+    }
 
     if (filters.receipt_id) {
       const bannerRow = el("tr", "table__row");
@@ -400,6 +437,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
             type: filters.type || undefined,
             status: filters.status || undefined,
             receipt_id: filters.receipt_id || undefined,
+            customer_id: filters.customer_id || undefined,
           },
           signal,
         ),

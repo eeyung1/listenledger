@@ -31,6 +31,9 @@ type CaptureRequest struct {
 	Transcript     string                 `json:"transcript"`
 	ClosingPhrase  string                 `json:"closing_phrase,omitempty"`
 	SupplierName   string                 `json:"supplier_name,omitempty"`
+	CustomerID     string                 `json:"customer_id,omitempty"`
+	CustomerName   string                 `json:"customer_name,omitempty"`
+	IsCreditSale   bool                   `json:"is_credit_sale,omitempty"`
 	OccurredAt     *time.Time             `json:"occurred_at,omitempty"`
 	ExtractedLines []CaptureLineInput     `json:"extracted_lines,omitempty"`
 }
@@ -48,6 +51,9 @@ type ValidationResult struct {
 	CaptureID      string
 	Type           models.TransactionType
 	ClosingPhrase  string
+	CustomerID     string
+	CustomerName   string
+	IsCreditSale   bool
 	Lines          []ValidatedLine
 	RequiresReview bool
 }
@@ -70,6 +76,7 @@ func (e *Engine) Validate(
 	salePhrase string,
 	restockPhrase string,
 	catalogue []models.Product,
+	customers ...[]models.Customer,
 ) (ValidationResult, error) {
 	if threshold <= 0 || threshold > 1 {
 		threshold = DefaultReviewThreshold
@@ -122,12 +129,55 @@ func (e *Engine) Validate(
 		}
 	}
 
+	// 4. Spoken Customer Credit Attribution (Blueprint §18)
+	customerID := strings.TrimSpace(req.CustomerID)
+	customerName := strings.TrimSpace(req.CustomerName)
+	isCreditSale := req.IsCreditSale
+
+	extractedCust, isCredit, strippedCust := ExtractCustomer(cleanTranscript)
+	if extractedCust != "" {
+		if customerName == "" {
+			customerName = extractedCust
+		}
+		cleanTranscript = strippedCust
+	}
+	if isCredit {
+		isCreditSale = true
+	}
+
+	var customerList []models.Customer
+	if len(customers) > 0 {
+		customerList = customers[0]
+	}
+
+	var customerReviewReason string
+	if customerName != "" || customerID != "" {
+		cand := customerID
+		if cand == "" {
+			cand = customerName
+		}
+		custMatch := MatchCustomer(cand, customerList)
+		if custMatch.Customer != nil {
+			customerID = custMatch.Customer.ID
+			customerName = custMatch.Customer.Name
+			if custMatch.Ambiguous {
+				customerReviewReason = "ambiguous_customer_match"
+			}
+		} else {
+			if isCreditSale {
+				customerReviewReason = "unmatched_customer"
+			}
+		}
+	} else if isCreditSale {
+		customerReviewReason = "unmatched_customer"
+	}
+
 	occurredAt := time.Now().UTC()
 	if req.OccurredAt != nil {
 		occurredAt = req.OccurredAt.UTC()
 	}
 
-	// 4. Prepare Line Items (either from pre-extracted lines or by parsing transcript)
+	// 5. Prepare Line Items (either from pre-extracted lines or by parsing transcript)
 	var linesToProcess []CaptureLineInput
 	if len(req.ExtractedLines) > 0 {
 		linesToProcess = req.ExtractedLines
@@ -248,6 +298,10 @@ func (e *Engine) Validate(
 			reviewReasons = append(reviewReasons, "missing_closing_phrase")
 		}
 
+		if customerReviewReason != "" {
+			reviewReasons = append(reviewReasons, customerReviewReason)
+		}
+
 		// Overall Confidence: Weakest Anchor Decides (Blueprint §11)
 		overallConf := minScore(productConf, qtyConf, amountConf, boundaryConf)
 
@@ -297,6 +351,8 @@ func (e *Engine) Validate(
 			CreatedAt:    time.Now().UTC(),
 			Transcript:   transcriptText,
 			SupplierName: supplier,
+			CustomerID:   customerID,
+			CustomerName: customerName,
 		}
 
 		validatedLines = append(validatedLines, ValidatedLine{
@@ -315,6 +371,9 @@ func (e *Engine) Validate(
 		CaptureID:      req.CaptureID,
 		Type:           txnType,
 		ClosingPhrase:  closingPhrase,
+		CustomerID:     customerID,
+		CustomerName:   customerName,
+		IsCreditSale:   isCreditSale,
 		Lines:          validatedLines,
 		RequiresReview: anyReview,
 	}, nil

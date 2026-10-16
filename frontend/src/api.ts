@@ -60,6 +60,8 @@ export interface Transaction {
   readonly transcript?: string;
   readonly receipt_id?: string | undefined;
   readonly supplier_name?: string | undefined;
+  readonly customer_id?: string | undefined;
+  readonly customer_name?: string | undefined;
 }
 
 export interface Product {
@@ -83,6 +85,7 @@ export interface TransactionQuery {
   readonly status?: string | undefined;
   readonly product_id?: string | undefined;
   readonly receipt_id?: string | undefined;
+  readonly customer_id?: string | undefined;
   readonly from?: string | undefined;
   readonly to?: string | undefined;
 }
@@ -327,6 +330,8 @@ export interface ReviewCorrections {
   readonly quantity?: number | undefined;
   readonly unit?: Unit | undefined;
   readonly amount?: Money | undefined;
+  readonly customer_id?: string | undefined;
+  readonly customer_name?: string | undefined;
   readonly notes?: string | undefined;
   readonly create_product?: CreateProductOnboard | undefined;
 }
@@ -339,6 +344,8 @@ export interface ReviewValuesSnapshot {
   readonly quantity?: number;
   readonly unit?: Unit;
   readonly amount?: Money;
+  readonly customer_id?: string | undefined;
+  readonly customer_name?: string | undefined;
 }
 
 export interface ReviewDecision {

@@ -34,7 +34,7 @@ func ClampLimit(limit int) int {
 const transactionColumns = `id, shop_id, type, product_id, product_name, quantity,
 	unit, amount_amount, amount_currency, confidence_overall, confidence_product,
 	confidence_quantity, confidence_amount, status, occurred_at, created_at,
-	transcript, receipt_id, supplier_name`
+	transcript, receipt_id, supplier_name, customer_id, customer_name`
 
 // InsertTransaction records a stock movement.
 //
@@ -83,8 +83,9 @@ func (s *Store) insertTransaction(ctx context.Context, db executor, transaction 
 			id, shop_id, type, product_id, product_name, quantity, unit,
 			amount_amount, amount_currency, confidence_overall,
 			confidence_product, confidence_quantity, confidence_amount,
-			status, occurred_at, created_at, transcript, receipt_id, supplier_name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			status, occurred_at, created_at, transcript, receipt_id, supplier_name,
+			customer_id, customer_name
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := db.ExecContext(ctx, s.rebind(query),
 		transaction.ID, transaction.ShopID, string(transaction.Type),
@@ -97,6 +98,7 @@ func (s *Store) insertTransaction(ctx context.Context, db executor, transaction 
 		nullFloat(transaction.Confidence.Amount),
 		string(transaction.Status), formatTime(occurredAt), formatTime(createdAt),
 		transaction.Transcript, nullString(transaction.ReceiptID), transaction.SupplierName,
+		transaction.CustomerID, transaction.CustomerName,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: insert transaction %s: %w", transaction.ID, err)
@@ -106,14 +108,15 @@ func (s *Store) insertTransaction(ctx context.Context, db executor, transaction 
 
 // TransactionFilter defines query constraints for filtering and paging transactions.
 type TransactionFilter struct {
-	Type      *models.TransactionType
-	Status    *models.TransactionStatus
-	ProductID string
-	ReceiptID string
-	From      *time.Time
-	To        *time.Time
-	Limit     int
-	Offset    int
+	Type       *models.TransactionType
+	Status     *models.TransactionStatus
+	ProductID  string
+	ReceiptID  string
+	CustomerID string
+	From       *time.Time
+	To         *time.Time
+	Limit      int
+	Offset     int
 }
 
 // QueryTransactions returns movements for a shop matching the given filter, along with the total count.
@@ -140,6 +143,10 @@ func (s *Store) QueryTransactions(ctx context.Context, shopID string, filter Tra
 	if filter.ReceiptID != "" {
 		whereClause += " AND receipt_id = ?"
 		args = append(args, filter.ReceiptID)
+	}
+	if filter.CustomerID != "" {
+		whereClause += " AND customer_id = ?"
+		args = append(args, filter.CustomerID)
 	}
 	if filter.From != nil {
 		whereClause += " AND occurred_at >= ?"
@@ -282,6 +289,8 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 		createdAtRaw       string
 		receiptID          sql.NullString
 		supplierName       sql.NullString
+		customerID         sql.NullString
+		customerName       sql.NullString
 	)
 
 	err := row.Scan(
@@ -290,7 +299,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 		&amountAmount, &amountCurrency, &transaction.Confidence.Overall,
 		&confidenceProduct, &confidenceQuantity, &confidenceAmount, &status,
 		&occurredAtRaw, &createdAtRaw, &transaction.Transcript, &receiptID,
-		&supplierName,
+		&supplierName, &customerID, &customerName,
 	)
 	if err != nil {
 		return models.Transaction{}, err
@@ -306,6 +315,8 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 	transaction.Confidence.Amount = floatPointer(confidenceAmount)
 	transaction.ReceiptID = receiptID.String
 	transaction.SupplierName = supplierName.String
+	transaction.CustomerID = customerID.String
+	transaction.CustomerName = customerName.String
 
 	if transaction.OccurredAt, err = parseTime(occurredAtRaw); err != nil {
 		return models.Transaction{}, err

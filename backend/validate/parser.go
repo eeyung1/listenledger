@@ -277,8 +277,8 @@ func cleanProductMention(raw string, anchors ParsedAnchors) string {
 	}
 	s = regexp.MustCompile(`\b[0-9]+\b`).ReplaceAllString(s, " ")
 
-	// Remove conversational greetings, correction markers, fillers, supplier prefixes, and noise words
-	s = regexp.MustCompile(`(?i)\b(?:good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|how\s+far|hello|hi|welcome|sorry|wait\s+no|no\s+wait|wait|no|i\s+mean|make\s+that|actually|correction|uh|um|ah|er|eh|okay|alright|of|and|please|for|at|that\s+is\s+all|delivery\s+from|received\s+from|restock\s+from|from\s+supplier|supplier|delivery|restock)\b`).ReplaceAllString(s, " ")
+	// Remove conversational greetings, correction markers, fillers, supplier prefixes, customer/credit words, and noise words
+	s = regexp.MustCompile(`(?i)\b(?:good\s+morning|good\s+afternoon|good\s+evening|how\s+are\s+you|how\s+far|hello|hi|welcome|sorry|wait\s+no|no\s+wait|wait|no|i\s+mean|make\s+that|actually|correction|uh|um|ah|er|eh|okay|alright|of|and|please|for|at|that\s+is\s+all|delivery\s+from|received\s+from|restock\s+from|from\s+supplier|supplier|delivery|restock|credit|tab|debt|account|customer|cust)\b`).ReplaceAllString(s, " ")
 
 	var b strings.Builder
 	for _, r := range s {
@@ -536,4 +536,148 @@ func ExtractSupplier(text string) (string, string) {
 	}
 
 	return "", text
+}
+
+var (
+	creditSuffixRegex1       = regexp.MustCompile(`(?i)(?:,\s*|\s+)(?:for|to)\s+([A-Za-z0-9&'.\s-]+?)\s+on\s+(?:credit|tab|debt|account)(?:[.,;:\s]+(.*)|$)`)
+	creditSuffixRegex2       = regexp.MustCompile(`(?i)(?:,\s*|\s+)on\s+(?:credit|tab|debt|account)\s+(?:for|to)\s+([A-Za-z0-9&'.\s-]+?)(?:[.,;:\s]+(.*)|$)`)
+	putOnTabPrefixRegex      = regexp.MustCompile(`(?i)^(?:put\s+(?:it\s+)?on|charge\s+(?:to\s+)?|add\s+to)\s+([A-Za-z0-9&'.\s-]+?)(?:'s)?\s+(?:tab|debt|credit|account)\s*(?::|\s*[-–—]\s*|\s*,\s*|\s+(?:we\s+got|[0-9]+|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|hundred|a|an)\b))`)
+	creditSalePrefixRegex    = regexp.MustCompile(`(?i)^(?:credit\s+sale\s+(?:for|to\s+|)|on\s+credit\s+(?:for|to\s+|)|credit\s+(?:for|to))\s+([A-Za-z0-9&'.\s-]+?)(?::|\s*[-–—]\s*|\s*,\s*|\s+(?:[0-9]+|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|forty|fifty|hundred|a|an)\b))`)
+	customerPrefixRegex      = regexp.MustCompile(`(?i)^(?:customer|cust|for\s+customer)\s*(?::|\s*[-–—]\s*|\s*,\s*|\s+)\s*([A-Za-z0-9&'.\s-]+?)(?::|\s*[-–—]\s*|\s*,\s*)`)
+	genericCreditPhraseRegex = regexp.MustCompile(`(?i)(?:,\s*|\s+)\b(?:on\s+credit|on\s+tab|on\s+debt|on\s+account)\b(?:[.,;:\s]+(.*)|$)`)
+)
+
+// ExtractCustomer parses spoken customer credit attribution from counter utterances (blueprint §18).
+// Returns customer name, whether credit/tab was specified, and the remaining utterance.
+func ExtractCustomer(text string) (string, bool, string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", false, text
+	}
+
+	// 1. Check Put on Tab prefix ("Put on Emeka's tab: 2 Milo", "Charge to Mama Ngozi's account: 3 bread")
+	if match := putOnTabPrefixRegex.FindStringSubmatchIndex(trimmed); len(match) >= 4 {
+		nameStart, nameEnd := match[2], match[3]
+		candidate := cleanSpokenCustomerName(trimmed[nameStart:nameEnd])
+		if isValidCustomerCandidate(candidate) {
+			afterName := trimmed[nameEnd:]
+			afterLower := strings.ToLower(afterName)
+			idx := -1
+			keywordLen := 0
+			for _, kw := range []string{"tab", "credit", "debt", "account"} {
+				kIdx := strings.Index(afterLower, kw)
+				if kIdx >= 0 && (idx < 0 || kIdx < idx) {
+					idx = kIdx
+					keywordLen = len(kw)
+				}
+			}
+			var remaining string
+			if idx >= 0 {
+				remaining = strings.TrimLeft(afterName[idx+keywordLen:], ":-–—, \t\r\n")
+			} else {
+				remaining = strings.TrimLeft(afterName, ":-–—, \t\r\n")
+			}
+			return candidate, true, strings.TrimSpace(remaining)
+		}
+	}
+
+	// 2. Check Credit Sale prefix ("Credit sale for Emeka: 2 Milo", "On credit to Mama Ngozi: 5 Peak milk")
+	if match := creditSalePrefixRegex.FindStringSubmatchIndex(trimmed); len(match) >= 4 {
+		nameStart, nameEnd := match[2], match[3]
+		candidate := cleanSpokenCustomerName(trimmed[nameStart:nameEnd])
+		if isValidCustomerCandidate(candidate) {
+			remaining := strings.TrimLeft(trimmed[nameEnd:], ":-–—, \t\r\n")
+			return candidate, true, strings.TrimSpace(remaining)
+		}
+	}
+
+	// 3. Check Suffix 1 ("2 Milo for Emeka on credit, thank you")
+	if match := creditSuffixRegex1.FindStringSubmatchIndex(trimmed); len(match) >= 4 {
+		nameStart, nameEnd := match[2], match[3]
+		candidate := cleanSpokenCustomerName(trimmed[nameStart:nameEnd])
+		if isValidCustomerCandidate(candidate) {
+			pre := strings.TrimSpace(trimmed[:match[0]])
+			trailing := ""
+			if len(match) >= 6 && match[4] >= 0 && match[5] >= 0 {
+				trailing = strings.TrimSpace(trimmed[match[4]:match[5]])
+			}
+			remaining := pre
+			if trailing != "" {
+				remaining = pre + ", " + trailing
+			}
+			return candidate, true, strings.TrimSpace(remaining)
+		}
+	}
+
+	// 4. Check Suffix 2 ("2 Milo on credit for Emeka, thank you")
+	if match := creditSuffixRegex2.FindStringSubmatchIndex(trimmed); len(match) >= 4 {
+		nameStart, nameEnd := match[2], match[3]
+		candidate := cleanSpokenCustomerName(trimmed[nameStart:nameEnd])
+		if isValidCustomerCandidate(candidate) {
+			pre := strings.TrimSpace(trimmed[:match[0]])
+			trailing := ""
+			if len(match) >= 6 && match[4] >= 0 && match[5] >= 0 {
+				trailing = strings.TrimSpace(trimmed[match[4]:match[5]])
+			}
+			remaining := pre
+			if trailing != "" {
+				remaining = pre + ", " + trailing
+			}
+			return candidate, true, strings.TrimSpace(remaining)
+		}
+	}
+
+	// 5. Check Customer prefix ("Customer Emeka: 2 Milo", "Customer Emeka on credit: 2 Milo")
+	if match := customerPrefixRegex.FindStringSubmatchIndex(trimmed); len(match) >= 4 {
+		nameStart, nameEnd := match[2], match[3]
+		rawCand := trimmed[nameStart:nameEnd]
+		isCredit := false
+		lowerCand := strings.ToLower(rawCand)
+		if strings.Contains(lowerCand, "on credit") || strings.Contains(lowerCand, "on tab") || strings.Contains(lowerCand, "on debt") {
+			isCredit = true
+			rawCand = regexp.MustCompile(`(?i)\s+on\s+(?:credit|tab|debt|account)`).ReplaceAllString(rawCand, "")
+		}
+		candidate := cleanSpokenCustomerName(rawCand)
+		if isValidCustomerCandidate(candidate) {
+			remaining := strings.TrimSpace(trimmed[match[1]:])
+			return candidate, isCredit, remaining
+		}
+	}
+
+	// 6. Generic anonymous credit phrase ("2 Milo on credit, thank you")
+	if match := genericCreditPhraseRegex.FindStringSubmatchIndex(trimmed); len(match) >= 2 {
+		pre := strings.TrimSpace(trimmed[:match[0]])
+		trailing := ""
+		if len(match) >= 4 && match[2] >= 0 && match[3] >= 0 {
+			trailing = strings.TrimSpace(trimmed[match[2]:match[3]])
+		}
+		remaining := pre
+		if trailing != "" {
+			remaining = pre + ", " + trailing
+		}
+		return "", true, strings.TrimSpace(remaining)
+	}
+
+	return "", false, text
+}
+
+func cleanSpokenCustomerName(raw string) string {
+	s := strings.Trim(raw, ":-–—, '\"\t\r\n")
+	s = strings.TrimSuffix(s, "'s")
+	s = strings.TrimSuffix(s, "’s")
+	s = strings.TrimSuffix(s, "'S")
+	return strings.TrimSpace(s)
+}
+
+func isValidCustomerCandidate(name string) bool {
+	if name == "" {
+		return false
+	}
+	lower := strings.ToLower(name)
+	switch lower {
+	case "today", "yesterday", "cash", "store", "warehouse", "shop", "sale", "restock", "the", "a", "an":
+		return false
+	default:
+		return true
+	}
 }

@@ -747,12 +747,14 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
               const totalAmount = res.transactions.reduce((acc, t) => acc + (t.amount?.amount || 0), 0);
               const moneyStr = formatMoney({ amount: totalAmount, currency: first?.amount?.currency || "NGN" });
               const supplierInfo = isRestock && first?.supplier_name ? ` from ${first.supplier_name}` : "";
+              const customerInfo = first?.customer_name ? ` (Tab: ${first.customer_name})` : "";
               showCaptureToast(
-                `✓ Logged ${isRestock ? "Restock" : "Sale"} (${count} items): ${itemsSummary}${supplierInfo} (${moneyStr})`,
+                `✓ Logged ${isRestock ? "Restock" : "Sale"} (${count} items): ${itemsSummary}${supplierInfo}${customerInfo} (${moneyStr})`,
                 "success",
               );
               if (voiceFeedbackEnabled) {
-                speakFeedback(`Logged ${count} items: ${itemsSummary}`);
+                const creditVoice = first?.customer_name ? ` on credit for ${first.customer_name}` : "";
+                speakFeedback(`Logged ${count} items${creditVoice}: ${itemsSummary}`);
               }
             } else if (isRestock) {
               const supplierInfo = first?.supplier_name ? ` from ${first.supplier_name}` : "";
@@ -764,12 +766,14 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
                 speakFeedback(`Stock received: ${first.quantity} ${first.product_name}${supplierInfo}`);
               }
             } else {
+              const custInfo = first?.customer_name ? ` (Tab: ${first.customer_name})` : "";
               const detail = first
-                ? `${first.quantity} ${first.product_name} (${formatMoney(first.amount)})`
+                ? `${first.quantity} ${first.product_name} (${formatMoney(first.amount)})${custInfo}`
                 : candidate.transcript;
               showCaptureToast(`✓ Logged Sale: ${detail}`, "success");
               if (voiceFeedbackEnabled && first) {
-                speakFeedback(`Sale: ${first.quantity} ${first.product_name}`);
+                const creditVoice = first.customer_name ? ` on credit for ${first.customer_name}` : "";
+                speakFeedback(`Sale: ${first.quantity} ${first.product_name}${creditVoice}`);
               }
             }
           }

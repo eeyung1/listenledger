@@ -134,4 +134,8 @@ type Transaction struct {
 	ReceiptID string `json:"receipt_id,omitempty"`
 	// SupplierName attributes the source of delivered stock for restocks (blueprint §18).
 	SupplierName string `json:"supplier_name,omitempty"`
+	// CustomerID links a transaction to a tracked customer credit account (blueprint §18).
+	CustomerID string `json:"customer_id,omitempty"`
+	// CustomerName holds the human-readable customer name spoken at counter.
+	CustomerName string `json:"customer_name,omitempty"`
 }

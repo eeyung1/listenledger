@@ -217,3 +217,131 @@ func levenshteinDistance(s, t string) int {
 	}
 	return d[len(s)][len(t)]
 }
+
+// CustomerMatchResult holds the outcome of resolving a candidate customer mention.
+type CustomerMatchResult struct {
+	Customer   *models.Customer
+	Confidence float64
+	Ambiguous  bool
+	MatchedBy  string // "id", "exact_name", "token", "fuzzy", "none"
+}
+
+// MatchCustomer searches a shop's registered customers for a candidate spoken name.
+func MatchCustomer(candidate string, customers []models.Customer) CustomerMatchResult {
+	norm := normalizeText(candidate)
+	if norm == "" || len(customers) == 0 {
+		return CustomerMatchResult{Confidence: 0.0, MatchedBy: "none"}
+	}
+
+	// 1. Exact ID match
+	for i := range customers {
+		c := &customers[i]
+		if strings.EqualFold(strings.TrimSpace(c.ID), strings.TrimSpace(candidate)) {
+			return CustomerMatchResult{
+				Customer:   c,
+				Confidence: 1.0,
+				MatchedBy:  "id",
+			}
+		}
+	}
+
+	// 2. Exact Name match
+	for i := range customers {
+		c := &customers[i]
+		if normalizeText(c.Name) == norm {
+			return CustomerMatchResult{
+				Customer:   c,
+				Confidence: 0.98,
+				MatchedBy:  "exact_name",
+			}
+		}
+	}
+
+	// 3. Token containment (e.g. spoken "Emeka" matches customer "Emeka Okafor")
+	var tokenMatches []*models.Customer
+	candWords := strings.Fields(norm)
+	for i := range customers {
+		c := &customers[i]
+		cNorm := normalizeText(c.Name)
+		cWords := strings.Fields(cNorm)
+
+		allMatched := true
+		for _, cw := range candWords {
+			wordFound := false
+			for _, w := range cWords {
+				if w == cw {
+					wordFound = true
+					break
+				}
+			}
+			if !wordFound {
+				allMatched = false
+				break
+			}
+		}
+		if allMatched {
+			tokenMatches = append(tokenMatches, c)
+		}
+	}
+
+	if len(tokenMatches) == 1 {
+		return CustomerMatchResult{
+			Customer:   tokenMatches[0],
+			Confidence: 0.92,
+			MatchedBy:  "token",
+		}
+	} else if len(tokenMatches) > 1 {
+		return CustomerMatchResult{
+			Customer:   tokenMatches[0],
+			Confidence: 0.50,
+			Ambiguous:  true,
+			MatchedBy:  "token",
+		}
+	}
+
+	// 4. Conservative fuzzy match
+	type custFuzzyScore struct {
+		customer *models.Customer
+		score    float64
+	}
+	var scores []custFuzzyScore
+	for i := range customers {
+		c := &customers[i]
+		s := similarity(norm, normalizeText(c.Name))
+		if s >= 0.75 {
+			scores = append(scores, custFuzzyScore{customer: c, score: s})
+		}
+	}
+
+	if len(scores) == 0 {
+		return CustomerMatchResult{Confidence: 0.0, MatchedBy: "none"}
+	}
+
+	for i := 0; i < len(scores)-1; i++ {
+		for j := i + 1; j < len(scores); j++ {
+			if scores[j].score > scores[i].score {
+				scores[i], scores[j] = scores[j], scores[i]
+			}
+		}
+	}
+
+	best := scores[0]
+	if len(scores) > 1 && (best.score-scores[1].score) < 0.10 && scores[1].score >= 0.75 {
+		return CustomerMatchResult{
+			Customer:   best.customer,
+			Confidence: 0.50,
+			Ambiguous:  true,
+			MatchedBy:  "fuzzy",
+		}
+	}
+
+	conf := 0.80 + (best.score-0.75)*0.40
+	if conf > 0.90 {
+		conf = 0.90
+	}
+	return CustomerMatchResult{
+		Customer:   best.customer,
+		Confidence: conf,
+		MatchedBy:  "fuzzy",
+	}
+}
