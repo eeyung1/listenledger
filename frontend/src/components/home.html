@@ -57,7 +57,14 @@
           <div class="counter-dock__threshold-marker" data-hook="counter-threshold-marker" title="Ambient Noise Speech Threshold" style="left: 12%;"></div>
           <div class="counter-dock__level-fill" data-hook="counter-level-fill"></div>
         </div>
+        <div class="counter-dock__spectral" aria-label="16-Band Spectral Frequency Visualizer" data-hook="counter-spectral-bars" title="Vocal & Noise Frequency Spectrum (300Hz - 3.4kHz Vocal Band Highlighted)">
+          <span class="spectral-bar"></span><span class="spectral-bar"></span><span class="spectral-bar"></span><span class="spectral-bar"></span>
+          <span class="spectral-bar"></span><span class="spectral-bar"></span><span class="spectral-bar"></span><span class="spectral-bar"></span>
+          <span class="spectral-bar"></span><span class="spectral-bar"></span><span class="spectral-bar"></span><span class="spectral-bar"></span>
+          <span class="spectral-bar"></span><span class="spectral-bar"></span><span class="spectral-bar"></span><span class="spectral-bar"></span>
+        </div>
         <span class="badge badge--vad badge--calibrating" data-hook="counter-vad-badge">Calibrating…</span>
+        <span class="badge badge--snr badge--snr-calibrating" data-hook="counter-snr-badge" title="Estimated Signal-to-Noise Ratio (dB)">SNR: Calibrating…</span>
       </div>
       <div class="counter-dock__transcript" data-hook="counter-live-transcript">
         <em>Say a sale ending with "Thank you" or a restock ending with "Stock received"…</em>

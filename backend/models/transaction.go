@@ -138,4 +138,8 @@ type Transaction struct {
 	CustomerID string `json:"customer_id,omitempty"`
 	// CustomerName holds the human-readable customer name spoken at counter.
 	CustomerName string `json:"customer_name,omitempty"`
+	// AudioData is the base64-encoded audio snippet of the spoken counter interaction,
+	// preserved so the shop owner can listen to what was actually spoken to resolve
+	// disputed or low-confidence line items (blueprint §17).
+	AudioData string `json:"audio_data,omitempty"`
 }

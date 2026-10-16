@@ -36,6 +36,7 @@ type CaptureRequest struct {
 	IsCreditSale   bool                   `json:"is_credit_sale,omitempty"`
 	OccurredAt     *time.Time             `json:"occurred_at,omitempty"`
 	ExtractedLines []CaptureLineInput     `json:"extracted_lines,omitempty"`
+	AudioData      string                 `json:"audio_data,omitempty"`
 }
 
 // ValidatedLine contains the fully validated transaction ready for storage.
@@ -360,6 +361,7 @@ func (e *Engine) Validate(
 			SupplierName: supplier,
 			CustomerID:   customerID,
 			CustomerName: customerName,
+			AudioData:    req.AudioData,
 		}
 
 		validatedLines = append(validatedLines, ValidatedLine{

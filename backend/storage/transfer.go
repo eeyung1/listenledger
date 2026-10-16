@@ -91,7 +91,7 @@ var transferDependencyOrder = []tableTransferDef{
 	},
 	{
 		name:    "transactions",
-		columns: []string{"id", "shop_id", "type", "product_id", "product_name", "quantity", "unit", "amount_amount", "amount_currency", "confidence_overall", "confidence_product", "confidence_quantity", "confidence_amount", "status", "occurred_at", "created_at", "transcript", "receipt_id", "supplier_name", "customer_id", "customer_name"},
+		columns: []string{"id", "shop_id", "type", "product_id", "product_name", "quantity", "unit", "amount_amount", "amount_currency", "confidence_overall", "confidence_product", "confidence_quantity", "confidence_amount", "status", "occurred_at", "created_at", "transcript", "receipt_id", "supplier_name", "customer_id", "customer_name", "audio_data"},
 		orderBy: "occurred_at ASC, id ASC",
 	},
 	{

@@ -192,7 +192,24 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     } else {
       actions.append(confirmBtn, editBtn, rejectBtn, errorMsg);
     }
-    card.append(head, transcript, scores, actions);
+
+    let audioElement: HTMLElement | null = null;
+    if (transaction.audio_data) {
+      audioElement = el("div", "review-card__audio");
+      const audioLabel = el("span", "review-card__audio-label", "🎙 Spoken Counter Audio:");
+      const audioPlayer = document.createElement("audio");
+      audioPlayer.controls = true;
+      audioPlayer.src = transaction.audio_data;
+      audioPlayer.className = "review-card__audio-player";
+      audioPlayer.preload = "none";
+      audioElement.append(audioLabel, audioPlayer);
+    }
+
+    if (audioElement) {
+      card.append(head, transcript, audioElement, scores, actions);
+    } else {
+      card.append(head, transcript, scores, actions);
+    }
     return card;
   }
 
@@ -283,6 +300,21 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       showAuditModal(transaction.id);
     });
     actionCell.append(auditBtn);
+
+    if (transaction.audio_data) {
+      const playBtn = el("button", "button button--secondary button--sm button--audio-replay", "▶ Audio");
+      playBtn.type = "button";
+      playBtn.title = "Listen to counter audio snippet recorded for this transaction";
+      playBtn.addEventListener("click", () => {
+        try {
+          const snd = new Audio(transaction.audio_data);
+          void snd.play();
+        } catch {
+          // ignore playback issues
+        }
+      });
+      actionCell.append(playBtn);
+    }
 
     row.append(time, direction, product, quantity, amount, confidence, statusCell, actionCell);
 
@@ -625,7 +657,24 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       }
     });
 
-    form.append(help, transcriptInfo, nameLabel, skuLabel, unitLabel, priceLabel, qtyLabel);
+    let audioContainer: HTMLElement | null = null;
+    if (transaction.audio_data) {
+      audioContainer = el("div", "review-card__audio");
+      audioContainer.style.marginBottom = "0.75rem";
+      const audioLabel = el("span", "review-card__audio-label", "🎙 Spoken Counter Audio:");
+      const audioPlayer = document.createElement("audio");
+      audioPlayer.controls = true;
+      audioPlayer.src = transaction.audio_data;
+      audioPlayer.className = "review-card__audio-player";
+      audioPlayer.preload = "none";
+      audioContainer.append(audioLabel, audioPlayer);
+    }
+
+    if (audioContainer) {
+      form.append(help, transcriptInfo, audioContainer, nameLabel, skuLabel, unitLabel, priceLabel, qtyLabel);
+    } else {
+      form.append(help, transcriptInfo, nameLabel, skuLabel, unitLabel, priceLabel, qtyLabel);
+    }
     if (supplierSection) form.append(supplierSection);
     form.append(formError, actions);
     modal.append(header, form);
@@ -701,7 +750,24 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     submitBtn.type = "submit";
     footer.append(cancelBtn, submitBtn);
 
-    form.append(help, transcriptInfo, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, errorMsg, footer);
+    let audioContainer: HTMLElement | null = null;
+    if (transaction.audio_data) {
+      audioContainer = el("div", "review-card__audio");
+      audioContainer.style.marginBottom = "0.75rem";
+      const audioLabel = el("span", "review-card__audio-label", "🎙 Spoken Counter Audio:");
+      const audioPlayer = document.createElement("audio");
+      audioPlayer.controls = true;
+      audioPlayer.src = transaction.audio_data;
+      audioPlayer.className = "review-card__audio-player";
+      audioPlayer.preload = "none";
+      audioContainer.append(audioLabel, audioPlayer);
+    }
+
+    if (audioContainer) {
+      form.append(help, transcriptInfo, audioContainer, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, errorMsg, footer);
+    } else {
+      form.append(help, transcriptInfo, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, errorMsg, footer);
+    }
     modal.append(header, form);
     overlay.append(modal);
     document.body.append(overlay);

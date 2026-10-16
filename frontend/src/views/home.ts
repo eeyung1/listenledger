@@ -603,6 +603,8 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const levelFill = hook(root, "counter-level-fill");
   const thresholdMarker = hook(root, "counter-threshold-marker");
   const vadBadge = hook(root, "counter-vad-badge");
+  const snrBadge = hook(root, "counter-snr-badge");
+  const spectralContainer = hook(root, "counter-spectral-bars");
   const waveform = hook(root, "counter-waveform");
   const liveTranscript = hook(root, "counter-live-transcript");
   const captureToast = hook(root, "counter-capture-toast");
@@ -855,6 +857,38 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
             setText(vadBadge, label);
           }
         }
+        if (snrBadge) {
+          if (metrics.isCalibrating) {
+            snrBadge.className = "badge badge--snr badge--snr-calibrating";
+            setText(snrBadge, "SNR: Calibrating…");
+          } else if (metrics.snrDb >= 12) {
+            snrBadge.className = "badge badge--snr badge--snr-clear";
+            setText(snrBadge, `🟢 SNR +${Math.round(metrics.snrDb)}dB Clear`);
+          } else if (metrics.snrDb >= 6) {
+            snrBadge.className = "badge badge--snr badge--snr-moderate";
+            setText(snrBadge, `🟡 SNR +${Math.round(metrics.snrDb)}dB Mod`);
+          } else {
+            snrBadge.className = "badge badge--snr badge--snr-noisy";
+            setText(snrBadge, `🔴 SNR +${Math.max(0, Math.round(metrics.snrDb))}dB Noisy`);
+          }
+        }
+      },
+      onSpectralBands: (bands: number[]) => {
+        if (spectralContainer) {
+          const bars = spectralContainer.querySelectorAll(".spectral-bar");
+          for (let i = 0; i < bars.length && i < bands.length; i++) {
+            const bar = bars[i] as HTMLElement;
+            const energy = bands[i] ?? 0;
+            const heightPct = Math.max(8, Math.round(energy * 100));
+            bar.style.height = `${heightPct}%`;
+            // Vocal frequency range (bands 2 to 9, ~300Hz-3.4kHz)
+            if (i >= 2 && i <= 9 && energy > 0.15) {
+              bar.classList.add("spectral-bar--vocal");
+            } else {
+              bar.classList.remove("spectral-bar--vocal");
+            }
+          }
+        }
       },
       onBoundaryDetected: async (candidate: BoundaryCaptureCandidate) => {
         async function handleOfflineCapture(): Promise<void> {
@@ -864,6 +898,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
               transcript: candidate.transcript,
               type: candidate.type,
               closing_phrase: candidate.closingPhrase,
+              audio_data: candidate.audioData,
             });
             playAudioFeedback("start");
             showCaptureToast(
@@ -893,6 +928,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
             transcript: candidate.transcript,
             type: candidate.type,
             closing_phrase: candidate.closingPhrase,
+            audio_data: candidate.audioData,
           });
 
           const first = res.transactions[0];

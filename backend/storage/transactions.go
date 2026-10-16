@@ -34,7 +34,7 @@ func ClampLimit(limit int) int {
 const transactionColumns = `id, shop_id, type, product_id, product_name, quantity,
 	unit, amount_amount, amount_currency, confidence_overall, confidence_product,
 	confidence_quantity, confidence_amount, status, occurred_at, created_at,
-	transcript, receipt_id, supplier_name, customer_id, customer_name`
+	transcript, receipt_id, supplier_name, customer_id, customer_name, audio_data`
 
 // InsertTransaction records a stock movement.
 //
@@ -84,8 +84,8 @@ func (s *Store) insertTransaction(ctx context.Context, db executor, transaction 
 			amount_amount, amount_currency, confidence_overall,
 			confidence_product, confidence_quantity, confidence_amount,
 			status, occurred_at, created_at, transcript, receipt_id, supplier_name,
-			customer_id, customer_name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			customer_id, customer_name, audio_data
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := db.ExecContext(ctx, s.rebind(query),
 		transaction.ID, transaction.ShopID, string(transaction.Type),
@@ -98,7 +98,7 @@ func (s *Store) insertTransaction(ctx context.Context, db executor, transaction 
 		nullFloat(transaction.Confidence.Amount),
 		string(transaction.Status), formatTime(occurredAt), formatTime(createdAt),
 		transaction.Transcript, nullString(transaction.ReceiptID), transaction.SupplierName,
-		transaction.CustomerID, transaction.CustomerName,
+		transaction.CustomerID, transaction.CustomerName, transaction.AudioData,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: insert transaction %s: %w", transaction.ID, err)
@@ -291,6 +291,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 		supplierName       sql.NullString
 		customerID         sql.NullString
 		customerName       sql.NullString
+		audioData          sql.NullString
 	)
 
 	err := row.Scan(
@@ -299,7 +300,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 		&amountAmount, &amountCurrency, &transaction.Confidence.Overall,
 		&confidenceProduct, &confidenceQuantity, &confidenceAmount, &status,
 		&occurredAtRaw, &createdAtRaw, &transaction.Transcript, &receiptID,
-		&supplierName, &customerID, &customerName,
+		&supplierName, &customerID, &customerName, &audioData,
 	)
 	if err != nil {
 		return models.Transaction{}, err
@@ -317,6 +318,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 	transaction.SupplierName = supplierName.String
 	transaction.CustomerID = customerID.String
 	transaction.CustomerName = customerName.String
+	transaction.AudioData = audioData.String
 
 	if transaction.OccurredAt, err = parseTime(occurredAtRaw); err != nil {
 		return models.Transaction{}, err
@@ -337,7 +339,7 @@ func floatPointer(value sql.NullFloat64) *float64 {
 	return &score
 }
 
-// PurgeTranscripts clears the spoken transcript text from historical transactions
+// PurgeTranscripts clears the spoken transcript text and audio snippets from historical transactions
 // older than the specified timestamp for a given shop, honoring data retention and privacy policies
 // while preserving financial audit records, ledger amounts, and inventory movements.
 func (s *Store) PurgeTranscripts(ctx context.Context, shopID string, olderThan time.Time) (int64, error) {
@@ -349,10 +351,10 @@ func (s *Store) PurgeTranscripts(ctx context.Context, shopID string, olderThan t
 	}
 
 	const query = `UPDATE transactions
-                      SET transcript = ''
+                      SET transcript = '', audio_data = ''
                     WHERE shop_id = ?
                       AND occurred_at < ?
-                      AND transcript != ''`
+                      AND (transcript != '' OR audio_data != '')`
 
 	res, err := s.db.ExecContext(ctx, s.rebind(query), shopID, formatTime(olderThan))
 	if err != nil {
