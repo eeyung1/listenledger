@@ -10,6 +10,7 @@ import { requireIdentity, addAccountControls } from "./auth.js";
  * events update the mounted view in place; see TODO.md.
  */
 
+import { renderNavigation, syncActiveNav } from "./nav.js";
 import { startSocket } from "./ws.js";
 import { startViews } from "./views/index.js";
 
@@ -79,23 +80,13 @@ async function fetchTemplate(template: string): Promise<string> {
   return response.text();
 }
 
-function setActiveNav(path: RoutePath): void {
-  for (const link of document.querySelectorAll<HTMLAnchorElement>(".app-nav a[data-route]")) {
-    const isActive = link.dataset.route === path;
-    link.classList.toggle("is-active", isActive);
-    if (isActive) {
-      link.setAttribute("aria-current", "page");
-    } else {
-      link.removeAttribute("aria-current");
-    }
-  }
-}
-
 function mount(route: RouteDefinition, html: string): void {
   const root = appRoot();
   root.innerHTML = html;
   document.title = `ListenLedger — ${route.title}`;
-  setActiveNav(route.path);
+  // Marks the destination on every surface (sidebar and mobile bar) at once;
+  // see syncActiveNav.
+  syncActiveNav(document, route.path);
   root.dispatchEvent(
     new CustomEvent<ViewMountedDetail>(VIEW_MOUNTED_EVENT, {
       detail: { route: route.path },
@@ -155,6 +146,9 @@ export function startRouter(): void {
 // correctness does not depend on that timing.
 async function boot(): Promise<void> {
   try {
+    // Rendered before the identity check so the sign-in panel has a complete
+    // shell to hide, and so no navigation is missing if the check is slow.
+    renderNavigation(document);
     const identity = await requireIdentity();
     addAccountControls(identity);
     startViews({ root: appRoot(), mountedEvent: VIEW_MOUNTED_EVENT, shopId: identity.shop_id });

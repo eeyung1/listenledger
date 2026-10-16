@@ -45,7 +45,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 ## Phase 1 — Shared visual system and navigation
 
 - [x] F01. Define reusable colour, spacing, typography, radius, and focus tokens; unify button/input/card/badge/dialog styles.
-- [ ] F02. Build the desktop sidebar and shop/account top bar with active navigation and accessible labels.
+- [x] F02. Build the desktop sidebar and shop/account top bar with active navigation and accessible labels.
 - [ ] F03. Build mobile bottom navigation and More menu with safe-area spacing, usable close behaviour, and no content obstruction.
 - [ ] F04. Register the new page routes and lifecycle handlers; preserve old links, browser back/forward, page titles, and unknown-route handling. Do not ship dead navigation entries.
 - [ ] F05. Standardize loading, empty, validation, failed-save, and disconnected states with useful recovery actions.
@@ -128,7 +128,8 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 | --- | --- | --- | --- | --- |
 | Planning document | [PR #39](https://github.com/eeyung1/listenledger/pull/39) | All four CI jobs passed before merge | Not applicable; no UI change | Plan established |
 | F01 | [PR #40](https://github.com/eeyung1/listenledger/pull/40) | Typecheck/build and 63 existing frontend tests passed; exact-head repository CI required before merge | Chromium rendered-template checks at 360/390/768/1440px for four current pages and Customer Book dialog; viewport containment, 44px button sizing, button alias parity, reduced motion, screenshots | Empty/intercepted test responses; not full authenticated or physical microphone acceptance. New shell, per-page layouts, modal focus lifecycle, and real-device checks remain pending. |
+| F02 | PR #43 | Typecheck/build and all 73 frontend tests passed (including 5 shell nav tests); repository CI required before merge | Shell navigation unit and DOM rendering tests verify sidebar and mobile stand-in nav | Mobile bottom navigation (F03) and route additions (F04) to follow in subsequent PRs |
 
 ## Next action
 
-After PR #40 passes CI and merges, begin F02: desktop sidebar and shop/account top bar, followed by mobile navigation and route lifecycle work. Deliver the redesign incrementally, ticking only completed and verified items.
+After PR #43 passes CI and merges, proceed to F03: mobile bottom navigation and More menu. Deliver the redesign incrementally, ticking only completed and verified items.

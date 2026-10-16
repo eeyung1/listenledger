@@ -3,13 +3,22 @@ import { el } from "./format.js";
 export interface Identity { owner_id: string; email: string; shop_id: string; shop_name: string; currency: string; timezone: string }
 interface AuthResponse extends Identity { recovery_code?: string }
 
+/**
+ * Shows or hides the parts of the shell that only make sense for a signed-in
+ * shop: the navigation and the account bar. #app itself stays visible, because
+ * the sign-in panel is rendered there.
+ */
+function setShellChromeVisible(visible: boolean): void {
+ for (const node of document.querySelectorAll<HTMLElement>("[data-shell-chrome]")) node.hidden = !visible;
+}
+
 export async function requireIdentity(): Promise<Identity> {
  const session = await fetch("/api/auth/session");
  if (session.ok) return await session.json() as Identity;
  if (session.status !== 401) throw new Error("Sign-in service unavailable. Please reload to retry.");
+ setShellChromeVisible(false);
  return new Promise<Identity>((resolve) => {
   const root = document.getElementById("app")!;
-  const nav = document.querySelector<HTMLElement>(".app-nav"); if (nav) nav.hidden = true;
   const section = el("section", "auth-panel");
   const title = el("h1", "", "Welcome to ListenLedger");
   const form = document.createElement("form");
@@ -46,7 +55,7 @@ export async function requireIdentity(): Promise<Identity> {
     const body = await response.json() as AuthResponse & {error?: string};
     if (!response.ok) throw new Error(body.error ?? "Unable to continue");
     password.value = ""; recovery.value = "";
-    const finish = (): void => {if (nav) nav.hidden = false; root.replaceChildren(); resolve(body);};
+    const finish = (): void => {setShellChromeVisible(true); root.replaceChildren(); resolve(body);};
     if (body.recovery_code) {
      const panel = el("section", "auth-panel");
      panel.append(el("h2", "", "Save your recovery code"), el("p", "", "This code is shown once. Store it privately; it can reset your password. Recovery replaces the previous code and signs out other sessions."), el("code", "recovery-code", body.recovery_code));
@@ -56,15 +65,22 @@ export async function requireIdentity(): Promise<Identity> {
   });
  });
 }
+/**
+ * Fills the shop/account top bar: the shop the owner is signed in to, the
+ * account it belongs to, and the way out of it.
+ */
 export function addAccountControls(identity: Identity): void {
- const header = document.querySelector(".app-header");
- if (!header) return;
- const name = el("span", "account-name", identity.shop_name);
- const logout = document.createElement("button"); logout.textContent = "Sign out";
+ const shop = document.querySelector<HTMLElement>('[data-hook="account-shop-name"]');
+ if (shop) shop.textContent = identity.shop_name;
+ const slot = document.querySelector<HTMLElement>('[data-hook="account-controls"]');
+ if (!slot) return;
+ const account = el("span", "account-name", identity.email);
+ const logout = document.createElement("button"); logout.type = "button";
+ logout.className = "btn btn--secondary btn--sm"; logout.textContent = "Sign out";
  logout.addEventListener("click", async () => {
   logout.disabled = true;
   try { const r = await fetch("/api/auth/logout", {method: "POST", headers: {"X-ListenLedger-Request": "1"}}); if (!r.ok) throw new Error(); window.location.reload(); }
   catch {logout.textContent = "Sign out failed — retry"; logout.disabled = false;}
  });
- header.append(name, logout);
+ slot.replaceChildren(account, logout);
 }
