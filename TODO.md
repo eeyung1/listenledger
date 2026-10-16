@@ -19,6 +19,28 @@ See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md) for the current procedure.
 
 ## Historical implementation notes
 
+## Mobile Counter Audio Resilience, Screen Wake Lock, Speech Grammar Boosting & Voice Readout increment (16 October 2026) — MILESTONE 27 COMPLETE
+
+Implemented mobile counter audio resilience, Screen Wake Lock API integration, catalogue speech grammar boosting, spoken text-to-speech audio feedback, and differentiated voice restock notifications (`frontend/src/audio.ts`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/src/components/settings.html`, `frontend/style.css`, `frontend/test/audio.test.mjs`, `frontend/test/test_dom.mjs`):
+1. **Screen Wake Lock API Integration (`frontend/src/audio.ts`)**:
+   - Acquired `navigator.wakeLock.request("screen")` on ambient counter listening activation to prevent mobile devices (iOS Safari and Android Chrome) from dimming or going to sleep during retail trading hours.
+   - Added automatic re-acquisition on `visibilitychange` when returning from background tabs or phone call interruptions.
+   - Graceful fallback and release handling with `onWakeLockChange` event callbacks.
+2. **Speech Grammar Catalogue Boosting (`frontend/src/audio.ts`, `frontend/src/views/home.ts`)**:
+   - Injected dynamic JSGF grammar lists via `SpeechGrammarList` / `webkitSpeechGrammarList` populated with the shop's active product names, aliases, and packaging units (`carton`, `pack`, `crate`, `piece`, `bottle`, `naira`).
+   - Automatically re-synchronizes catalogue vocabulary with the speech listener on catalogue loading and real-time product updates.
+3. **Discreet Spoken Voice Feedback (SpeechSynthesis TTS) (`frontend/src/audio.ts`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/style.css`)**:
+   - Built `speakFeedback` using `window.speechSynthesis` with brisk cadence (1.15x rate) for rapid counter confirmation.
+   - Added "Voice Readout" toggle button (`🔊 Voice: On` / `🔇 Voice: Off`) in Counter Dock with local preference persistence (`localStorage.getItem("ll_voice_feedback")`).
+   - Announces spoken confirmations aloud for eyes-free retail operations: sales (`"Sale: 2 Milo"`), restocks (`"Stock received: 3 cartons Milo"`), and reviews (`"Item held for review"`).
+4. **Restock Toast & Visual Differentiation (`frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/style.css`)**:
+   - Differentiated restock toasts (`✓ Logged Restock: 3 cartons Milo (+36 stock)`) from sales toasts.
+   - Added visual `⚡ Screen Awake` wake lock status pill badge to the dock header.
+   - Updated placeholder guidance: *"Say a sale ending with 'Thank you' or a restock ending with 'Stock received'…"*.
+5. **Settings Notice & Full Automated Test Suites (`frontend/src/components/settings.html`, `frontend/test/audio.test.mjs`, `frontend/test/test_dom.mjs`)**:
+   - Updated settings guidance explaining Screen Wake Lock and spoken audio feedback on mobile counter devices.
+   - Added automated test cases covering Screen Wake Lock lifecycle, Speech Grammar compilation, Speech Synthesis fallback, and Voice Readout / Restock dock controls (53/53 tests passing).
+
 ## Mobile Web Counter Audio Interface & Real-Time Speech Capture increment (16 October 2026) — MILESTONE 26 COMPLETE
 
 Implemented in-browser mobile counter microphone audio capture and real-time speech recognition interface (`frontend/src/audio.ts`, `frontend/src/api.ts`, `frontend/src/views/home.ts`, `frontend/src/components/home.html`, `frontend/src/components/settings.html`, `frontend/style.css`, `frontend/test/audio.test.mjs`, `backend/api/captures_test.go`):

@@ -6,6 +6,10 @@ import {
   detectClosingBoundary,
   isSpeechRecognitionSupported,
   isAudioCaptureSupported,
+  isWakeLockSupported,
+  isSpeechGrammarListSupported,
+  isSpeechSynthesisSupported,
+  speakFeedback,
   CounterSpeechListener,
   playAudioFeedback,
 } from "../dist/audio.js";
@@ -464,5 +468,280 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.notEqual(liveMicBtn, null, "live microphone button must exist in modal");
 
     cleanup();
+  });
+
+  await t.test("7. Screen Wake Lock: acquires lock on start, releases on stop, and re-requests on visibilitychange", async () => {
+    let requestCount = 0;
+    let released = false;
+
+    class MockWakeLockSentinel {
+      constructor() {
+        this.released = false;
+        this.type = "screen";
+      }
+      async release() {
+        this.released = true;
+        released = true;
+        this.onrelease?.(new MockEvent("release"));
+      }
+    }
+
+    navigator.wakeLock = {
+      request: async (type) => {
+        if (type === "screen") {
+          requestCount++;
+          return new MockWakeLockSentinel();
+        }
+        throw new Error("unsupported type");
+      },
+    };
+
+    assert.equal(isWakeLockSupported(), true);
+
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const wakeLockEvents = [];
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      onWakeLockChange: (active) => {
+        wakeLockEvents.push(active);
+      },
+    });
+
+    await listener.start();
+    assert.equal(requestCount, 1);
+    assert.equal(listener.isWakeLockActive(), true);
+    assert.deepEqual(wakeLockEvents, [true]);
+
+    // Simulate tab visibility change: hide then restore
+    document.visibilityState = "hidden";
+    document.dispatchEvent(new MockEvent("visibilitychange"));
+    document.visibilityState = "visible";
+    document.dispatchEvent(new MockEvent("visibilitychange"));
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.equal(requestCount, 2, "wake lock must be re-requested when returning to tab");
+
+    listener.stop();
+    assert.equal(listener.isWakeLockActive(), false);
+    assert.equal(released, true);
+    assert.equal(wakeLockEvents[wakeLockEvents.length - 1], false);
+
+    delete navigator.wakeLock;
+    assert.equal(isWakeLockSupported(), false);
+  });
+
+  await t.test("8. Speech Grammar List: compiles catalogue vocabulary boosting grammar", async () => {
+    const addedGrammarStrings = [];
+    const addedGrammarWeights = [];
+
+    class MockSpeechGrammarList {
+      constructor() {
+        this.length = 0;
+      }
+      addFromString(str, weight = 1.0) {
+        addedGrammarStrings.push(str);
+        addedGrammarWeights.push(weight);
+      }
+      addFromURI() {}
+    }
+    window.SpeechGrammarList = MockSpeechGrammarList;
+    assert.equal(isSpeechGrammarListSupported(), true);
+
+    let assignedGrammars = null;
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.grammars = null;
+      }
+      start() {
+        assignedGrammars = this.grammars;
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const listener = new CounterSpeechListener({
+      catalogueWords: ["Peak Milk 400g", "Milo", "Indomie Onion", "carton", "pack"],
+    });
+
+    await listener.start();
+
+    assert.notEqual(assignedGrammars, null);
+    assert.equal(addedGrammarStrings.length, 1);
+    assert.ok(addedGrammarStrings[0].includes("peak milk 400g"));
+    assert.ok(addedGrammarStrings[0].includes("milo"));
+    assert.ok(addedGrammarStrings[0].includes("indomie onion"));
+    assert.equal(addedGrammarWeights[0], 1.0);
+
+    // Test updating catalogue words dynamically
+    listener.setCatalogueWords(["Golden Morn", "Cornflakes"]);
+    assert.equal(addedGrammarStrings.length, 2);
+    assert.ok(addedGrammarStrings[1].includes("golden morn"));
+
+    listener.stop();
+    delete window.SpeechGrammarList;
+    assert.equal(isSpeechGrammarListSupported(), false);
+  });
+
+  await t.test("9. Speech Synthesis: speakFeedback speaks with brisk counter cadence and handles missing synth gracefully", () => {
+    // When no speechSynthesis exists
+    delete window.speechSynthesis;
+    assert.equal(isSpeechSynthesisSupported(), false);
+    assert.equal(speakFeedback("Test message"), false);
+
+    // Mock speechSynthesis
+    let spokenText = "";
+    let spokenRate = 0;
+    let spokenLang = "";
+    let cancelled = false;
+
+    window.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+        this.rate = 1.0;
+        this.lang = "en-US";
+      }
+    };
+
+    window.speechSynthesis = {
+      cancel: () => {
+        cancelled = true;
+      },
+      speak: (utterance) => {
+        spokenText = utterance.text;
+        spokenRate = utterance.rate;
+        spokenLang = utterance.lang;
+      },
+    };
+
+    assert.equal(isSpeechSynthesisSupported(), true);
+    const spoken = speakFeedback("Sale: 2 Milo", { rate: 1.2, lang: "en-NG" });
+    assert.equal(spoken, true);
+    assert.equal(cancelled, true, "ongoing speech should be cancelled first");
+    assert.equal(spokenText, "Sale: 2 Milo");
+    assert.equal(spokenRate, 1.2);
+    assert.equal(spokenLang, "en-NG");
+
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
+  });
+
+  await t.test("10. Voice Readout & Restock Feedback in Home Command Centre: toggles TTS button and emits restock announcements", async () => {
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const spokenUtterances = [];
+    window.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+      }
+    };
+    window.speechSynthesis = {
+      cancel: () => {},
+      speak: (utterance) => {
+        spokenUtterances.push(utterance.text);
+      },
+    };
+
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes("/api/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            today_sales_count: 5,
+            today_sales_amount: { amount: 2000000, currency: "NGN" },
+            pending_reviews: 0,
+            low_stock_count: 0,
+            active_devices_count: 1,
+            today_expenses_count: 0,
+            today_expenses_amount: { amount: 0, currency: "NGN" },
+            today_net_profit: { amount: 2000000, currency: "NGN" },
+          }),
+        };
+      }
+      if (u.includes("/api/transactions")) {
+        return { ok: true, status: 200, json: async () => ({ transactions: [], total: 0, limit: 20, offset: 0 }) };
+      }
+      if (u.includes("/api/inventory")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            products: [
+              { id: "prd_milo", name: "Milo 500g", aliases: ["Milo", "Choco"], price: { amount: 200000, currency: "NGN" } },
+            ],
+            low_stock_count: 0,
+          }),
+        };
+      }
+      if (u.includes("/api/onboarding/status")) {
+        return { ok: true, status: 200, json: async () => ({ is_complete: true, steps: {} }) };
+      }
+      if (u.includes("/api/devices")) {
+        return { ok: true, status: 200, json: async () => ({ devices: [] }) };
+      }
+      if (u.includes("/api/customers/credit-summary")) {
+        return { ok: true, status: 200, json: async () => ({ total_outstanding_debt: { amount: 0, currency: "NGN" } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    document.body.innerHTML = HOME_HTML;
+    const cleanup = mountHome(document.body, "shop_test");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const ttsBtn = document.querySelector("[data-hook='counter-tts-toggle-btn']");
+    const ttsIcon = document.querySelector("[data-hook='counter-tts-btn-icon']");
+    const ttsLabel = document.querySelector("[data-hook='counter-tts-btn-label']");
+
+    assert.notEqual(ttsBtn, null, "TTS toggle button must be mounted");
+    assert.equal(ttsLabel.textContent, "Voice: Off");
+
+    // Click TTS toggle button to turn voice feedback on
+    ttsBtn.dispatchEvent(new MockEvent("click"));
+    assert.equal(ttsLabel.textContent, "Voice: On");
+    assert.equal(ttsIcon.textContent, "🔊");
+    assert.ok(spokenUtterances.includes("Voice readout enabled"));
+
+    cleanup();
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
   });
 });

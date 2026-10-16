@@ -1157,6 +1157,26 @@ a {
   }
 }
 
+.counter-dock__title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.badge--wakelock {
+  background: #fef08a;
+  color: #854d0e;
+  border: 1px solid #fde047;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .counter-dock__title {
   margin: 0;
   font-size: 1.05rem;
@@ -1174,6 +1194,37 @@ a {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.counter-dock__tts-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.counter-dock__tts-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.counter-dock__tts-btn--active {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #065f46;
+  font-weight: 600;
+}
+
+.counter-dock__tts-btn--active:hover {
+  background: #d1fae5;
+  border-color: #34d399;
 }
 
 .counter-dock__toggle-btn {
