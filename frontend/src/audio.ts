@@ -492,9 +492,7 @@ export class CounterSpeechListener {
   private vadSilenceDebounce = 0;
   private currentAudioLevel = 0;
 
-  // Multi-Band Spectral Visualizer & Audio Snippet Recording
-  private mediaRecorder: MediaRecorder | null = null;
-  private audioChunks: Blob[] = [];
+  // UI-only spectral meter; raw-audio recording is disabled for the pilot.
   private currentSpectralBands: number[] = new Array(16).fill(0);
 
   constructor(options: CounterSpeechListenerOptions = {}) {
@@ -548,30 +546,9 @@ export class CounterSpeechListener {
     return calculateSNR(this.currentAudioLevel, this.vadNoiseFloor);
   }
 
-  /**
-   * Exports recent rolling counter audio as a base64 Data URL.
-   * Returns undefined if MediaRecorder or audio chunks are unavailable.
-   */
+  /** Raw-audio retention is disabled until the P6 policy is implemented. */
   public async exportRecentAudioSnippet(): Promise<string | undefined> {
-    if (this.audioChunks.length === 0) return undefined;
-    try {
-      const mimeType = this.mediaRecorder?.mimeType || "audio/webm";
-      const blob = new Blob(this.audioChunks, { type: mimeType });
-      return await new Promise<string | undefined>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === "string") {
-            resolve(reader.result);
-          } else {
-            resolve(undefined);
-          }
-        };
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      return undefined;
-    }
+    return undefined;
   }
 
   /** Returns true if active voice articulation is currently detected above the ambient noise floor. */
@@ -816,31 +793,11 @@ export class CounterSpeechListener {
         const phrase = boundary.closingPhrase;
         this.currentTranscript = "";
 
-        if (this.audioChunks.length === 0) {
-          const candidate: BoundaryCaptureCandidate = {
-            transcript: cleanText,
-            type: boundaryType,
-            closingPhrase: phrase,
-            audioData: undefined,
-          };
-          this.options.onBoundaryDetected?.(candidate);
-        } else {
-          void (async () => {
-            let audioData: string | undefined;
-            try {
-              audioData = await this.exportRecentAudioSnippet();
-            } catch {
-              // audio snippet export failure is non-fatal
-            }
-            const candidate: BoundaryCaptureCandidate = {
-              transcript: cleanText,
-              type: boundaryType,
-              closingPhrase: phrase,
-              audioData,
-            };
-            this.options.onBoundaryDetected?.(candidate);
-          })();
-        }
+        this.options.onBoundaryDetected?.({
+          transcript: cleanText,
+          type: boundaryType,
+          closingPhrase: phrase,
+        });
       }
     };
 
@@ -913,35 +870,6 @@ export class CounterSpeechListener {
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 256;
       source.connect(this.analyser);
-
-      if (typeof MediaRecorder !== "undefined" && this.mediaStream) {
-        try {
-          let mimeType = "";
-          if (typeof MediaRecorder.isTypeSupported === "function") {
-            if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
-              mimeType = "audio/webm;codecs=opus";
-            } else if (MediaRecorder.isTypeSupported("audio/webm")) {
-              mimeType = "audio/webm";
-            } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-              mimeType = "audio/mp4";
-            }
-          }
-          const recOptions = mimeType ? { mimeType } : undefined;
-          this.mediaRecorder = new MediaRecorder(this.mediaStream, recOptions);
-          this.audioChunks = [];
-          this.mediaRecorder.ondataavailable = (event: BlobEvent) => {
-            if (event.data && event.data.size > 0) {
-              this.audioChunks.push(event.data);
-              if (this.audioChunks.length > 30) {
-                this.audioChunks.shift();
-              }
-            }
-          };
-          this.mediaRecorder.start(500);
-        } catch {
-          // MediaRecorder unsupported in environment
-        }
-      }
 
       this.startLevelLoop();
     } catch {
@@ -1042,15 +970,6 @@ export class CounterSpeechListener {
       this.animFrameId = null;
     }
 
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
-      try {
-        this.mediaRecorder.stop();
-      } catch {
-        // ignore
-      }
-      this.mediaRecorder = null;
-    }
-    this.audioChunks = [];
     this.currentSpectralBands = new Array(16).fill(0);
     this.options.onSpectralBands?.(this.currentSpectralBands);
 
@@ -1073,3 +992,4 @@ export class CounterSpeechListener {
     this.options.onVADChange?.(this.getVADMetrics());
   }
 }
+

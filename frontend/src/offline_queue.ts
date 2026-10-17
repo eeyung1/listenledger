@@ -151,9 +151,7 @@ export async function enqueueCapture(
   if (input.shop_id) {
     (item as { shop_id?: string }).shop_id = input.shop_id;
   }
-  if (input.audio_data) {
-    (item as { audio_data?: string }).audio_data = input.audio_data;
-  }
+  // New queue entries never retain raw audio during the pilot.
 
   if (isIndexedDBSupported()) {
     try {
@@ -400,7 +398,6 @@ export async function syncOfflineQueue(
           type: item.type,
           closing_phrase: item.closing_phrase,
           occurred_at: item.queued_at,
-          audio_data: item.audio_data,
         });
 
         await removeQueuedCapture(item.queue_id);
@@ -424,3 +421,4 @@ export async function syncOfflineQueue(
 
   return { synced, failed };
 }
+

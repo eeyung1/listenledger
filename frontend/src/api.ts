@@ -1292,6 +1292,9 @@ export interface CaptureResult {
 
 /** POST /api/captures — edge and mobile counter capture intake endpoint. */
 export async function postCapture(input: CaptureInput): Promise<CaptureResult> {
-  return postJSON<CaptureResult>("/api/captures", input);
+  // Strip snippets from stale callers and queued captures as well as live input.
+  const { audio_data: _discardedAudio, ...textCapture } = input;
+  return postJSON<CaptureResult>("/api/captures", textCapture);
 }
+
 

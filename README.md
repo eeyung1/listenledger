@@ -1,6 +1,6 @@
 # ListenLedger — Ambient Sales and Inventory Capture
 
-> **Current execution priority:** [realProductpath.md](realProductpath.md) supersedes the milestone roadmap and frontend redesign. P0a parks distracting pilot UI and corrects privacy guidance. P0 remains open until audio retention and spoken credit handling are disabled and verified. P1 real-shop evidence is still pending; synthetic tests do not establish voice accuracy.
+> **Current execution priority:** [realProductpath.md](realProductpath.md) supersedes the milestone roadmap and frontend redesign. P0a parks distracting pilot UI and corrects privacy guidance. P0b is implemented on `fix/p0-disable-audio-retention` to stop new snippet retention and reject credit captures; it remains unmerged pending real-device evidence. P0 remains open until that candidate is verified and deployed. P1 real-shop evidence is still pending; synthetic tests do not establish voice accuracy.
 
 
 ListenLedger is a voice-driven sales and inventory system for small businesses. It is designed to turn structured shop conversations into sales records, stock movements, and a live owner dashboard. Uncertain captures go to a human review queue.
@@ -429,4 +429,5 @@ API writes require the session cookie and `X-ListenLedger-Request: 1`; cross-ori
 ## Beyond the first MVP
 
 Dedicated rechargeable hardware, receipt-photo OCR, additional languages, overlapping speakers/multiple counters, customer credit and debt ledger (I-Owe-You / customer book), cross-shop multi-branch analytics, and commercial billing remain later work. Preserve the hardware-plus-software vision while proving accurate capture on existing hardware first.
+
 

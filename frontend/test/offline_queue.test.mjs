@@ -36,6 +36,15 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
     }
   });
 
+  await t.test("Pilot queue drops supplied audio while preserving the transcript", async () => {
+    const input = { transcript: "Two Milo thank you", type: "sale", closing_phrase: "thank you", audio_data: "data:audio/webm;base64,private" };
+    const item = await enqueueCapture(input);
+    assert.equal(item.audio_data, undefined);
+    const saved = await getQueuedCaptures();
+    assert.equal(saved[0].audio_data, undefined);
+    assert.equal(saved[0].transcript, input.transcript);
+  });
+
   await t.test("1. Queue Id Generation & Online / Network Error Detection", () => {
     const id1 = generateQueueId();
     const id2 = generateQueueId();
@@ -211,3 +220,4 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
     assert.equal(remaining.retry_count, 1);
   });
 });
+
