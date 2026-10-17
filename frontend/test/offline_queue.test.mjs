@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { setupDOMEnvironment } from "./test_dom.mjs";
 import {
   enqueueCapture,
+  enqueueManualTransaction,
   getQueuedCaptures,
   getQueuedCount,
   removeQueuedCapture,
@@ -218,6 +219,72 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
     const remaining = (await getQueuedCaptures())[0];
     assert.equal(remaining.transcript, "Capture 2 thank you");
     assert.equal(remaining.retry_count, 1);
+  });
+
+  await t.test("6. P4.8 manual counter entry: queued on device offline, replayed into /api/transactions/manual when back", async () => {
+    // 1. Enqueue a manual entry while the network is down.
+    navigator.onLine = false;
+    const queued = await enqueueManualTransaction(
+      "shop_001",
+      {
+        type: "sale",
+        product_id: "prod_milo",
+        quantity: 2,
+        unit: "carton",
+        amount: { amount: 500000, currency: "NGN" },
+        notes: "Typed while network down",
+      },
+      "Milo 400g",
+    );
+    assert.equal(queued.kind, "manual-transaction", "entry is tagged as a manual transaction");
+    assert.equal(queued.transcript, "Manual sale: 2 carton Milo 400g", "readable paper-trail label");
+    assert.equal(await getQueuedCount(), 1);
+
+    // 2. Sync attempt with the network still effectively down: the manual POST
+    //    fails with a network error and the entry must survive.
+    navigator.onLine = true;
+    globalThis.fetch = async (url) => {
+      assert.ok(String(url).includes("/api/transactions/manual"), "manual entries go to the manual endpoint");
+      throw new TypeError("Failed to fetch");
+    };
+    const failedStats = await syncOfflineQueue();
+    assert.equal(failedStats.synced, 0);
+    assert.equal(await getQueuedCount(), 1, "manual entry survives a failed sync");
+    const [pending] = await getQueuedCaptures();
+    assert.equal(pending.kind, "manual-transaction");
+    assert.notEqual(pending.last_error, undefined);
+
+    // 3. Network back: the entry replays exactly once into the manual endpoint
+    //    and is removed from the queue.
+    const posted = [];
+    globalThis.fetch = async (url, init = {}) => {
+      assert.ok(String(url).includes("/api/transactions/manual"), "manual entries go to the manual endpoint");
+      posted.push(JSON.parse(String(init.body)));
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ transaction: { id: "tx_manual_replay" } }),
+      };
+    };
+    const progress = [];
+    const stats = await syncOfflineQueue((item, result) => {
+      progress.push({ item, result });
+    });
+    assert.equal(stats.synced, 1);
+    assert.equal(stats.failed, 0);
+    assert.equal(await getQueuedCount(), 0, "queue empty after replay");
+    assert.deepEqual(posted, [
+      {
+        type: "sale",
+        product_id: "prod_milo",
+        quantity: 2,
+        unit: "carton",
+        amount: { amount: 500000, currency: "NGN" },
+        notes: "Typed while network down",
+      },
+    ]);
+    assert.equal(progress[0].result, undefined, "manual replays carry no CaptureResult");
+    assert.equal(progress[0].item.kind, "manual-transaction");
   });
 });
 
