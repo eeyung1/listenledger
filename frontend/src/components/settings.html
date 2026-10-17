@@ -6,9 +6,9 @@
 -->
 <section class="view view--settings">
   <header class="view__header">
-    <h1 class="view__title">Settings & Devices</h1>
+    <h1 class="view__title">Shop Settings</h1>
     <p class="view__subtitle">
-      Configure merchant preferences, voice loop boundary phrases, and paired microphone hardware.
+      Configure this shop and its voice boundary phrases for the single-counter trial.
     </p>
   </header>
 
@@ -65,7 +65,7 @@
     </section>
 
     <!-- Edge Devices Panel -->
-    <section class="panel" aria-labelledby="devices-heading">
+    <section class="panel" hidden data-pilot-parked="devices-heading" aria-labelledby="devices-heading">
       <h2 class="panel__title" id="devices-heading">Paired Capture Devices</h2>
       <p class="panel__hint">
         Physical microphones and external edge hubs authenticated to record transactions for this shop.
@@ -106,7 +106,7 @@
     </section>
 
     <!-- Pilot Target Gates & Accuracy Agreements Panel -->
-    <section class="panel" aria-labelledby="target-gates-heading">
+    <section class="panel" hidden data-pilot-parked="target-gates-heading" aria-labelledby="target-gates-heading">
       <div class="panel__header">
         <h2 class="panel__title" id="target-gates-heading">Pilot Target Gates & Accuracy Agreement</h2>
         <span class="badge" data-hook="gates-agreement-badge">Pending Agreement</span>
@@ -180,7 +180,7 @@
     </section>
 
     <!-- Pilot Dual-Entry Reconciliation & Cohort Expansion Panel -->
-    <section class="panel" aria-labelledby="pilot-reconciliation-heading">
+    <section class="panel" hidden data-pilot-parked="pilot-reconciliation-heading" aria-labelledby="pilot-reconciliation-heading">
       <div class="panel__header">
         <h2 class="panel__title" id="pilot-reconciliation-heading">Pilot Dual-Entry Reconciliation & Cohort Progression</h2>
         <span class="badge" data-hook="cohort-phase-badge">Phase 1: Controlled Trial</span>
@@ -251,15 +251,14 @@
 
     <!-- Privacy & Hardware Notice -->
     <section class="panel panel--privacy" aria-labelledby="privacy-heading">
-      <h2 class="panel__title" id="privacy-heading">Ambient Voice Privacy & Local Processing</h2>
+      <h2 class="panel__title" id="privacy-heading">Voice processing and trial privacy</h2>
       <div class="privacy-notice">
-        <p>
-          <strong>Zero Audio Retention Policy:</strong> ListenLedger captures speech locally on paired hardware. Raw microphone PCM audio is framed in volatile device memory and discarded immediately once voice activity boundaries are detected.
-        </p>
-        <p>
-          Audio is never transmitted over the internet or saved to disk. Only extracted structured text and transcription anchors reach this dashboard.
-        </p>
+        <p>Use the microphone on this phone from Overview. External edge hardware is parked for this trial; do not connect the demonstration runner to a real shop.</p>
+        <p>Browser speech recognition may send audio to the browser provider and normally needs an internet connection. ListenLedger receives transcripts and, in the current capture version, short audio snippets stored with transactions. Do not assume processing is local or that audio is automatically deleted.</p>
+        <p>Raw-audio retention is being disabled under the product plan. Until that change is verified and deployed, use manual entry for real customer transactions. Existing recordings are not deleted by this interface change.</p>
+        <p>Before field recording, obtain the owner's consent, inform staff and display a customer notice. Collect P1 evidence with an ordinary phone recorder, keep recordings out of git, store them encrypted and delete them after labelling.</p>
       </div>
     </section>
   </div>
 </section>
+

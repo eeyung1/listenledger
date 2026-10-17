@@ -1,5 +1,8 @@
 # ListenLedger — Ambient Sales and Inventory Capture
 
+> **Current execution priority:** [realProductpath.md](realProductpath.md) supersedes the milestone roadmap and frontend redesign. P0a parks distracting pilot UI and corrects privacy guidance. P0 remains open until audio retention and spoken credit handling are disabled and verified. P1 real-shop evidence is still pending; synthetic tests do not establish voice accuracy.
+
+
 ListenLedger is a voice-driven sales and inventory system for small businesses. It is designed to turn structured shop conversations into sales records, stock movements, and a live owner dashboard. Uncertain captures go to a human review queue.
 
 **Core principle: conversation becomes the data-entry interface.**

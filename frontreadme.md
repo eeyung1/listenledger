@@ -7,7 +7,7 @@ Baseline: `ea37895b6532c2c464ff4d10c2fdc3b5610dcea5` (main, PR #38).
 
 This is the execution checklist for the agreed frontend redesign. Counter is the main audio listening dashboard staff keep open during trading. Home is the owner's business summary.
 
-F01 is implemented in PR #40: shared visual tokens, compatible component styles, and responsive sizing. All other redesign features remain pending; the new navigation and dedicated Counter page are not yet implemented. Re-read current main before each stage because development continues in parallel.
+F01 (PR #40) and F02 (PR #43) are implemented. Other redesign features remain pending, including the dedicated Counter route. The feature freeze in [realProductpath.md](realProductpath.md) takes precedence: execute P0 and the evidence gates before resuming this checklist.
 
 The baseline has four page routes (Home, Transactions, Inventory, Settings), customer management in dialogs, and audio capture on Home. PR #38 introduced an IndexedDB offline capture queue; preserve and inspect it rather than replacing it or assuming offline persistence is absent. Its real-device reliability still needs acceptance testing.
 
@@ -132,4 +132,5 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 
 ## Next action
 
-After PR #43 passes CI and merges, proceed to F03: mobile bottom navigation and More menu. Deliver the redesign incrementally, ticking only completed and verified items.
+Do not proceed to F03 during the product feature freeze. Next: finish P0 in realProductpath.md, then collect P1 field evidence. Resume this redesign only when the product gates permit it. Tick only completed and verified items.
+

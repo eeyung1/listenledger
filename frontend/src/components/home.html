@@ -17,12 +17,19 @@
       <!-- data-hook: connection status of the live feed (live / reconnecting / offline) -->
       <p class="view__subtitle" data-hook="connection-status">Connecting…</p>
     </div>
-    <div class="view__header-badges">
+    <div class="view__header-badges" hidden data-pilot-parked="credit-expenses-edge">
       <button type="button" class="btn btn--secondary btn--sm" data-hook="customer-book-btn">📖 Customer Credit Book</button>
       <button type="button" class="btn btn--secondary btn--sm" data-hook="record-expense-btn">+ Record Expense</button>
       <span class="badge badge--device badge--device-checking" data-hook="device-health-badge" role="status" aria-label="Edge capture hardware health">Hardware: Checking…</span>
     </div>
   </header>
+
+  <section class="panel" aria-labelledby="pilot-scope-heading">
+    <h2 class="panel__title" id="pilot-scope-heading">Single-counter trial preparation</h2>
+    <p>Voice accuracy has not yet been verified in a real shop. Keep independent sales and stock records; review every captured transaction.</p>
+    <p>Start with <a href="#/settings">shop settings</a> and <a href="#/inventory">your product catalogue</a>. Use <a href="#/transactions">Transactions</a> for manual entry and corrections.</p>
+    <p>Voice recognition needs connectivity and may send audio to your browser provider. The offline queue can retry existing transcripts; it does not provide offline speech recognition.</p>
+  </section>
 
   <section class="counter-dock" data-hook="counter-dock" aria-label="Mobile Counter Microphone">
     <div class="counter-dock__main">
@@ -73,7 +80,7 @@
     <div class="counter-dock__toast" data-hook="counter-capture-toast" style="display: none;"></div>
   </section>
 
-  <div class="onboarding-container" data-hook="onboarding-checklist-container"></div>
+  <div hidden data-pilot-parked="training-and-target-gates" class="onboarding-container" data-hook="onboarding-checklist-container"></div>
 
   <section class="kpis" aria-label="Today at a glance">
     <article class="kpi">
@@ -84,15 +91,15 @@
       <h2 class="kpi__label">Transactions</h2>
       <p class="kpi__value" data-hook="kpi-transaction-count">—</p>
     </article>
-    <article class="kpi">
+    <article hidden data-pilot-parked="business-extras" class="kpi">
       <h2 class="kpi__label">Expenses today</h2>
       <p class="kpi__value" data-hook="kpi-expenses-today">—</p>
     </article>
-    <article class="kpi">
+    <article hidden data-pilot-parked="business-extras" class="kpi">
       <h2 class="kpi__label">Net profit</h2>
       <p class="kpi__value" data-hook="kpi-net-profit">—</p>
     </article>
-    <article class="kpi kpi--attention">
+    <article hidden data-pilot-parked="business-extras" class="kpi kpi--attention">
       <h2 class="kpi__label">Customer Debt</h2>
       <p class="kpi__value" data-hook="kpi-customer-debt">—</p>
       <a class="kpi__link" href="javascript:void(0)" data-hook="kpi-customer-debt-link">Open credit book</a>
@@ -133,3 +140,4 @@
     </ul>
   </section>
 </section>
+
