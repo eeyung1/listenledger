@@ -43,6 +43,17 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// P0 pilot policy: discard snippets even from stale clients or offline retries.
+	// Retention may only return after P6 opt-in, access and deletion controls exist.
+	req.AudioData = ""
+
+	// Park spoken credit attribution without silently treating credit as cash.
+	spokenCustomer, spokenCredit, _ := validate.ExtractCustomer(req.Transcript)
+	if req.IsCreditSale || req.CustomerID != "" || req.CustomerName != "" || spokenCredit || spokenCustomer != "" {
+		writeError(w, http.StatusUnprocessableEntity, "Customer credit capture is parked for this pilot. Keep this sale in your independent credit records; no ledger entry was created.")
+		return
+	}
+
 	if req.CaptureID == "" {
 		cid, err := newID("cap")
 		if err != nil {
@@ -331,3 +342,4 @@ func (s *Server) authenticateCaptureCaller(w http.ResponseWriter, r *http.Reques
 	shopID, ok := s.shopID(w, r)
 	return shopID, "", ok
 }
+
