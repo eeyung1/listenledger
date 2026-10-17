@@ -93,6 +93,14 @@ interface HomeState {
   creditSummary?: ShopCreditSummary | undefined;
 }
 
+/** P4.8: honest offline messaging for the counter microphone dock. */
+const OFFLINE_MIC_TITLE = "Counter Microphone: Offline";
+const OFFLINE_MIC_HINT =
+  "Voice capture needs a connection — speech is recognized in the cloud. " +
+  "Use manual counter entry while offline; pending captures sync automatically when reconnected.";
+const OFFLINE_MIC_TOAST =
+  "📶 Voice capture needs a connection. Use manual counter entry while offline — pending captures sync when reconnected.";
+
 export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const state: HomeState = { transactions: [], products: [] };
   let disposed = false;
@@ -721,8 +729,14 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const onOnlineEvent = (): void => {
     showCaptureToast("📶 Network restored — syncing offline captures…", "success");
     void triggerOfflineSync();
+    updateMicConnectionState(false);
   };
   window.addEventListener("online", onOnlineEvent);
+
+  const onOfflineEvent = (): void => {
+    updateMicConnectionState(true);
+  };
+  window.addEventListener("offline", onOfflineEvent);
   void updateOfflineQueueBadge();
 
   let counterListener: CounterSpeechListener | null = null;
@@ -1012,11 +1026,65 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       if (counterListener.isListening()) {
         counterListener.stop();
       } else {
+        if (!isOnline()) {
+          // P4.8: state plainly instead of burning a doomed recognition session
+          // (and its restart backoff) against an unreachable recognizer.
+          showCaptureToast(OFFLINE_MIC_TOAST, "warning");
+          return;
+        }
         counterListener.start().catch(() => {
           // Handled via onError
         });
       }
     });
+    updateMicConnectionState(false);
+  }
+
+  // P4.8: Web Speech recognition runs on the recognizer's cloud, so counter
+  // voice capture genuinely cannot work offline. Say that plainly instead of
+  // implying the offline queue keeps listening, and keep manual counter entry
+  // (Ledger) as the fallback. The offline queue's real coverage is the gap
+  // between a recognized transcript and a failed POST.
+  function updateMicConnectionState(withToast: boolean): void {
+    const micOffline = !isOnline();
+    if (micOffline) {
+      if (counterListener?.isListening()) {
+        counterListener.stop();
+      }
+      if (micTitle) {
+        setText(micTitle, OFFLINE_MIC_TITLE);
+      }
+      if (micSubtitle) {
+        setText(micSubtitle, OFFLINE_MIC_HINT);
+      }
+      if (micBtnLabel) {
+        setText(micBtnLabel, "Voice Offline");
+      }
+      if (micToggleBtn) {
+        micToggleBtn.title = OFFLINE_MIC_HINT;
+      }
+      if (withToast) {
+        showCaptureToast(OFFLINE_MIC_TOAST, "warning");
+      }
+      return;
+    }
+    // Back online: restore the plain idle dock text; later listener state
+    // transitions overwrite it as normal.
+    if (counterListener?.isListening()) {
+      return;
+    }
+    if (micTitle) {
+      setText(micTitle, "Counter Microphone");
+    }
+    if (micSubtitle) {
+      setText(micSubtitle, "Idle — Tap to start ambient sales listening on this phone");
+    }
+    if (micBtnLabel) {
+      setText(micBtnLabel, "Start Listening");
+    }
+    if (micToggleBtn) {
+      micToggleBtn.title = "Start ambient counter listening";
+    }
   }
 
   window.addEventListener("ll:transaction-received", onTransactionReceived);
@@ -1052,6 +1120,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     window.removeEventListener("ll:customer-debt-recorded", onCustomerEvent);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     window.removeEventListener("online", onOnlineEvent);
+    window.removeEventListener("offline", onOfflineEvent);
   };
 }
 

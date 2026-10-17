@@ -1739,5 +1739,98 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
 
     listener.stop();
   });
+
+  await t.test("25. P4.8 counter dock states plainly that voice capture needs a connection while offline", async () => {
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    // Calm backend: everything responds with an empty success so only the
+    // connectivity behaviour is exercised.
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes("/api/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            today_sales_count: 0,
+            today_sales_amount: { amount: 0, currency: "NGN" },
+            pending_reviews: 0,
+            low_stock_count: 0,
+            active_devices_count: 0,
+            today_expenses_count: 0,
+            today_expenses_amount: { amount: 0, currency: "NGN" },
+            today_net_profit: { amount: 0, currency: "NGN" },
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    document.body.innerHTML = HOME_HTML;
+    const cleanup = mountHome(document.body, "shop_test");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const micTitle = document.querySelector("[data-hook='counter-mic-title']");
+    const micSubtitle = document.querySelector("[data-hook='counter-mic-subtitle']");
+    const micBtnLabel = document.querySelector("[data-hook='counter-mic-btn-label']");
+    const micToggleBtn = document.querySelector("[data-hook='counter-mic-toggle-btn']");
+    const toast = document.querySelector("[data-hook='counter-capture-toast']");
+
+    assert.notEqual(micTitle, null, "mic title must be mounted");
+
+    const previousOnLine = navigator.onLine;
+    try {
+      // Going offline: the dock must say plainly that voice capture cannot work.
+      navigator.onLine = false;
+      window.dispatchEvent(new MockEvent("offline"));
+      await new Promise((r) => setTimeout(r, 20));
+
+      assert.equal(micTitle.textContent, "Counter Microphone: Offline");
+      assert.ok(
+        micSubtitle.textContent.includes("Voice capture needs a connection"),
+        "the dock must state plainly that voice capture needs a connection",
+      );
+      assert.ok(
+        micSubtitle.textContent.includes("manual counter entry"),
+        "the dock must point at the manual-entry fallback",
+      );
+      assert.equal(micBtnLabel.textContent, "Voice Offline", "the toggle must not promise listening while offline");
+
+      // Tapping the mic while offline must not start a doomed recognition session.
+      micToggleBtn.dispatchEvent(new MockEvent("click"));
+      await new Promise((r) => setTimeout(r, 20));
+      assert.equal(micBtnLabel.textContent, "Voice Offline", "offline mic stays off");
+      assert.ok(
+        toast.textContent.includes("Voice capture needs a connection"),
+        "an offline tap is explained instead of silently failing",
+      );
+
+      // Reconnecting restores the usable idle dock.
+      navigator.onLine = true;
+      window.dispatchEvent(new MockEvent("online"));
+      await new Promise((r) => setTimeout(r, 40));
+      assert.equal(micTitle.textContent, "Counter Microphone", "idle title restored");
+      assert.equal(micBtnLabel.textContent, "Start Listening", "listening toggle restored");
+    } finally {
+      cleanup();
+      navigator.onLine = previousOnLine;
+    }
+  });
 });
 

@@ -174,6 +174,7 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 
 - **Problem:** Chrome's default Web Speech recognition runs on Google's servers. Without a network connection there is no transcript to queue, so the IndexedDB queue only covers failures between recognition and POST.
 - **Fix:** use on-device recognition where the chosen engine supports it. Otherwise, state plainly in the UI that voice capture needs a connection, and keep manual entry as the offline fallback.
+- [x] Implementation on branch `feat/p4-8-honest-offline-voice-capture`: the counter dock now states plainly when offline ("Voice capture needs a connection — speech is recognized in the cloud; use manual counter entry while offline; pending captures sync when reconnected"), the mic toggle reads "Voice Offline" and refuses to start a doomed recognition session offline, an outage while listening stops the listener instead of feeding the P4.7 backoff, and reconnecting restores the idle dock and resumes offline sync. Manual counter entry in the Ledger remains the offline fallback. Covered by a mounted-view connectivity test.
 
 ### P4.9 Features that do not improve accuracy
 
