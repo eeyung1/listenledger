@@ -182,7 +182,8 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 - `SpeechGrammarList` "grammar boosting" (`audio.ts:761-775`) has no effect in Chrome.
 - Adaptive VAD (`audio.ts:1012-1028`) only drives UI badges. `adaptiveSilenceTimeoutMs` is computed and never used to segment or flush speech.
 - The spectral visualizer is decoration.
-- [ ] Remove these, or relabel them as UI-only, so they are not mistaken for accuracy work.
+- [x] Implementation on branch `feat/p4-9-remove-inert-accuracy-features`: removed `SpeechGrammarList` grammar boosting and all `catalogueWords` plumbing that existed only to feed it, removed the dead `adaptiveSilenceTimeoutMs` metric (computed, never used to segment or flush speech), and removed the decorative spectral visualizer (bars, `calculateSpectralBands`, `onSpectralBands`, `getSpectralBands`). The surviving ambient VAD/SNR/signal badges are relabelled as explicit UI-only indicators ("🎙 Voice Active (UI)", "🟢 Mic Signal Clear (UI)", tooltips state they do not affect recognition or accuracy). The dormant raw-audio recorder path is intentionally untouched because P6 will re-enable recording under per-shop opt-in. Covered by listener tests 8/17/19.
+- [ ] Real-device sanity: the counter still listens and records sales with the decorative widgets removed.
 
 ---
 

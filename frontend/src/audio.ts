@@ -38,7 +38,6 @@ export interface AudioVADMetrics {
   readonly noiseFloor: number;
   readonly speechThreshold: number;
   readonly isSpeaking: boolean;
-  readonly adaptiveSilenceTimeoutMs: number;
   readonly isCalibrating: boolean;
   readonly environmentMode: EnvironmentAudioMode;
   readonly snrDb: number;
@@ -47,7 +46,6 @@ export interface AudioVADMetrics {
 export interface CounterSpeechListenerOptions {
   readonly salePhrase?: string | undefined;
   readonly restockPhrase?: string | undefined;
-  readonly catalogueWords?: readonly string[] | undefined;
   readonly enableVoiceFeedback?: boolean | undefined;
   readonly onStateChange?: ((state: CounterListenerState) => void) | undefined;
   readonly onInterimTranscript?: ((transcript: string) => void) | undefined;
@@ -57,7 +55,6 @@ export interface CounterSpeechListenerOptions {
   readonly onWakeLockChange?: ((active: boolean) => void) | undefined;
   readonly onSpeechActivityChange?: ((isSpeaking: boolean) => void) | undefined;
   readonly onVADChange?: ((metrics: AudioVADMetrics) => void) | undefined;
-  readonly onSpectralBands?: ((bands: number[]) => void) | undefined;
   /**
    * How far back (ms) to look for the anchor-bearing utterance that led into a
    * standalone closing phrase. Covers the natural pause while a customer pays.
@@ -90,21 +87,6 @@ interface SpeechRecognitionErrorEventLike extends Event {
   readonly message?: string;
 }
 
-// Minimal browser typing for SpeechGrammarList
-export interface SpeechGrammarLike {
-  src: string;
-  weight: number;
-}
-
-export interface SpeechGrammarListLike {
-  readonly length: number;
-  [index: number]: SpeechGrammarLike;
-  addFromURI(src: string, weight?: number): void;
-  addFromString(string: string, weight?: number): void;
-}
-
-export type SpeechGrammarListConstructor = new () => SpeechGrammarListLike;
-
 // Minimal browser typing for WakeLockSentinel
 export interface WakeLockSentinelLike extends EventTarget {
   readonly released: boolean;
@@ -118,7 +100,6 @@ interface SpeechRecognitionLike extends EventTarget {
   interimResults: boolean;
   lang: string;
   maxAlternatives: number;
-  grammars?: SpeechGrammarListLike;
   start(): void;
   stop(): void;
   abort(): void;
@@ -143,21 +124,6 @@ export function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor 
 /** Checks whether speech recognition is supported in the current browser. */
 export function isSpeechRecognitionSupported(): boolean {
   return getSpeechRecognitionConstructor() !== null;
-}
-
-/** Returns the browser's native SpeechGrammarList constructor if available. */
-export function getSpeechGrammarListConstructor(): SpeechGrammarListConstructor | null {
-  if (typeof window === "undefined") return null;
-  const win = window as unknown as {
-    SpeechGrammarList?: SpeechGrammarListConstructor;
-    webkitSpeechGrammarList?: SpeechGrammarListConstructor;
-  };
-  return win.SpeechGrammarList ?? win.webkitSpeechGrammarList ?? null;
-}
-
-/** Checks whether SpeechGrammarList is supported in the current browser. */
-export function isSpeechGrammarListSupported(): boolean {
-  return getSpeechGrammarListConstructor() !== null;
 }
 
 /** Checks whether the Screen Wake Lock API is supported. */
@@ -367,21 +333,6 @@ export function calculateSpeechThreshold(noiseFloor: number): number {
 }
 
 /**
- * Derives adaptive silence timeout in milliseconds based on ambient noise floor.
- * Quiet environments: ~1200ms for snappy counter turnover.
- * Noisy open markets: up to 2500ms to tolerate background interruptions and cashier pauses.
- */
-export function calculateAdaptiveSilenceTimeout(noiseFloor: number): number {
-  const minFloor = 0.06;
-  const maxFloor = 0.4;
-  const minTimeout = 1200;
-  const maxTimeout = 2500;
-  const clamped = Math.max(minFloor, Math.min(maxFloor, noiseFloor));
-  const ratio = (clamped - minFloor) / (maxFloor - minFloor);
-  return Math.round(minTimeout + ratio * (maxTimeout - minTimeout));
-}
-
-/**
  * Classifies the acoustic environment profile based on calibrated noise floor.
  */
 export function classifyEnvironmentMode(noiseFloor: number): EnvironmentAudioMode {
@@ -394,6 +345,7 @@ export function classifyEnvironmentMode(noiseFloor: number): EnvironmentAudioMod
  * Computes the estimated Signal-to-Noise Ratio (SNR) in decibels (dB).
  * Formula: 20 * log10(signalLevel / max(noiseFloor, 0.001))
  * Clamped to a practical range between -6.0 dB and +30.0 dB.
+ * UI-only diagnostics; the recognizer is never given these values (P4.9).
  */
 export function calculateSNR(signalLevel: number, noiseFloor: number): number {
   const safeFloor = Math.max(0.001, noiseFloor);
@@ -403,34 +355,6 @@ export function calculateSNR(signalLevel: number, noiseFloor: number): number {
   const clamped = Math.max(-6.0, Math.min(30.0, db));
   return Number(clamped.toFixed(1));
 }
-
-/**
- * Aggregates frequency bin data into a normalized discrete multi-band spectral array.
- * Useful for 16-band visualizers representing vocal frequency presence (300Hz - 3.4kHz)
- * and acoustic noise profiles (low-frequency motor/generator hum vs high-frequency hiss).
- */
-export function calculateSpectralBands(freqData: Uint8Array | number[], bandCount = 16): number[] {
-  if (freqData.length === 0 || bandCount <= 0) {
-    return new Array(bandCount).fill(0);
-  }
-  const result: number[] = [];
-  const binsPerBand = Math.max(1, Math.floor(freqData.length / bandCount));
-  for (let b = 0; b < bandCount; b++) {
-    const start = b * binsPerBand;
-    const end = b === bandCount - 1 ? freqData.length : (b + 1) * binsPerBand;
-    let sum = 0;
-    let count = 0;
-    for (let i = start; i < end; i++) {
-      sum += (freqData[i] ?? 0);
-      count++;
-    }
-    const avg = count > 0 ? sum / count : 0;
-    // Normalize 0..255 byte frequency values to 0.0..1.0
-    result.push(Number(Math.min(1.0, Math.max(0.0, avg / 255.0)).toFixed(3)));
-  }
-  return result;
-}
-
 
 /**
  * Synthesizes an immediate audio chime feedback using the Web Audio API.
@@ -590,7 +514,6 @@ export class CounterSpeechListener {
   private currentTranscript = "";
   private wakeLockSentinel: WakeLockSentinelLike | null = null;
   private onVisibilityChangeBound: (() => void) | null = null;
-  private catalogueWords: string[] = [];
 
   // Recognition restart backoff. Chrome and mobile Safari end the recognition
   // session on their own (silence timeouts, tab backgrounding, network drops).
@@ -613,10 +536,12 @@ export class CounterSpeechListener {
   private lastBoundaryResultIndex = -1;
   private lastBoundaryResultsLength = -1;
 
-  // Ambient Voice Activity Detection (VAD) & Adaptive Silence State
+  // Ambient Voice Activity Detection (VAD) state. UI-only: it drives the
+  // ambient noise / voice-active indicators and never affects recognition,
+  // capture, or accuracy (P4.9). No adaptive silence timeout is computed —
+  // nothing segments or flushes speech with it.
   private vadNoiseFloor = 0.05;
   private vadSpeechThreshold = 0.12;
-  private vadAdaptiveSilenceTimeoutMs = 1200;
   private vadIsSpeaking = false;
   private vadIsCalibrating = false;
   private vadCalibrationSamples: number[] = [];
@@ -625,14 +550,8 @@ export class CounterSpeechListener {
   private vadSilenceDebounce = 0;
   private currentAudioLevel = 0;
 
-  // UI-only spectral meter; raw-audio recording is disabled for the pilot.
-  private currentSpectralBands: number[] = new Array(16).fill(0);
-
   constructor(options: CounterSpeechListenerOptions = {}) {
     this.options = options;
-    if (options.catalogueWords) {
-      this.setCatalogueWords(options.catalogueWords);
-    }
   }
 
   public getState(): CounterListenerState {
@@ -651,10 +570,6 @@ export class CounterSpeechListener {
     return this.currentTranscript;
   }
 
-  public getCatalogueWords(): readonly string[] {
-    return this.catalogueWords;
-  }
-
   /** Returns current voice activity detection (VAD) and noise floor metrics. */
   public getVADMetrics(): AudioVADMetrics {
     return {
@@ -662,16 +577,10 @@ export class CounterSpeechListener {
       noiseFloor: this.vadNoiseFloor,
       speechThreshold: this.vadSpeechThreshold,
       isSpeaking: this.vadIsSpeaking,
-      adaptiveSilenceTimeoutMs: this.vadAdaptiveSilenceTimeoutMs,
       isCalibrating: this.vadIsCalibrating,
       environmentMode: classifyEnvironmentMode(this.vadNoiseFloor),
       snrDb: calculateSNR(this.currentAudioLevel, this.vadNoiseFloor),
     };
-  }
-
-  /** Returns the latest 16-band normalized frequency spectrum (0.0 to 1.0). */
-  public getSpectralBands(): readonly number[] {
-    return this.currentSpectralBands;
   }
 
   /** Returns real-time estimated Signal-to-Noise Ratio (SNR) in dB. */
@@ -694,11 +603,6 @@ export class CounterSpeechListener {
     return this.currentAudioLevel;
   }
 
-  /** Returns the dynamically calculated silence pause timeout in milliseconds. */
-  public getAdaptiveSilenceTimeout(): number {
-    return this.vadAdaptiveSilenceTimeoutMs;
-  }
-
   /**
    * Resets and triggers an ambient background noise floor calibration cycle.
    * Useful when market acoustic conditions shift (e.g. generator started or street traffic peak).
@@ -709,32 +613,10 @@ export class CounterSpeechListener {
     this.vadCalibrationSamples = [];
     this.vadNoiseFloor = 0.05;
     this.vadSpeechThreshold = 0.12;
-    this.vadAdaptiveSilenceTimeoutMs = 1200;
     this.vadIsSpeaking = false;
     this.vadSpeechDebounce = 0;
     this.vadSilenceDebounce = 0;
     this.options.onVADChange?.(this.getVADMetrics());
-  }
-
-  /**
-   * Updates the catalogue vocabulary used to bias the speech recognition grammar.
-   * Sanitizes phrases to alphanumeric tokens and updates active recognizer if present.
-   */
-  public setCatalogueWords(words: readonly string[]): void {
-    const sanitized: string[] = [];
-    for (const w of words) {
-      const trimmed = w.trim().toLowerCase();
-      // Remove punctuation and invalid chars from grammar token
-      const clean = trimmed.replace(/[^a-z0-9\s-]/g, "").trim();
-      if (clean.length > 0) {
-        sanitized.push(clean);
-      }
-    }
-    this.catalogueWords = Array.from(new Set(sanitized));
-
-    if (this.recognition) {
-      this.applyGrammar(this.recognition);
-    }
   }
 
   /**
@@ -882,22 +764,6 @@ export class CounterSpeechListener {
     }
   }
 
-  private applyGrammar(recognition: SpeechRecognitionLike): void {
-    if (this.catalogueWords.length === 0) return;
-    const GrammarClass = getSpeechGrammarListConstructor();
-    if (!GrammarClass) return;
-
-    try {
-      const grammarList = new GrammarClass();
-      const grammarTerms = this.catalogueWords.join(" | ");
-      const jsgf = `#JSGF V1.0; grammar products; public <product> = ${grammarTerms} ;`;
-      grammarList.addFromString(jsgf, 1.0);
-      recognition.grammars = grammarList;
-    } catch {
-      // Non-critical if browser grammar compilation throws
-    }
-  }
-
   /**
    * Appends newly finalized speech to the rolling utterance buffer, updating the
    * current session's entry as it grows and starting a new entry after a
@@ -930,8 +796,6 @@ export class CounterSpeechListener {
     recognition.interimResults = true;
     recognition.lang = "en-US";
     recognition.maxAlternatives = 1;
-
-    this.applyGrammar(recognition);
 
     recognition.onstart = () => {
       this.recognitionStartedAt = Date.now();
@@ -1136,9 +1000,6 @@ export class CounterSpeechListener {
       }
 
       this.analyser.getByteFrequencyData(freqData);
-      const bands = calculateSpectralBands(freqData, 16);
-      this.currentSpectralBands = bands;
-      this.options.onSpectralBands?.(bands);
 
       let level = 0;
       if (floatTimeData && typeof this.analyser.getFloatTimeDomainData === "function") {
@@ -1166,11 +1027,9 @@ export class CounterSpeechListener {
           this.vadIsCalibrating = false;
           this.vadNoiseFloor = estimateNoiseFloor(this.vadCalibrationSamples);
           this.vadSpeechThreshold = calculateSpeechThreshold(this.vadNoiseFloor);
-          this.vadAdaptiveSilenceTimeoutMs = calculateAdaptiveSilenceTimeout(this.vadNoiseFloor);
         } else {
           this.vadNoiseFloor = estimateNoiseFloor(this.vadCalibrationSamples);
           this.vadSpeechThreshold = calculateSpeechThreshold(this.vadNoiseFloor);
-          this.vadAdaptiveSilenceTimeoutMs = calculateAdaptiveSilenceTimeout(this.vadNoiseFloor);
         }
       } else {
         // 2. Slow Continuous Ambient Noise Floor Tracking when idle
@@ -1179,7 +1038,6 @@ export class CounterSpeechListener {
             (0.985 * this.vadNoiseFloor + 0.015 * this.currentAudioLevel).toFixed(3)
           );
           this.vadSpeechThreshold = calculateSpeechThreshold(this.vadNoiseFloor);
-          this.vadAdaptiveSilenceTimeoutMs = calculateAdaptiveSilenceTimeout(this.vadNoiseFloor);
         }
 
         // 3. Speech Activity Gating & Debouncing
@@ -1214,9 +1072,6 @@ export class CounterSpeechListener {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
-
-    this.currentSpectralBands = new Array(16).fill(0);
-    this.options.onSpectralBands?.(this.currentSpectralBands);
 
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach((track) => track.stop());

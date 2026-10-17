@@ -10,7 +10,6 @@ import {
   isSpeechRecognitionSupported,
   isAudioCaptureSupported,
   isWakeLockSupported,
-  isSpeechGrammarListSupported,
   isSpeechSynthesisSupported,
   speakFeedback,
   CounterSpeechListener,
@@ -18,10 +17,8 @@ import {
   calculateAudioRMS,
   estimateNoiseFloor,
   calculateSpeechThreshold,
-  calculateAdaptiveSilenceTimeout,
   classifyEnvironmentMode,
   calculateSNR,
-  calculateSpectralBands,
 } from "../dist/audio.js";
 import { postCapture } from "../dist/api.js";
 import { clearQueue, getQueuedCount } from "../dist/offline_queue.js";
@@ -555,60 +552,48 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.equal(isWakeLockSupported(), false);
   });
 
-  await t.test("8. Speech Grammar List: compiles catalogue vocabulary boosting grammar", async () => {
-    const addedGrammarStrings = [];
-    const addedGrammarWeights = [];
-
+  await t.test("8. P4.9: grammar boosting removed — the recognizer never receives `grammars` (P4.9)", async () => {
+    // SpeechGrammarList grammar boosting had no effect in Chrome, so P4.9
+    // removed it. Even when the browser offers the API, the listener must not
+    // touch it, and the created recognizer must carry no grammars.
     class MockSpeechGrammarList {
-      constructor() {
-        this.length = 0;
-      }
-      addFromString(str, weight = 1.0) {
-        addedGrammarStrings.push(str);
-        addedGrammarWeights.push(weight);
+      addFromString() {
+        throw new Error("P4.9: listener must not build a JSGF grammar anymore");
       }
       addFromURI() {}
     }
     window.SpeechGrammarList = MockSpeechGrammarList;
-    assert.equal(isSpeechGrammarListSupported(), true);
 
-    let assignedGrammars = null;
+    let createdRecognition = null;
     class MockSpeechRecognition {
       constructor() {
-        this.continuous = false;
-        this.interimResults = false;
+        createdRecognition = this;
+        this.continuous = true;
+        this.interimResults = true;
         this.lang = "en-US";
-        this.grammars = null;
+        this.maxAlternatives = 1;
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
       }
       start() {
-        assignedGrammars = this.grammars;
+        this.onstart?.(new MockEvent("start"));
       }
       abort() {}
       stop() {}
     }
     window.SpeechRecognition = MockSpeechRecognition;
 
-    const listener = new CounterSpeechListener({
-      catalogueWords: ["Peak Milk 400g", "Milo", "Indomie Onion", "carton", "pack"],
-    });
-
+    const listener = new CounterSpeechListener({});
     await listener.start();
 
-    assert.notEqual(assignedGrammars, null);
-    assert.equal(addedGrammarStrings.length, 1);
-    assert.ok(addedGrammarStrings[0].includes("peak milk 400g"));
-    assert.ok(addedGrammarStrings[0].includes("milo"));
-    assert.ok(addedGrammarStrings[0].includes("indomie onion"));
-    assert.equal(addedGrammarWeights[0], 1.0);
-
-    // Test updating catalogue words dynamically
-    listener.setCatalogueWords(["Golden Morn", "Cornflakes"]);
-    assert.equal(addedGrammarStrings.length, 2);
-    assert.ok(addedGrammarStrings[1].includes("golden morn"));
+    assert.equal("grammars" in createdRecognition, false, "no grammar is assigned to the recognizer");
+    assert.equal(typeof listener.setCatalogueWords, "undefined", "setCatalogueWords was removed with grammar boosting");
+    assert.equal(typeof listener.getAdaptiveSilenceTimeout, "undefined", "dead adaptive silence timeout getter was removed");
 
     listener.stop();
     delete window.SpeechGrammarList;
-    assert.equal(isSpeechGrammarListSupported(), false);
   });
 
   await t.test("9. Speech Synthesis: speakFeedback speaks with brisk counter cadence and handles missing synth gracefully", () => {
@@ -783,16 +768,9 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     const speechNoisy = calculateSpeechThreshold(0.35);
     assert.ok(speechNoisy >= 0.54, "noisy speech threshold should guard against market background");
 
-    // 4. Adaptive Silence Timeout
-    // Quiet environment (floor <= 0.06) -> 1200ms
-    assert.equal(calculateAdaptiveSilenceTimeout(0.04), 1200);
-    assert.equal(calculateAdaptiveSilenceTimeout(0.06), 1200);
-    // Noisy market (floor >= 0.40) -> 2500ms
-    assert.equal(calculateAdaptiveSilenceTimeout(0.40), 2500);
-    assert.equal(calculateAdaptiveSilenceTimeout(0.50), 2500);
-    // Moderate noise floor (e.g. 0.23) -> intermediate timeout
-    const moderateTimeout = calculateAdaptiveSilenceTimeout(0.23);
-    assert.ok(moderateTimeout > 1600 && moderateTimeout < 2100);
+    // 4. Adaptive Silence Timeout was removed (P4.9): the metric is computed
+    // from nothing used to segment or flush speech, so getVADMetrics() no
+    // longer reports it (asserted in test 17).
 
     // 5. Environment Classification
     assert.equal(classifyEnvironmentMode(0.05), "quiet");
@@ -1010,14 +988,14 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     micToggleBtn.dispatchEvent(new MockEvent("click"));
     await new Promise((r) => setTimeout(r, 20));
 
-    assert.equal(vadBadge.textContent, "Calibrating Ambient Noise…");
+    assert.equal(vadBadge.textContent, "Calibrating Ambient Noise (UI)…");
     assert.ok(vadBadge.className.includes("badge--calibrating"));
 
     // Click stop listening
     micToggleBtn.dispatchEvent(new MockEvent("click"));
     await new Promise((r) => setTimeout(r, 20));
 
-    assert.equal(vadBadge.textContent, "Ambient VAD Idle");
+    assert.equal(vadBadge.textContent, "Ambient VAD Idle (UI)");
 
     cleanup();
   });
@@ -1174,34 +1152,18 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.ok(zeroFloorSNR >= -6.0 && zeroFloorSNR <= 30.0);
   });
 
-  await t.test("17. calculateSpectralBands: groups FFT frequency bins into normalized discrete bands", () => {
-    // Empty frequency data
-    const emptyBands = calculateSpectralBands([], 16);
-    assert.equal(emptyBands.length, 16);
-    assert.deepEqual(emptyBands, new Array(16).fill(0));
+  await t.test("17. P4.9: inert accuracy-adjacent features removed from the capture listener", () => {
+    // The spectral visualizer was decoration and adaptiveSilenceTimeoutMs was
+    // computed but never used to segment or flush speech — both removed.
+    // VAD metrics stay, but only as honest UI-only feedback.
+    const listener = new CounterSpeechListener({});
+    const metrics = listener.getVADMetrics();
 
-    // Full scale 255 uniform frequency data (32 bins into 16 bands = 2 bins per band)
-    const fullBins = new Uint8Array(32).fill(255);
-    const fullBands = calculateSpectralBands(fullBins, 16);
-    assert.equal(fullBands.length, 16);
-    assert.ok(fullBands.every((v) => v === 1.0));
-
-    // Half scale 128 uniform frequency data
-    const halfBins = new Uint8Array(32).fill(128);
-    const halfBands = calculateSpectralBands(halfBins, 16);
-    assert.equal(halfBands.length, 16);
-    assert.ok(halfBands.every((v) => Math.abs(v - 0.502) < 0.01));
-
-    // Non-uniform distribution: low frequency energy, high frequency silence
-    const shapedBins = new Uint8Array(16);
-    shapedBins[0] = 255;
-    shapedBins[1] = 255;
-    for (let i = 2; i < 16; i++) shapedBins[i] = 0;
-    const shapedBands = calculateSpectralBands(shapedBins, 8);
-    assert.equal(shapedBands.length, 8);
-    assert.equal(shapedBands[0], 1.0);
-    assert.equal(shapedBands[1], 0.0);
-    assert.equal(shapedBands[7], 0.0);
+    assert.equal(typeof listener.getSpectralBands, "undefined", "getSpectralBands was removed");
+    assert.equal(typeof listener.getAdaptiveSilenceTimeout, "undefined", "getAdaptiveSilenceTimeout was removed");
+    assert.equal("adaptiveSilenceTimeoutMs" in metrics, false, "VAD metrics no longer report the dead timeout");
+    assert.equal(Array.isArray(metrics.noiseFloor), false, "metrics remain a flat metrics object");
+    assert.equal(typeof metrics.snrDb, "number", "UI-only SNR indication still available for relabelled badges");
   });
 
   await t.test("18. Pilot listener never creates a recorder or attaches raw audio", async () => {
@@ -1350,7 +1312,7 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     delete navigator.mediaDevices;
   });
 
-  await t.test("19. Home Overview: renders spectral visualizer bars and SNR diagnostic badge", async () => {
+  await t.test("19. P4.9 Home Overview: spectrum visualizer removed and ambient badges relabelled as UI-only", async () => {
     class MockSpeechRecognition {
       constructor() {
         this.continuous = false;
@@ -1430,15 +1392,26 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
 
     const spectralContainer = document.querySelector("[data-hook='counter-spectral-bars']");
     const snrBadge = document.querySelector("[data-hook='counter-snr-badge']");
+    const vadBadge2 = document.querySelector("[data-hook='counter-vad-badge']");
 
-    assert.notEqual(spectralContainer, null, "spectral bars container must exist");
-    assert.notEqual(snrBadge, null, "snr badge must exist");
+    // The spectral visualizer was pure decoration — removed entirely (P4.9).
+    assert.equal(spectralContainer, null, "spectral bars must no longer be mounted");
 
-    const bars = spectralContainer.querySelectorAll(".spectral-bar");
-    assert.equal(bars.length, 16, "must mount 16 spectral bars");
+    assert.notEqual(vadBadge2, null, "vad badge must remain (relabeled)");
+    assert.notEqual(snrBadge, null, "snr badge must remain (relabeled)");
 
-    // Check SNR badge initial state
-    assert.equal(snrBadge.textContent, "SNR: Calibrating…");
+    // Both surviving badges are plainly marked as UI-only decoration.
+    assert.ok(
+      (vadBadge2.getAttribute("title") || "").includes("does not affect recognition"),
+      "vad badge must state its UI-only nature",
+    );
+    assert.ok(
+      (snrBadge.getAttribute("title") || "").includes("does not affect recognition"),
+      "snr badge must state its UI-only nature",
+    );
+
+    // Check badge initial state uses the honest label
+    assert.equal(snrBadge.textContent, "Calibrating…");
 
     cleanup();
   });
