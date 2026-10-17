@@ -342,4 +342,3 @@ func (s *Server) authenticateCaptureCaller(w http.ResponseWriter, r *http.Reques
 	shopID, ok := s.shopID(w, r)
 	return shopID, "", ok
 }
-
