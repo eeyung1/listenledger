@@ -31,6 +31,7 @@ import {
   type TransactionType,
   type Unit,
 } from "../api.js";
+import { enqueueManualTransaction, isNetworkError, syncOfflineQueue } from "../offline_queue.js";
 import {
   applyFilteredTransactionToList,
   applyTransactionToList,
@@ -1067,13 +1068,13 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       submitBtn.textContent = "Recording…";
       statusMsg.hidden = true;
 
+      const input: ManualTransactionInput = {
+        type: typeSelect.value as TransactionType,
+        product_id: prodId,
+        quantity: qty,
+        unit: unitSelect.value as Unit,
+      };
       try {
-        const input: ManualTransactionInput = {
-          type: typeSelect.value as TransactionType,
-          product_id: prodId,
-          quantity: qty,
-          unit: unitSelect.value as Unit,
-        };
         const rawAmt = amountInput.value.trim() ? parseInt(amountInput.value.trim(), 10) : undefined;
         if (rawAmt !== undefined && !isNaN(rawAmt)) {
           input.amount = { amount: rawAmt, currency: "NGN" };
@@ -1086,6 +1087,21 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         closeModal();
         void refetch();
       } catch (err: unknown) {
+        if (isNetworkError(err)) {
+          // P4.8: manual counter entry is the offline fallback. When the POST
+          // cannot reach the server, queue it on-device; it replays into
+          // /api/transactions/manual when the network returns.
+          const optText = productSelect.options[productSelect.selectedIndex]?.text ?? "";
+          const productLabel = optText.replace(/\s*\([^)]*\)\s*$/, "").trim();
+          await enqueueManualTransaction(shopId, input, productLabel);
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Record Movement";
+          statusMsg.hidden = false;
+          statusMsg.className = "status-badge status-badge--warning";
+          statusMsg.textContent =
+            "No connection — entry queued on this device. It syncs automatically when the network returns.";
+          return;
+        }
         submitBtn.disabled = false;
         submitBtn.textContent = "Record Movement";
         statusMsg.hidden = false;
@@ -1172,6 +1188,15 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     if (detail.resyncRequired) {
       void refetch();
     }
+    // A socket reconnect usually means the network is back — replay anything
+    // queued offline (spoken captures and manual entries alike).
+    if (detail.status === "open") {
+      void syncOfflineQueue();
+    }
+  };
+
+  const onOnlineBack = (): void => {
+    void syncOfflineQueue();
   };
 
   const onManualClick = (): void => {
@@ -1182,6 +1207,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   window.addEventListener("ll:transaction-review-required", onTransactionReviewRequired);
   window.addEventListener("ll:transaction-updated", onTransactionUpdated);
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
+  window.addEventListener("online", onOnlineBack);
   typeFilter?.addEventListener("change", onTypeFilter);
   statusFilter?.addEventListener("change", onStatusFilter);
   pagePrev?.addEventListener("click", onPrevPage);
@@ -1197,6 +1223,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     window.removeEventListener("ll:transaction-review-required", onTransactionReviewRequired);
     window.removeEventListener("ll:transaction-updated", onTransactionUpdated);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
+    window.removeEventListener("online", onOnlineBack);
     typeFilter?.removeEventListener("change", onTypeFilter);
     statusFilter?.removeEventListener("change", onStatusFilter);
     pagePrev?.removeEventListener("click", onPrevPage);

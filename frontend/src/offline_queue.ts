@@ -11,10 +11,20 @@
  * sequentially into the backend ledger.
  */
 
-import { postCapture, type CaptureResult, type TransactionType } from "./api.js";
+import {
+  postCapture,
+  createManualTransaction,
+  type CaptureResult,
+  type ManualTransactionInput,
+  type TransactionType,
+} from "./api.js";
+
+/** What kind of entry this queue item replays to. Legacy entries are spoken captures. */
+export type QueuedEntryKind = "spoken-capture" | "manual-transaction";
 
 export interface QueuedSpokenCapture {
   readonly queue_id: string;
+  readonly kind?: QueuedEntryKind | undefined;
   readonly capture_id?: string | undefined;
   readonly shop_id?: string | undefined;
   readonly transcript: string;
@@ -22,6 +32,8 @@ export interface QueuedSpokenCapture {
   readonly closing_phrase: string;
   readonly queued_at: string;
   readonly audio_data?: string | undefined;
+  /** Present only when `kind` is "manual-transaction" (P4.8 offline fallback). */
+  readonly manual_payload?: ManualTransactionInput | undefined;
   retry_count: number;
   last_error?: string | undefined;
   status: "queued" | "syncing";
@@ -152,6 +164,57 @@ export async function enqueueCapture(
     (item as { shop_id?: string }).shop_id = input.shop_id;
   }
   // New queue entries never retain raw audio during the pilot.
+
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDB();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.put(item);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+      return item;
+    } catch {
+      // Fallback to localStorage on IndexedDB failure
+    }
+  }
+
+  if (isLocalStorageSupported()) {
+    const list = readLocalStorageQueue();
+    list.push(item);
+    writeLocalStorageQueue(list);
+    return item;
+  }
+
+  memoryStore.set(item.queue_id, item);
+  return item;
+}
+
+/**
+ * Queues a manual counter entry (typed Ledger fallback) created while the
+ * device is offline, so it replays into /api/transactions/manual when
+ * connectivity returns. P4.8: manual entry must genuinely be an offline
+ * fallback, not a form whose POST dies with a network error.
+ */
+export async function enqueueManualTransaction(
+  shopId: string,
+  input: ManualTransactionInput,
+  productLabel?: string,
+): Promise<QueuedSpokenCapture> {
+  const item: QueuedSpokenCapture = {
+    queue_id: generateQueueId(),
+    kind: "manual-transaction",
+    shop_id: shopId,
+    transcript: `Manual ${input.type}: ${input.quantity} ${input.unit} ${productLabel ?? input.product_id}`,
+    type: input.type,
+    closing_phrase: "",
+    manual_payload: { ...input },
+    queued_at: new Date().toISOString(),
+    retry_count: 0,
+    status: "queued",
+  };
 
   if (isIndexedDBSupported()) {
     try {
@@ -392,13 +455,28 @@ export async function syncOfflineQueue(
 
       try {
         await markCaptureSyncing(item.queue_id);
-        const result = await postCapture({
-          capture_id: item.capture_id || item.queue_id,
-          transcript: item.transcript,
-          type: item.type,
-          closing_phrase: item.closing_phrase,
-          occurred_at: item.queued_at,
-        });
+        let result: CaptureResult | undefined;
+        if (item.kind === "manual-transaction" && item.manual_payload) {
+          // P4.8: manual counter entries replay into the manual-transaction
+          // endpoint, not /api/captures.
+          const payload = item.manual_payload;
+          await createManualTransaction({
+            type: payload.type,
+            product_id: payload.product_id,
+            quantity: payload.quantity,
+            unit: payload.unit,
+            amount: payload.amount,
+            notes: payload.notes,
+          });
+        } else {
+          result = await postCapture({
+            capture_id: item.capture_id || item.queue_id,
+            transcript: item.transcript,
+            type: item.type,
+            closing_phrase: item.closing_phrase,
+            occurred_at: item.queued_at,
+          });
+        }
 
         await removeQueuedCapture(item.queue_id);
         synced++;
