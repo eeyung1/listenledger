@@ -53,6 +53,11 @@ export interface CounterSpeechListenerOptions {
   readonly onSpeechActivityChange?: ((isSpeaking: boolean) => void) | undefined;
   readonly onVADChange?: ((metrics: AudioVADMetrics) => void) | undefined;
   readonly onSpectralBands?: ((bands: number[]) => void) | undefined;
+  /**
+   * How far back (ms) to look for the anchor-bearing utterance that led into a
+   * standalone closing phrase. Covers the natural pause while a customer pays.
+   */
+  readonly anchorLookbackMs?: number | undefined;
 }
 
 // Minimal browser typing for vendor-prefixed SpeechRecognition
@@ -228,6 +233,80 @@ export function detectClosingBoundary(
   }
 
   return { detected: false };
+}
+
+/** A finalized speech utterance with the time it was recognized. */
+export interface TranscriptUtterance {
+  readonly text: string;
+  readonly at: number;
+}
+
+/**
+ * Default look-back window for assembling a capture when the closing phrase is
+ * spoken in a later result or recognition session than the anchors. The
+ * protocol has a natural pause while the customer pays.
+ */
+export const DEFAULT_ANCHOR_LOOKBACK_MS = 60_000;
+
+const ANCHOR_NUMBER_WORDS = [
+  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+  "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+  "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty",
+  "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million",
+];
+
+const ANCHOR_CURRENCY_WORDS = ["naira", "kobo", "₦"];
+
+/**
+ * Heuristically reports whether an utterance carries capture anchors (a
+ * quantity or an amount). A standalone closing phrase such as "Thank you"
+ * carries none, so the anchors must be recovered from an earlier utterance.
+ */
+export function utteranceHasAnchors(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return false;
+  if (/\d/.test(t)) return true;
+  if (ANCHOR_CURRENCY_WORDS.some((w) => t.includes(w))) return true;
+  return ANCHOR_NUMBER_WORDS.some((w) => new RegExp(`\\b${w}\\b`).test(t));
+}
+
+/**
+ * Assembles the transcript to submit when a closing boundary fires.
+ *
+ * If the closing utterance already contains anchors, it is used as-is. When the
+ * closing phrase arrives alone — for example a later result or a restarted
+ * recognition session, after the customer has finished paying — the most recent
+ * anchor-bearing utterance within the look-back window is prepended so the
+ * product, quantity and amount are not lost.
+ */
+export function assembleCaptureTranscript(
+  utterances: readonly TranscriptUtterance[],
+  closingText: string,
+  closingAt: number,
+  windowMs: number = DEFAULT_ANCHOR_LOOKBACK_MS,
+): string {
+  const closing = closingText.trim();
+  if (utteranceHasAnchors(closing)) return closing;
+
+  const cutoff = closingAt - windowMs;
+  const recent = utterances.filter((u) => u.at >= cutoff && u.text.trim() !== "");
+
+  let anchorStart = -1;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    if (utteranceHasAnchors(recent[i]!.text)) {
+      anchorStart = i;
+      break;
+    }
+  }
+  if (anchorStart === -1) return closing;
+
+  const parts = recent.slice(anchorStart).map((u) => u.text.trim());
+  const last = parts[parts.length - 1] ?? "";
+  const closingLower = closing.toLowerCase();
+  if (closing && last.toLowerCase().endsWith(closingLower)) {
+    return parts.join(" ");
+  }
+  return [...parts, closing].filter(Boolean).join(" ");
 }
 
 /**
@@ -498,6 +577,12 @@ export class CounterSpeechListener {
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private recognitionStartedAt = 0;
 
+  // Rolling, timestamped buffer of finalized utterances so a pause before the
+  // closing phrase (across results or recognition restarts) does not lose the
+  // product, quantity and amount anchors.
+  private speechUtterances: TranscriptUtterance[] = [];
+  private currentSessionFinalText = "";
+
   // Ambient Voice Activity Detection (VAD) & Adaptive Silence State
   private vadNoiseFloor = 0.05;
   private vadSpeechThreshold = 0.12;
@@ -639,6 +724,8 @@ export class CounterSpeechListener {
 
     this.isExplicitlyStopped = false;
     this.currentTranscript = "";
+    this.speechUtterances = [];
+    this.currentSessionFinalText = "";
     this.calibrateNoiseFloor();
 
     // 1. Request Screen Wake Lock so mobile phone display doesn't sleep at counter
@@ -682,6 +769,8 @@ export class CounterSpeechListener {
     void this.releaseWakeLock();
     this.teardownAudioAnalyser();
     this.currentTranscript = "";
+    this.speechUtterances = [];
+    this.currentSessionFinalText = "";
     this.currentAudioLevel = 0;
     this.vadIsSpeaking = false;
     this.vadIsCalibrating = false;
@@ -779,6 +868,32 @@ export class CounterSpeechListener {
     }
   }
 
+  /**
+   * Appends newly finalized speech to the rolling utterance buffer, updating the
+   * current session's entry as it grows and starting a new entry after a
+   * recognition restart. Bounded to the most recent 20 utterances.
+   */
+  private recordFinalUtterance(finalText: string, at: number): void {
+    const ft = finalText.trim();
+    if (!ft || ft === this.currentSessionFinalText) return;
+
+    const growsCurrent =
+      this.currentSessionFinalText !== "" &&
+      ft.startsWith(this.currentSessionFinalText) &&
+      this.speechUtterances.length > 0;
+
+    if (growsCurrent) {
+      this.speechUtterances[this.speechUtterances.length - 1] = { text: ft, at };
+    } else {
+      this.speechUtterances.push({ text: ft, at });
+    }
+    this.currentSessionFinalText = ft;
+
+    if (this.speechUtterances.length > 20) {
+      this.speechUtterances.shift();
+    }
+  }
+
   private initRecognition(RecognizerClass: SpeechRecognitionConstructor): void {
     const recognition = new RecognizerClass();
     recognition.continuous = true;
@@ -796,16 +911,25 @@ export class CounterSpeechListener {
     };
 
     recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      // Gather the full session transcript. Iterating from the first result (not
+      // `resultIndex`) keeps earlier text in the same session, and tracking the
+      // finalized text separately lets us buffer utterances across restarts.
       let accumulated = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const item = event.results[i]?.[0];
-        if (item) {
-          accumulated += item.transcript;
+      let finalText = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const entry = event.results[i];
+        const item = entry?.[0];
+        if (!item) continue;
+        accumulated += item.transcript;
+        if (entry.isFinal) {
+          finalText += item.transcript;
         }
       }
 
       const text = accumulated.trim();
       if (!text) return;
+
+      this.recordFinalUtterance(finalText, Date.now());
 
       this.currentTranscript = text;
       this.options.onInterimTranscript?.(text);
@@ -820,10 +944,22 @@ export class CounterSpeechListener {
         const cleanText = boundary.cleanTranscript;
         const boundaryType = boundary.type;
         const phrase = boundary.closingPhrase;
+
+        // Recover anchors spoken before the closing phrase when it arrives in a
+        // later result or a restarted recognition session after a payment pause.
+        const assembled = assembleCaptureTranscript(
+          this.speechUtterances,
+          cleanText,
+          Date.now(),
+          this.options.anchorLookbackMs,
+        );
+
         this.currentTranscript = "";
+        this.speechUtterances = [];
+        this.currentSessionFinalText = "";
 
         this.options.onBoundaryDetected?.({
-          transcript: cleanText,
+          transcript: assembled,
           type: boundaryType,
           closingPhrase: phrase,
         });
