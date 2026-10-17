@@ -1458,4 +1458,97 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
 
     cleanup();
   });
+
+  await t.test("20. P4.7 restart backoff: escalates then stops retrying after repeated immediate failures", async () => {
+    const origSetTimeout = globalThis.setTimeout;
+    let recognitionInstance = null;
+    let startCount = 0;
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionInstance = this;
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        startCount++;
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    // Record the requested restart delays and run them immediately so the
+    // backoff sequence can be exercised without real waits.
+    const delays = [];
+    globalThis.setTimeout = (cb, ms, ...args) => {
+      delays.push(ms);
+      return origSetTimeout(cb, 0, ...args);
+    };
+
+    const errors = [];
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      onError: (e) => errors.push(e),
+    });
+
+    try {
+      await listener.start();
+      // Each session ends ~immediately, so every restart counts as a failure.
+      for (let i = 0; i < 6; i++) {
+        recognitionInstance.onend();
+        await new Promise((r) => origSetTimeout(r, 10));
+      }
+
+      // 150ms doubling to 2400ms, then it gives up (no sixth timer).
+      assert.deepEqual(delays, [150, 300, 600, 1200, 2400]);
+      assert.equal(listener.getState(), "error");
+      assert.equal(errors.length, 1, "onError fires once when retrying gives up");
+      assert.equal(startCount, 6, "initial start plus five bounded restarts");
+    } finally {
+      listener.stop();
+      globalThis.setTimeout = origSetTimeout;
+      delete window.SpeechRecognition;
+    }
+  });
+
+  await t.test("21. P4.7 stop() cancels a pending restart", async () => {
+    let recognitionInstance = null;
+    let startCount = 0;
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionInstance = this;
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        startCount++;
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const listener = new CounterSpeechListener({ salePhrase: "Thank you" });
+    await listener.start();
+    const startsAfterStart = startCount;
+
+    recognitionInstance.onend(); // schedules a restart in 150ms
+    listener.stop(); // must clear the pending timer
+    await new Promise((r) => setTimeout(r, 220));
+
+    assert.equal(startCount, startsAfterStart, "no restart fires after stop()");
+    delete window.SpeechRecognition;
+  });
 });
