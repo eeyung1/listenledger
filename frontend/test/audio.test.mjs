@@ -132,8 +132,10 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
       transcript: "Two Milo, four thousand naira. Thank you.",
       type: "sale",
       closing_phrase: "Thank you",
+      audio_data: "data:audio/webm;base64,legacy-snippet",
     });
 
+    assert.equal(calledBody.audio_data, undefined);
     assert.equal(calledUrl, "/api/captures");
     assert.equal(calledMethod, "POST");
     assert.equal(calledBody.transcript, "Two Milo, four thousand naira. Thank you.");
@@ -1209,7 +1211,7 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.equal(shapedBands[7], 0.0);
   });
 
-  await t.test("18. CounterSpeechListener: audio snippet recording and spectral bands callback", async () => {
+  await t.test("18. Pilot listener never creates a recorder or attaches raw audio", async () => {
     let recognitionInstance = null;
     class MockSpeechRecognition {
       constructor() {
@@ -1322,15 +1324,9 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     await listener.start();
     assert.equal(listener.isListening(), true);
 
-    // Verify media recorder was initialized and simulate audio chunk collection
-    assert.notEqual(mediaRecorderInstance, null, "MediaRecorder must be created");
-    mediaRecorderInstance.ondataavailable?.({
-      data: { size: 1024, type: "audio/webm" },
-    });
-
-    // Test exportRecentAudioSnippet
-    const snippet = await listener.exportRecentAudioSnippet();
-    assert.equal(snippet, "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=");
+    // Even when recording is supported, the pilot must never create a recorder.
+    assert.equal(mediaRecorderInstance, null);
+    assert.equal(await listener.exportRecentAudioSnippet(), undefined);
 
     // Simulate recognition boundary event
     recognitionInstance.onresult({
@@ -1350,7 +1346,7 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
 
     assert.notEqual(capturedCandidate, null);
     assert.equal(capturedCandidate.type, "sale");
-    assert.equal(capturedCandidate.audioData, "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=");
+    assert.equal(capturedCandidate.audioData, undefined);
 
     // Check VAD metrics SNR
     const vadMetrics = listener.getVADMetrics();
@@ -1459,3 +1455,4 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     cleanup();
   });
 });
+
