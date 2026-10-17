@@ -402,44 +402,12 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     }
   }
 
-  function extractCatalogueWords(products: readonly Product[]): string[] {
-    const words = new Set<string>();
-    words.add("carton");
-    words.add("pack");
-    words.add("crate");
-    words.add("piece");
-    words.add("bottle");
-    words.add("roll");
-    words.add("sachet");
-    words.add("naira");
-    words.add("thank you");
-    words.add("stock received");
-
-    for (const p of products) {
-      if (p.name) {
-        words.add(p.name);
-        p.name.split(/\s+/).forEach((tok) => {
-          if (tok.length > 2) words.add(tok);
-        });
-      }
-      if (p.aliases && Array.isArray(p.aliases)) {
-        for (const a of p.aliases) {
-          if (a) words.add(a);
-        }
-      }
-    }
-    return Array.from(words);
-  }
-
   function render(): void {
     renderKPIs();
     renderDeviceHealth();
     renderOnboarding();
     renderFeed();
     renderLowStock();
-    if (counterListener && state.products.length > 0) {
-      counterListener.setCatalogueWords(extractCatalogueWords(state.products));
-    }
   }
 
   /** Fetches transactions, inventory and daily summary snapshots and replaces state wholesale. */
@@ -612,7 +580,6 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const thresholdMarker = hook(root, "counter-threshold-marker");
   const vadBadge = hook(root, "counter-vad-badge");
   const snrBadge = hook(root, "counter-snr-badge");
-  const spectralContainer = hook(root, "counter-spectral-bars");
   const waveform = hook(root, "counter-waveform");
   const liveTranscript = hook(root, "counter-live-transcript");
   const captureToast = hook(root, "counter-capture-toast");
@@ -755,7 +722,6 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     counterListener = new CounterSpeechListener({
       salePhrase: "thank you",
       restockPhrase: "stock received",
-      catalogueWords: extractCatalogueWords(state.products),
       onWakeLockChange: (active: boolean) => {
         if (wakeLockBadge) {
           wakeLockBadge.style.display = active ? "inline-flex" : "none";
@@ -776,7 +742,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           livePanel.style.display = "flex";
           if (vadBadge) {
             vadBadge.className = "badge badge--vad badge--calibrating";
-            setText(vadBadge, "Calibrating Ambient Noise…");
+            setText(vadBadge, "Calibrating Ambient Noise (UI)…");
           }
         } else if (listenerState === "processing") {
           setText(micTitle, "Processing Spoken Capture…");
@@ -791,7 +757,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           if (wakeLockBadge) wakeLockBadge.style.display = "none";
           if (vadBadge) {
             vadBadge.className = "badge badge--vad";
-            setText(vadBadge, "Ambient VAD Error");
+            setText(vadBadge, "Ambient VAD Error (UI)");
           }
           if (waveform) {
             waveform.classList.remove("counter-dock__waveform--active");
@@ -809,7 +775,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           if (wakeLockBadge) wakeLockBadge.style.display = "none";
           if (vadBadge) {
             vadBadge.className = "badge badge--vad";
-            setText(vadBadge, "Ambient VAD Idle");
+            setText(vadBadge, "Ambient VAD Idle (UI)");
           }
           if (waveform) {
             waveform.classList.remove("counter-dock__waveform--active");
@@ -852,55 +818,39 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
         if (thresholdMarker) {
           thresholdMarker.style.left = `${Math.min(95, Math.max(5, Math.round(metrics.speechThreshold * 100)))}%`;
         }
+        // P4.9: these badges are UI-only ambient indicators. They are labelled
+        // as such and never influence recognition, capture or accuracy.
         if (vadBadge) {
           if (metrics.isCalibrating) {
             vadBadge.className = "badge badge--vad badge--calibrating";
-            setText(vadBadge, "Calibrating Ambient Noise…");
+            setText(vadBadge, "Calibrating Ambient Noise (UI)…");
           } else if (metrics.isSpeaking) {
             vadBadge.className = "badge badge--vad badge--speaking";
-            setText(vadBadge, "🎙 Voice Active");
+            setText(vadBadge, "🎙 Voice Active (UI)");
           } else {
             vadBadge.className = `badge badge--vad badge--${metrics.environmentMode}`;
-            const pauseSec = (metrics.adaptiveSilenceTimeoutMs / 1000).toFixed(1);
             const label =
               metrics.environmentMode === "noisy"
-                ? `Market Noise (${pauseSec}s pause)`
+                ? "Market Noise (UI)"
                 : metrics.environmentMode === "moderate"
-                ? `Moderate Noise (${pauseSec}s pause)`
-                : `Quiet Stall (${pauseSec}s pause)`;
+                ? "Moderate Noise (UI)"
+                : "Quiet Stall (UI)";
             setText(vadBadge, label);
           }
         }
         if (snrBadge) {
           if (metrics.isCalibrating) {
             snrBadge.className = "badge badge--snr badge--snr-calibrating";
-            setText(snrBadge, "SNR: Calibrating…");
+            setText(snrBadge, "Signal: Calibrating (UI)…");
           } else if (metrics.snrDb >= 12) {
             snrBadge.className = "badge badge--snr badge--snr-clear";
-            setText(snrBadge, `🟢 SNR +${Math.round(metrics.snrDb)}dB Clear`);
+            setText(snrBadge, "🟢 Mic Signal Clear (UI)");
           } else if (metrics.snrDb >= 6) {
             snrBadge.className = "badge badge--snr badge--snr-moderate";
-            setText(snrBadge, `🟡 SNR +${Math.round(metrics.snrDb)}dB Mod`);
+            setText(snrBadge, "🟡 Mic Signal Fair (UI)");
           } else {
             snrBadge.className = "badge badge--snr badge--snr-noisy";
-            setText(snrBadge, `🔴 SNR +${Math.max(0, Math.round(metrics.snrDb))}dB Noisy`);
-          }
-        }
-      },
-      onSpectralBands: (bands: number[]) => {
-        if (spectralContainer) {
-          const bars = spectralContainer.querySelectorAll(".spectral-bar");
-          for (let i = 0; i < bars.length && i < bands.length; i++) {
-            const bar = bars[i] as HTMLElement;
-            const energy = bands[i] ?? 0;
-            const heightPct = Math.max(8, Math.round(energy * 100));
-            bar.style.height = `${heightPct}%`;
-            // Vocal frequency range (bands 2 to 9, ~300Hz-3.4kHz)
-            if (i >= 2 && i <= 9 && energy > 0.15) {
-              bar.classList.add("spectral-bar--vocal");
-            } else {
-              bar.classList.remove("spectral-bar--vocal");
-            }
+            setText(snrBadge, "🔴 Mic Signal Noisy (UI)");
           }
         }
       },
