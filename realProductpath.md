@@ -53,10 +53,11 @@ These are not needed to answer the core question. Stop extending them. Hide them
 - [x] P0a: Park credit-book/expense actions and KPIs, edge-device UI, training/target-gate onboarding, and reconciliation/cohort panels in the pilot interface. Preserve existing data and backend capabilities.
 - [x] P0a: Replace inaccurate privacy claims with current browser-processing and retention behaviour; explain the transcript queue's connectivity limits.
 - [x] P0a: Align README and frontend priorities with this document's feature freeze.
-- [ ] P0b: Disable new raw-audio recording/upload and server retention, including stale clients and queued captures. Implement and regression-test on a branch; merge only with the real-device evidence required by working rule 2.
+- [x] P0b implementation on `fix/p0-disable-audio-retention`: disable browser snippet recording, strip uploads and new queue entries, discard audio at server intake, and reject detected credit attribution before any ledger write.
+- [ ] P0b release: attach real-device evidence, verify exact-head CI, merge and verify the deployed build (working rule 2).
 - [ ] Verify P0b on a real device and deployed build, then close the parent P0 gate.
 
-P0a is a UI-only increment: hidden controls are not an API authorization boundary. Spoken credit attribution remains parked work for P0b; it is not disabled by hiding the credit book. No P1–P7 evidence or capture accuracy is claimed. Automated checks and desktop-browser inspection validate this interface change only.
+P0a is a UI-only increment: hidden controls are not an API authorization boundary. Spoken credit attribution is rejected in the P0b candidate; it is not disabled in the live P0a build merely by hiding the credit book. No P1–P7 evidence or capture accuracy is claimed. Automated checks and desktop-browser inspection validate this interface change only.
 
 
 ---
@@ -289,3 +290,18 @@ Fill in one row per field session. Link to the labelled ground-truth sheet, not 
 
 Update this table when a finding is confirmed, fixed or disproved.
 
+
+## P0b release evidence (pending)
+
+P0a merged as PR #47 (`a0adf3299b1cba77da2f1fe06bec479d908f9f24`); Render deploy `dep-db9qp0flk1mc73c7nu2g` is live and `/readyz` returned 200 with the database connected. The live Settings template contains the parked panels and corrected privacy wording.
+
+P0b remains a candidate, not deployed. No physical-device or real-shop evidence has been supplied. This change does not solve P4 recognition reliability, erase existing stored audio, or implement the P6 retention policy. Legacy local queue snippets are not uploaded by the new client, but pre-existing local data is not purged.
+
+Before merging P0b, run the candidate against an isolated test shop on a real phone:
+
+1. Record device/browser version, candidate commit and test time; screen-record Start Listening → a test sale → Stop Listening. Verify transcript capture and microphone release.
+2. Inspect that test capture's network request: no `audio_data`. Confirm its server row has empty `audio_data`, and its receipt/stock movement is correct.
+3. Queue a test transcript, reconnect, and verify it syncs without audio. Repeat with a legacy queued item containing `audio_data`.
+4. Submit a legacy client payload containing a snippet; verify it is discarded while the transcript is retained.
+5. Try a spoken credit phrase and explicit customer attribution; verify an explanatory rejection and no ledger or stock change.
+6. Attach the screen recording (without customer data) and measured observations to the PR. Leave the P0 parent unchecked until this evidence and deployment verification are complete.
