@@ -894,7 +894,7 @@ func TestPilotParksSpokenCreditAndPreservesManualReviewAttribution(t *testing.T)
 	}
 
 	// Missing boundary keeps this ordinary sale in review; no voice credit attribution.
-	cap2Payload := `{"capture_id":"cap_unmatched_02","transcript":"two milo 5000 naira"}`
+	cap2Payload := `{"capture_id":"cap_unmatched_02","transcript":"two milo 5000 naira","extracted_lines":[{"product_name":"Milo 500g","quantity":2,"unit":"piece","amount":{"amount":500000,"currency":"NGN"}}]}`
 	req2 := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewBufferString(cap2Payload))
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
