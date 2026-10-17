@@ -642,3 +642,102 @@ func TestCaptures_PilotRejectsCreditBeforeLedgerWrite(t *testing.T) {
 		})
 	}
 }
+
+// TestCaptures_ReplayedCaptureIDRecordsOnce pins the P4.3 replay contract: a
+// retried POST carrying the same browser-minted capture_id (and the same
+// Idempotency-Key) records exactly one ledger entry and one stock movement.
+func TestCaptures_ReplayedCaptureIDRecordsOnce(t *testing.T) {
+	store, handler, shopID := setupCaptureTest(t)
+	ctx := context.Background()
+
+	// Pair an edge microphone so the capture is authenticated like a real device
+	pairReq := httptest.NewRequest(http.MethodPost, "/api/devices", bytes.NewBufferString(`{"name":"Counter Mic Pi"}`))
+	pairReq.Header.Set("Content-Type", "application/json")
+	pairRec := httptest.NewRecorder()
+	handler.ServeHTTP(pairRec, pairReq)
+	if pairRec.Code != http.StatusCreated {
+		t.Fatalf("pair device failed: %d", pairRec.Code)
+	}
+	var pairRes struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(pairRec.Body.Bytes(), &pairRes); err != nil {
+		t.Fatalf("decode pair response: %v", err)
+	}
+
+	const captureID = "cap_replay_001"
+	body := bytes.NewBufferString(`{
+		"capture_id": "cap_replay_001",
+		"transcript": "Two Milo, four thousand naira. Thank you."
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/captures", body)
+	req.Header.Set("Authorization", "Bearer "+pairRes.Token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", captureID)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for first capture, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var first struct {
+		CaptureID    string               `json:"capture_id"`
+		Transactions []models.Transaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &first); err != nil {
+		t.Fatalf("decode first capture: %v", err)
+	}
+	if first.CaptureID != captureID {
+		t.Fatalf("echoed capture_id mismatch: got %q want %q", first.CaptureID, captureID)
+	}
+	if len(first.Transactions) != 1 || first.Transactions[0].Status != models.StatusConfirmed {
+		t.Fatalf("expected one confirmed transaction, got %+v", first.Transactions)
+	}
+
+	milo, err := store.GetProductByID(ctx, shopID, "prd_milo")
+	if err != nil {
+		t.Fatalf("GetProductByID after first capture: %v", err)
+	}
+	if milo.Quantity != 18 {
+		t.Fatalf("expected Milo stock 18 after first capture, got %d", milo.Quantity)
+	}
+
+	// A retry (network timeout response, accidental double-fire) re-POSTs the
+	// exact same capture id. The server must replay, not double-record.
+	replay := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewBufferString(`{
+		"capture_id": "cap_replay_001",
+		"transcript": "Two Milo, four thousand naira. Thank you."
+	}`))
+	replay.Header.Set("Authorization", "Bearer "+pairRes.Token)
+	replay.Header.Set("Content-Type", "application/json")
+	replay.Header.Set("Idempotency-Key", captureID)
+	replayRec := httptest.NewRecorder()
+	handler.ServeHTTP(replayRec, replay)
+
+	if replayRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK replay for same capture_id, got %d: %s", replayRec.Code, replayRec.Body.String())
+	}
+	var replayRes struct {
+		CaptureID    string               `json:"capture_id"`
+		Transactions []models.Transaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(replayRec.Body.Bytes(), &replayRes); err != nil {
+		t.Fatalf("decode replay response: %v", err)
+	}
+	if len(replayRes.Transactions) != 1 {
+		t.Fatalf("expected replay to return the single existing transaction, got %d", len(replayRes.Transactions))
+	}
+	if replayRes.Transactions[0].ID != first.Transactions[0].ID {
+		t.Fatalf("expected the replayed transaction to be the original, got new id %s", replayRes.Transactions[0].ID)
+	}
+
+	// Stock and ledger must be unchanged by the replay
+	milo, err = store.GetProductByID(ctx, shopID, "prd_milo")
+	if err != nil {
+		t.Fatalf("GetProductByID after replay: %v", err)
+	}
+	if milo.Quantity != 18 {
+		t.Fatalf("replay double-recorded stock: expected 18, got %d", milo.Quantity)
+	}
+}

@@ -207,13 +207,14 @@ async function getJSON<T>(path: string, params?: Record<string, string>, signal?
   return (await response.json()) as T;
 }
 
-async function postJSON<T>(path: string, body?: unknown): Promise<T> {
+async function postJSON<T>(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
   const response = await fetch(path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Accept": "application/json",
       "X-ListenLedger-Request": "1",
+      ...extraHeaders,
     },
     body: body !== undefined ? JSON.stringify(body) : JSON.stringify({}),
   });
@@ -1294,7 +1295,12 @@ export interface CaptureResult {
 export async function postCapture(input: CaptureInput): Promise<CaptureResult> {
   // Strip snippets from stale callers and queued captures as well as live input.
   const { audio_data: _discardedAudio, ...textCapture } = input;
-  return postJSON<CaptureResult>("/api/captures", textCapture);
+  // P4.3: replay safety. A capture id minted in the browser at detection time is
+  // sent both as the body's capture_id and as the Idempotency-Key header, so a
+  // retried POST resolves to the same server-side idempotency keys.
+  return postJSON<CaptureResult>("/api/captures", textCapture, {
+    ...(textCapture.capture_id ? { "Idempotency-Key": textCapture.capture_id } : {}),
+  });
 }
 
 

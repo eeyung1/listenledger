@@ -197,16 +197,11 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.equal(currentState, "listening");
 
     // Simulate speech event with boundary phrase
+    const speechResult = [{ transcript: "Two Peak Milk, seven thousand naira. Thank you.", confidence: 0.92 }];
+    speechResult.isFinal = true; // P4.3: boundary detection acts only on finalized results
     recognitionInstance.onresult({
       resultIndex: 0,
-      results: [
-        [
-          {
-            transcript: "Two Peak Milk, seven thousand naira. Thank you.",
-            confidence: 0.92,
-          },
-        ],
-      ],
+      results: [speechResult],
     });
 
     assert.equal(interimHeard, "Two Peak Milk, seven thousand naira. Thank you.");
@@ -1133,16 +1128,11 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     await new Promise((r) => setTimeout(r, 20));
 
     // Simulate cashier speaking a sale when network is offline
+    const offlineSpeechResult = [{ transcript: "Two Milo four thousand naira thank you", confidence: 0.95 }];
+    offlineSpeechResult.isFinal = true; // P4.3: boundary detection acts only on finalized results
     recognitionInstance.onresult({
       resultIndex: 0,
-      results: [
-        [
-          {
-            transcript: "Two Milo four thousand naira thank you",
-            confidence: 0.95,
-          },
-        ],
-      ],
+      results: [offlineSpeechResult],
     });
 
     await new Promise((r) => setTimeout(r, 40));
@@ -1332,16 +1322,11 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.equal(await listener.exportRecentAudioSnippet(), undefined);
 
     // Simulate recognition boundary event
+    const pilotSpeechResult = [{ transcript: "One peak milk five hundred naira thank you", confidence: 0.95 }];
+    pilotSpeechResult.isFinal = true; // P4.3: boundary detection acts only on finalized results
     recognitionInstance.onresult({
       resultIndex: 0,
-      results: [
-        [
-          {
-            transcript: "One peak milk five hundred naira thank you",
-            confidence: 0.95,
-          },
-        ],
-      ],
+      results: [pilotSpeechResult],
     });
 
     // Await async snippet attachment
@@ -1657,11 +1642,100 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
 
     // The recovered anchors are consumed, so a later standalone closing phrase
     // does not re-merge them. It is emitted on its own (suppressing anchorless
-    // captures is P4.2, tracked separately).
+    // captures is P4.2, tracked separately). The second sale starts a new
+    // recognition session, which is what resets the P4.3 replay guard for the
+    // same result position (done deterministically instead of waiting out the
+    // escalating P4.7 restart delay).
+    recognitionInstance.onend?.();
+    await new Promise((r) => setTimeout(r, 10));
+    listener.stop();
+    await listener.start();
+    await new Promise((r) => setTimeout(r, 20));
     recognitionInstance.onresult({ resultIndex: 0, results: [finalResult("Thank you")] });
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(candidates.length, 2, "a later closing phrase is a separate capture");
     assert.equal(candidates[1].transcript, "Thank you");
+
+    listener.stop();
+  });
+
+  await t.test("24. P4.3 interim results never capture; a final result captures once and a replayed final is ignored", async () => {
+    let recognitionInstance = null;
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionInstance = this;
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const result = (transcript, isFinal) => {
+      const entry = [{ transcript, confidence: 0.9 }];
+      entry.isFinal = isFinal;
+      return entry;
+    };
+
+    const candidates = [];
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      onBoundaryDetected: (cand) => candidates.push(cand),
+    });
+
+    await listener.start();
+
+    // Chrome emits an interim result that already ends in the closing phrase.
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [result("Two Milo, four thousand naira Thank you", false)],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(candidates.length, 0, "an interim result must not record a sale");
+
+    // The finalized result records exactly one sale with a browser capture id.
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [result("Two Milo, four thousand naira Thank you", true)],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(candidates.length, 1, "the final result records the sale");
+    assert.equal(candidates[0].transcript, "Two Milo, four thousand naira Thank you");
+    assert.match(candidates[0].captureId, /^cap_/);
+
+    // Replaying the same finalized result (same position, same results length)
+    // must not record it again.
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [result("Two Milo, four thousand naira Thank you", true)],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(candidates.length, 1, "a replayed final result is ignored");
+
+    // A genuinely new finalized result can record a separate sale. Start a new
+    // recognition session deterministically (the escalating P4.7 restart delay
+    // makes waiting for it flaky); onstart resets the replay guard.
+    recognitionInstance.onend?.();
+    await new Promise((r) => setTimeout(r, 10));
+    listener.stop();
+    await listener.start();
+    await new Promise((r) => setTimeout(r, 20));
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [result("Thank you", true)],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(candidates.length, 2, "a separate sale is recorded");
+    assert.notEqual(candidates[1].captureId, candidates[0].captureId, "each capture gets its own id");
 
     listener.stop();
   });

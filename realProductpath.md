@@ -147,6 +147,7 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 - **Problem:** boundary detection runs on interim results with no `isFinal` check (`audio.ts:807`). Chrome sends an interim result ending in "thank you" before the final one. The online POST sends no `capture_id` or `Idempotency-Key` (`frontend/src/views/home.ts:927`), and the server mints a new ID every time (`backend/api/captures.go:46-52`). Only the offline queue path is idempotent (`frontend/src/offline_queue.ts:398`).
 - **Fix:** act only on final results. Generate the capture ID in the browser at detection time and send it as both `capture_id` and `Idempotency-Key`. Ignore a second boundary for the same result.
 - [ ] **Acceptance:** one spoken sale produces exactly one ledger entry and one stock movement on Android Chrome and iOS Safari.
+- [x] Implementation on branch `feat/p4-3-final-results-idempotent-capture`: boundary detection now runs only when the changed result is final, a replayed final result (same result position + results length in one session) is ignored, the browser mints the capture id at detection time (`audio.ts` `BoundaryCaptureCandidate.captureId`), and the online POST sends it as `capture_id` and `Idempotency-Key` while the offline queue reuses it on sync. Server replay tested end-to-end (`TestCaptures_ReplayedCaptureIDRecordsOnce`); listener tests cover interim-then-final and replayed-final. Real-device acceptance above still gates merge.
 
 ### P4.4 Recognition language is American English
 

@@ -895,6 +895,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
           try {
             await enqueueCapture({
               shop_id: shopId,
+              capture_id: candidate.captureId,
               transcript: candidate.transcript,
               type: candidate.type,
               closing_phrase: candidate.closingPhrase,
@@ -925,6 +926,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
             liveTranscript.textContent = `Processing: "${candidate.transcript}"…`;
           }
           const res = await postCapture({
+            capture_id: candidate.captureId,
             transcript: candidate.transcript,
             type: candidate.type,
             closing_phrase: candidate.closingPhrase,
