@@ -393,7 +393,7 @@ export async function syncOfflineQueue(
       try {
         await markCaptureSyncing(item.queue_id);
         const result = await postCapture({
-          capture_id: item.queue_id,
+          capture_id: item.capture_id || item.queue_id,
           transcript: item.transcript,
           type: item.type,
           closing_phrase: item.closing_phrase,

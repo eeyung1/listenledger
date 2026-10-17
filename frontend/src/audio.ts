@@ -17,6 +17,11 @@ export interface BoundaryCaptureCandidate {
   readonly type: TransactionType | "cancelled";
   readonly closingPhrase: string;
   readonly audioData?: string | undefined;
+  /**
+   * Browser-generated id assigned at detection time. Sent as both `capture_id`
+   * and `Idempotency-Key` so a retried POST cannot record the same sale twice.
+   */
+  readonly captureId: string;
 }
 
 export interface BoundaryDetectionResult {
@@ -239,6 +244,25 @@ export function detectClosingBoundary(
 export interface TranscriptUtterance {
   readonly text: string;
   readonly at: number;
+}
+
+/**
+ * Generates the capture id in the browser at detection time (P4.3). Sent as both
+ * `capture_id` and `Idempotency-Key` so a retried POST cannot record one spoken
+ * sale twice. Falls back to a timestamp+random suffix when `crypto.randomUUID`
+ * is unavailable.
+ */
+export function generateCaptureId(now: number = Date.now()): string {
+  const cryptoObj = typeof crypto !== "undefined" ? crypto : undefined;
+  if (typeof cryptoObj?.randomUUID === "function") {
+    try {
+      return `cap_${cryptoObj.randomUUID()}`;
+    } catch {
+      // fall through to the deterministic fallback
+    }
+  }
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `cap_${now.toString(36)}_${rand}`;
 }
 
 /**
@@ -583,6 +607,12 @@ export class CounterSpeechListener {
   private speechUtterances: TranscriptUtterance[] = [];
   private currentSessionFinalText = "";
 
+  // Identity of the finalized result whose boundary was already detected, so a
+  // replayed final result does not record the same sale twice (P4.3). Reset on
+  // every new recognition session (onstart).
+  private lastBoundaryResultIndex = -1;
+  private lastBoundaryResultsLength = -1;
+
   // Ambient Voice Activity Detection (VAD) & Adaptive Silence State
   private vadNoiseFloor = 0.05;
   private vadSpeechThreshold = 0.12;
@@ -905,6 +935,10 @@ export class CounterSpeechListener {
 
     recognition.onstart = () => {
       this.recognitionStartedAt = Date.now();
+      // A new recognition session delivers a fresh results array, so a boundary
+      // guard keyed on the previous session's result positions no longer applies.
+      this.lastBoundaryResultIndex = -1;
+      this.lastBoundaryResultsLength = -1;
       if (!this.isExplicitlyStopped) {
         this.setState("listening");
       }
@@ -934,6 +968,24 @@ export class CounterSpeechListener {
       this.currentTranscript = text;
       this.options.onInterimTranscript?.(text);
 
+      // P4.3: act only on finalized results. Chrome emits an interim result that
+      // can already end in the closing phrase before the final one; running
+      // boundary detection on interim text recorded the same sale twice.
+      const changedResult = event.results[event.resultIndex];
+      if (!changedResult?.isFinal) {
+        return;
+      }
+
+      // P4.3: ignore a second boundary for the same finalized result. A replayed
+      // result keeps both its position and the results-array length; a genuinely
+      // new result changes at least one of the two.
+      if (
+        event.resultIndex === this.lastBoundaryResultIndex &&
+        event.results.length === this.lastBoundaryResultsLength
+      ) {
+        return;
+      }
+
       const boundary = detectClosingBoundary(
         text,
         this.options.salePhrase ?? "thank you",
@@ -958,10 +1010,14 @@ export class CounterSpeechListener {
         this.speechUtterances = [];
         this.currentSessionFinalText = "";
 
+        this.lastBoundaryResultIndex = event.resultIndex;
+        this.lastBoundaryResultsLength = event.results.length;
+
         this.options.onBoundaryDetected?.({
           transcript: assembled,
           type: boundaryType,
           closingPhrase: phrase,
+          captureId: generateCaptureId(),
         });
       }
     };
