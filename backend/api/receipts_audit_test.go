@@ -816,7 +816,7 @@ func TestCompoundMultiItemCaptureE2E(t *testing.T) {
 	}
 }
 
-func TestSpokenCustomerCreditAttributionAndDebt(t *testing.T) {
+func TestPilotParksSpokenCreditAndPreservesManualReviewAttribution(t *testing.T) {
 	store, handler, shopID := setupTestApp(t)
 	ctx := context.Background()
 
@@ -857,36 +857,8 @@ func TestSpokenCustomerCreditAttributionAndDebt(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201 Created for voice credit sale, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var capResp struct {
-		CaptureID      string               `json:"capture_id"`
-		ReceiptID      string               `json:"receipt_id"`
-		Transactions   []models.Transaction `json:"transactions"`
-		RequiresReview bool                 `json:"requires_review"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&capResp); err != nil {
-		t.Fatal(err)
-	}
-
-	if capResp.RequiresReview {
-		t.Fatalf("expected confirmed credit sale without review")
-	}
-	if len(capResp.Transactions) != 1 {
-		t.Fatalf("expected 1 transaction, got %d", len(capResp.Transactions))
-	}
-
-	txn := capResp.Transactions[0]
-	if txn.CustomerID != "cust_emeka_01" {
-		t.Errorf("expected customer_id cust_emeka_01, got %q", txn.CustomerID)
-	}
-	if txn.CustomerName != "Emeka Okafor" {
-		t.Errorf("expected customer_name Emeka Okafor, got %q", txn.CustomerName)
-	}
-	if txn.Status != models.StatusConfirmed {
-		t.Errorf("expected status confirmed, got %s", txn.Status)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for parked voice credit sale, got %d: %s", w.Code, w.Body.String())
 	}
 
 	// 4. Verify customer's outstanding balance in credit book
@@ -894,8 +866,8 @@ func TestSpokenCustomerCreditAttributionAndDebt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if emeka.OutstandingBalance.Amount != 500000 {
-		t.Errorf("expected Emeka's balance to increase by 500,000 kobo (5,000 NGN), got %d", emeka.OutstandingBalance.Amount)
+	if emeka.OutstandingBalance.Amount != 0 {
+		t.Errorf("parked credit changed Emeka's balance, got %d", emeka.OutstandingBalance.Amount)
 	}
 
 	// 5. Verify customer debts ledger record
@@ -903,20 +875,11 @@ func TestSpokenCustomerCreditAttributionAndDebt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 || len(debts) != 1 {
-		t.Fatalf("expected 1 debt record for Emeka, got count %d, len %d", count, len(debts))
-	}
-	if debts[0].Type != models.DebtTypeCreditSale {
-		t.Errorf("expected debt type credit_sale, got %s", debts[0].Type)
-	}
-	if debts[0].Amount.Amount != 500000 {
-		t.Errorf("expected debt amount 500,000, got %d", debts[0].Amount.Amount)
-	}
-	if debts[0].ReceiptRef != "cap_voice_credit_01" {
-		t.Errorf("expected ReceiptRef cap_voice_credit_01, got %q", debts[0].ReceiptRef)
+	if count != 0 || len(debts) != 0 {
+		t.Fatalf("parked credit wrote debts: count %d, len %d", count, len(debts))
 	}
 
-	// 6. Test Unmatched Customer on credit sale -> review required, then confirm with customer assignment
+	// 6. Preserve manual attribution of an ordinary review capture to an existing customer.
 	err = store.CreateCustomer(ctx, models.Customer{
 		ID:                 "cust_ngozi_01",
 		ShopID:             shopID,
@@ -930,8 +893,8 @@ func TestSpokenCustomerCreditAttributionAndDebt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Unmatched customer "Stranger"
-	cap2Payload := `{"capture_id":"cap_unmatched_02","transcript":"two milo 5000 naira for Stranger on credit thank you"}`
+	// Missing boundary keeps this ordinary sale in review; no voice credit attribution.
+	cap2Payload := `{"capture_id":"cap_unmatched_02","transcript":"two milo 5000 naira"}`
 	req2 := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewBufferString(cap2Payload))
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
