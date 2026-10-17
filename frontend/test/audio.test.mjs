@@ -4,6 +4,9 @@ import fs from "node:fs";
 import { setupDOMEnvironment, MockEvent } from "./test_dom.mjs";
 import {
   detectClosingBoundary,
+  utteranceHasAnchors,
+  assembleCaptureTranscript,
+  DEFAULT_ANCHOR_LOOKBACK_MS,
   isSpeechRecognitionSupported,
   isAudioCaptureSupported,
   isWakeLockSupported,
@@ -1546,6 +1549,121 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
 
     assert.equal(startCount, startsAfterStart, "no restart fires after stop()");
     delete window.SpeechRecognition;
+  });
+
+  await t.test("22. P4.1 assembleCaptureTranscript & utteranceHasAnchors: recover anchors across a payment pause", () => {
+    // Anchor detection: quantity/amount words and digits anchor; closing phrases do not.
+    assert.equal(utteranceHasAnchors("Two Milo, four thousand naira"), true);
+    assert.equal(utteranceHasAnchors("seven thousand"), true);
+    assert.equal(utteranceHasAnchors("₦5,000"), true);
+    assert.equal(utteranceHasAnchors("Thank you"), false);
+    assert.equal(utteranceHasAnchors(""), false);
+
+    // Closing utterance already carries anchors: used verbatim.
+    assert.equal(
+      assembleCaptureTranscript([], "Two Milo four thousand naira Thank you", 1_000),
+      "Two Milo four thousand naira Thank you",
+    );
+
+    // Standalone closing phrase recovers the most recent anchor utterance.
+    assert.equal(
+      assembleCaptureTranscript(
+        [{ text: "Two Milo, four thousand naira", at: 1_000 }],
+        "Thank you",
+        2_000,
+      ),
+      "Two Milo, four thousand naira Thank you",
+    );
+
+    // Does not duplicate a closing phrase already at the end of the buffered text.
+    assert.equal(
+      assembleCaptureTranscript(
+        [{ text: "Two Milo four thousand naira Thank you", at: 1_000 }],
+        "Thank you",
+        2_000,
+      ),
+      "Two Milo four thousand naira Thank you",
+    );
+
+    // Anchors older than the look-back window are ignored; only the closing phrase remains.
+    assert.equal(
+      assembleCaptureTranscript(
+        [{ text: "Two Milo, four thousand naira", at: 1_000 }],
+        "Thank you",
+        1_000 + DEFAULT_ANCHOR_LOOKBACK_MS + 1,
+      ),
+      "Thank you",
+    );
+
+    // No anchors anywhere: closing phrase returned unchanged.
+    assert.equal(
+      assembleCaptureTranscript([{ text: "Good morning", at: 1_000 }], "Thank you", 2_000),
+      "Thank you",
+    );
+  });
+
+  await t.test("23. P4.1 CounterSpeechListener: a pause before the closing phrase does not lose the sale", async () => {
+    let recognitionInstance = null;
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionInstance = this;
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const finalResult = (transcript) => {
+      const r = [{ transcript, confidence: 0.9 }];
+      r.isFinal = true;
+      return r;
+    };
+
+    const candidates = [];
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      restockPhrase: "Stock received",
+      onBoundaryDetected: (cand) => candidates.push(cand),
+    });
+
+    await listener.start();
+
+    // Session 1: the cashier states the anchors, no closing phrase yet.
+    recognitionInstance.onresult({ resultIndex: 0, results: [finalResult("Two Milo, four thousand naira ")] });
+    assert.equal(candidates.length, 0, "no capture until a closing phrase arrives");
+
+    // The session ends (pause while the customer pays) and recognition restarts.
+    recognitionInstance.onend?.();
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Session 2: a standalone closing phrase with no anchors.
+    recognitionInstance.onresult({ resultIndex: 0, results: [finalResult("Thank you")] });
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.equal(candidates.length, 1, "exactly one sale is recorded");
+    assert.equal(candidates[0].type, "sale");
+    assert.equal(candidates[0].closingPhrase, "Thank you");
+    assert.equal(candidates[0].transcript, "Two Milo, four thousand naira Thank you");
+
+    // The recovered anchors are consumed, so a later standalone closing phrase
+    // does not re-merge them. It is emitted on its own (suppressing anchorless
+    // captures is P4.2, tracked separately).
+    recognitionInstance.onresult({ resultIndex: 0, results: [finalResult("Thank you")] });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(candidates.length, 2, "a later closing phrase is a separate capture");
+    assert.equal(candidates[1].transcript, "Thank you");
+
+    listener.stop();
   });
 });
 

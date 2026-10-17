@@ -134,6 +134,7 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 - **Problem:** `onresult` only gathers text from `event.resultIndex` onward (`frontend/src/audio.ts:794`). The protocol has a natural pause while the customer pays, which splits the speech into separate results or sessions (restart at `audio.ts:870-885`). The capture fires with the transcript "Thank you" alone, and the product, quantity and amount are never sent.
 - **Fix:** keep a rolling, timestamped buffer of final results across results and sessions. When a closing phrase arrives, look back over a window (for example 60 seconds) for the most recent utterance containing anchors. Alternatively, detect anchor-bearing utterances directly and treat the closing phrase as optional confirmation.
 - [ ] **Acceptance:** on a real phone, saying "Two Milo, four thousand naira", waiting 10 seconds, then saying "Thank you" records exactly one correct sale.
+- [x] Implementation on branch `feat/p4-1-rolling-transcript-buffer`: `onresult` now reads the full session transcript, keeps a bounded rolling buffer of finalized utterances across results and restarts, and looks back (default 60s) for the most recent anchor-bearing utterance when the closing phrase arrives alone. Covered by automated unit and listener regression tests. Real-device acceptance above still gates merge; no phone evidence yet.
 
 ### P4.2 Every "thank you" creates a review item — critical
 
