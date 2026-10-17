@@ -458,6 +458,15 @@ export function speakFeedback(text: string, options: SpeakFeedbackOptions = {}):
   }
 }
 
+// Recognition restart backoff (see CounterSpeechListener.onend).
+// Sessions shorter than RESTART_BACKOFF_RESET_MS count as failures; a session
+// that lasted at least that long is a normal browser timeout and resets the
+// escalation. RESTART_BASE_DELAY_MS doubles per failure up to RESTART_MAX_DELAY_MS.
+const RESTART_BASE_DELAY_MS = 150;
+const RESTART_MAX_DELAY_MS = 5000;
+const RESTART_BACKOFF_RESET_MS = 5000;
+const MAX_RESTART_FAILURES = 5;
+
 /**
  * Continuous Counter Ambient Speech Listener.
  *
@@ -479,6 +488,15 @@ export class CounterSpeechListener {
   private wakeLockSentinel: WakeLockSentinelLike | null = null;
   private onVisibilityChangeBound: (() => void) | null = null;
   private catalogueWords: string[] = [];
+
+  // Recognition restart backoff. Chrome and mobile Safari end the recognition
+  // session on their own (silence timeouts, tab backgrounding, network drops).
+  // Restarting flat-out every 150 ms produces a beep loop on Android when
+  // `start()` keeps failing, so escalate the delay and give up loudly after
+  // MAX_RESTART_FAILURES consecutive sessions that never actually ran.
+  private restartFailures = 0;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private recognitionStartedAt = 0;
 
   // Ambient Voice Activity Detection (VAD) & Adaptive Silence State
   private vadNoiseFloor = 0.05;
@@ -647,6 +665,9 @@ export class CounterSpeechListener {
   /** Stops counter speech listening, releases wake lock, and cleans up audio streams. */
   public stop(): void {
     this.isExplicitlyStopped = true;
+    this.clearRestartTimer();
+    this.restartFailures = 0;
+    this.recognitionStartedAt = 0;
 
     if (this.recognition) {
       try {
@@ -665,6 +686,13 @@ export class CounterSpeechListener {
     this.vadIsSpeaking = false;
     this.vadIsCalibrating = false;
     this.setState("idle");
+  }
+
+  private clearRestartTimer(): void {
+    if (this.restartTimer !== null) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
   }
 
   private setState(state: CounterListenerState): void {
@@ -761,6 +789,7 @@ export class CounterSpeechListener {
     this.applyGrammar(recognition);
 
     recognition.onstart = () => {
+      this.recognitionStartedAt = Date.now();
       if (!this.isExplicitlyStopped) {
         this.setState("listening");
       }
@@ -826,19 +855,43 @@ export class CounterSpeechListener {
 
     recognition.onend = () => {
       // If recognition stopped unexpectedly (e.g. mobile browser timeout) and user hasn't stopped it:
-      if (!this.isExplicitlyStopped) {
-        setTimeout(() => {
-          if (!this.isExplicitlyStopped) {
-            try {
-              this.recognition?.start();
-            } catch {
-              // will restart on next frame
-            }
-          }
-        }, 150);
-      } else {
+      if (this.isExplicitlyStopped) {
         this.setState("idle");
+        return;
       }
+
+      // A session that stayed up for a while is a normal timeout, not a failure
+      // loop, so the next restart goes back to the short delay.
+      const sessionMs = this.recognitionStartedAt > 0 ? Date.now() - this.recognitionStartedAt : 0;
+      if (sessionMs >= RESTART_BACKOFF_RESET_MS) {
+        this.restartFailures = 0;
+      }
+
+      if (this.restartFailures >= MAX_RESTART_FAILURES) {
+        this.setState("error");
+        this.options.onError?.(
+          new Error(
+            "Voice listening stopped repeatedly and is no longer retrying. Check the connection, then tap Retry Listening.",
+          ),
+        );
+        return;
+      }
+
+      const delayMs = Math.min(
+        RESTART_BASE_DELAY_MS * 2 ** this.restartFailures,
+        RESTART_MAX_DELAY_MS,
+      );
+      this.restartFailures++;
+      this.clearRestartTimer();
+      this.restartTimer = setTimeout(() => {
+        this.restartTimer = null;
+        if (this.isExplicitlyStopped) return;
+        try {
+          this.recognition?.start();
+        } catch {
+          // onend fires again and the next backoff step is scheduled
+        }
+      }, delayMs);
     };
 
     this.recognition = recognition;
