@@ -554,7 +554,7 @@ func TestCaptures_NigerianMarketColloquialIntake(t *testing.T) {
 	}
 }
 
-func TestCaptures_AudioSnippetPreservationAndPlayback(t *testing.T) {
+func TestCaptures_PilotDiscardsAudioFromStaleClients(t *testing.T) {
 	store, handler, shopID := setupCaptureTest(t)
 	ctx := context.Background()
 
@@ -590,8 +590,8 @@ func TestCaptures_AudioSnippetPreservationAndPlayback(t *testing.T) {
 	}
 
 	txn := capRes.Transactions[0]
-	if txn.AudioData != audioSnippet {
-		t.Errorf("expected AudioData %q, got %q", audioSnippet, txn.AudioData)
+	if txn.AudioData != "" {
+		t.Errorf("pilot response retained raw audio: %q", txn.AudioData)
 	}
 
 	// Verify retrieval via GetTransactionByID
@@ -599,7 +599,46 @@ func TestCaptures_AudioSnippetPreservationAndPlayback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTransactionByID failed: %v", err)
 	}
-	if dbTxn.AudioData != audioSnippet {
-		t.Errorf("expected stored AudioData %q, got %q", audioSnippet, dbTxn.AudioData)
+	if dbTxn.AudioData != "" {
+		t.Errorf("pilot storage retained raw audio: %q", dbTxn.AudioData)
+	}
+}
+
+func TestCaptures_PilotRejectsCreditBeforeLedgerWrite(t *testing.T) {
+	for _, payload := range []string{
+		`{"transcript":"Two Milo, four thousand naira. Thank you.","is_credit_sale":true}`,
+		`{"transcript":"Two Milo, four thousand naira. Thank you.","customer_id":"cus_existing"}`,
+		`{"transcript":"Two Milo, four thousand naira. Thank you.","customer_name":"Emeka"}`,
+		`{"transcript":"Two Milo on credit, thank you"}`,
+	} {
+		t.Run(payload, func(t *testing.T) {
+			store, handler, shopID := setupCaptureTest(t)
+			req := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewBufferString(payload))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-ListenLedger-Request", "1")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("expected parked credit rejection, got %d: %s", rec.Code, rec.Body.String())
+			}
+			product, err := store.GetProductByID(context.Background(), shopID, "prd_milo")
+			if err != nil || product.Quantity != 20 {
+				t.Fatalf("rejected credit changed inventory: %+v, %v", product, err)
+			}
+			ledger := httptest.NewRecorder()
+			handler.ServeHTTP(ledger, httptest.NewRequest(http.MethodGet, "/api/transactions", nil))
+			var result struct {
+				Transactions []models.Transaction `json:"transactions"`
+			}
+			if ledger.Code != http.StatusOK {
+				t.Fatalf("read ledger: %d", ledger.Code)
+			}
+			if err := json.Unmarshal(ledger.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Transactions) != 0 {
+				t.Fatalf("rejected credit wrote ledger: %+v", result.Transactions)
+			}
+		})
 	}
 }
