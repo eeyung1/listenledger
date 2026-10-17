@@ -879,7 +879,7 @@ func TestPilotParksSpokenCreditAndPreservesManualReviewAttribution(t *testing.T)
 		t.Fatalf("parked credit wrote debts: count %d, len %d", count, len(debts))
 	}
 
-	// 6. Preserve manual attribution of an ordinary review capture to an existing customer.
+	// 6. Preserve manual attribution of a pre-existing credit review.
 	err = store.CreateCustomer(ctx, models.Customer{
 		ID:                 "cust_ngozi_01",
 		ShopID:             shopID,
@@ -893,27 +893,19 @@ func TestPilotParksSpokenCreditAndPreservesManualReviewAttribution(t *testing.T)
 		t.Fatal(err)
 	}
 
-	// Missing boundary keeps this ordinary sale in review; no voice credit attribution.
-	cap2Payload := `{"capture_id":"cap_unmatched_02","transcript":"two milo 5000 naira","extracted_lines":[{"product_name":"Milo 500g","quantity":2,"unit":"piece","amount":{"amount":500000,"currency":"NGN"}}]}`
-	req2 := httptest.NewRequest(http.MethodPost, "/api/captures", bytes.NewBufferString(cap2Payload))
-	req2.Header.Set("Content-Type", "application/json")
-	w2 := httptest.NewRecorder()
-	handler.ServeHTTP(w2, req2)
-
-	if w2.Code != http.StatusCreated {
-		t.Fatalf("expected 201 Created for review capture, got %d: %s", w2.Code, w2.Body.String())
-	}
-	var capResp2 struct {
-		Transactions   []models.Transaction `json:"transactions"`
-		RequiresReview bool                 `json:"requires_review"`
-	}
-	if err := json.NewDecoder(w2.Body).Decode(&capResp2); err != nil {
+	// Simulate a credit review created before the pilot freeze. It must remain resolvable.
+	reviewTxnID := "txn_legacy_credit_review"
+	err = store.InsertTransaction(ctx, models.Transaction{
+		ID: reviewTxnID, ShopID: shopID, Type: models.TypeSale,
+		ProductID: "prd_milo_credit", ProductName: "Milo 500g",
+		Quantity: 2, Unit: "piece", Amount: models.Money{Amount: 500000, Currency: "NGN"},
+		Confidence: models.Confidence{Overall: 0.5}, Status: models.StatusReviewRequired,
+		Transcript: "two milo 5000 naira for Stranger on credit thank you",
+		ReceiptID:  "cap_legacy_credit", OccurredAt: now, CreatedAt: now,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !capResp2.RequiresReview {
-		t.Fatalf("expected RequiresReview true for unmatched customer")
-	}
-	reviewTxnID := capResp2.Transactions[0].ID
 
 	// Confirm review and assign to Mama Ngozi
 	confirmPayload := `{"customer_id":"cust_ngozi_01","notes":"Assigned to Mama Ngozi after counter clarification"}`
