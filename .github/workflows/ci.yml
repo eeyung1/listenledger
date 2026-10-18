@@ -6,6 +6,17 @@ on:
 permissions:
   contents: read
 jobs:
+  coordination:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate migration versions and dialect parity
+        run: python3 scripts/agent_coordination.py migrations
+      - name: Verify atomic claims and collision rejection
+        run: python3 -m unittest discover -s scripts -p "test_agent_coordination.py"
   backend:
     runs-on: ubuntu-latest
     services:

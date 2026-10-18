@@ -151,6 +151,8 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 
 ### P4.4 Recognition language is American English
 
+- [x] Configurable language implementation: canonical PR #56 (`56166be`, opencode) persists `recognition_language`, exposes a Settings input, and wires the counter listener/readback. Codex's duplicate local implementation is withdrawn; keep only PR #56's migration 0014 per dialect. Default stays en-US pending P2 evidence. Implementation is prepared, not merged or field-accepted.
+
 - **Problem:** `recognition.lang = "en-US"` (`audio.ts:781`). Voice readback is also `en-US` (`audio.ts:450`).
 - **Fix:** make the recognition language a shop setting, defaulting to the P2 winner (likely `en-NG`).
 - [ ] **Acceptance:** the language is configurable, and the default is backed by P2 results.
