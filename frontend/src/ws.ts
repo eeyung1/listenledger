@@ -9,6 +9,8 @@
  * authority for both. Adding an event type means adding it in both places.
  */
 
+import { installConnectionBanner } from "./ui_state.js";
+
 /** Must match ws.ProtocolVersion on the server. */
 export const PROTOCOL_VERSION = 1;
 
@@ -124,6 +126,21 @@ export class ListenLedgerSocket {
     if (this.socket !== null) return;
     this.closedByCaller = false;
     this.openSocket("connecting");
+  }
+
+  /**
+   * Reconnects immediately, cancelling any pending backoff.
+   *
+   * This backs the disconnected banner's Retry action: without cancelling the
+   * timer, a retry that succeeded would race the scheduled reconnect and open a
+   * second socket, leaking the first.
+   */
+  retry(): void {
+    if (this.socket !== null) return;
+    this.closedByCaller = false;
+    this.cancelReconnect();
+    this.attempt = 0;
+    this.openSocket("reconnecting");
   }
 
   /** Closes the connection for good: no reconnect will be scheduled. */
@@ -314,9 +331,16 @@ let activeSocket: ListenLedgerSocket | null = null;
  */
 export function startSocket(shopId: string): ListenLedgerSocket {
   if (activeSocket !== null) return activeSocket;
-  activeSocket = new ListenLedgerSocket({ shopId });
-  activeSocket.connect();
-  return activeSocket;
+  const socket = new ListenLedgerSocket({ shopId });
+  activeSocket = socket;
+  // Installed here rather than in the router so the banner cannot be added
+  // without the connection whose state it reports.
+  installConnectionBanner(document, {
+    eventName: CONNECTION_STATUS_EVENT,
+    onRetry: () => socket.retry(),
+  });
+  socket.connect();
+  return socket;
 }
 
 export function getSocket(): ListenLedgerSocket | null {

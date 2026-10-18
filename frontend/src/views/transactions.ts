@@ -50,6 +50,7 @@ import {
   sortTransactions,
 } from "../format.js";
 import { CONNECTION_STATUS_EVENT, getSocket, type ConnectionStatusDetail } from "../ws.js";
+import { uiStateItem, uiStateRow } from "../ui_state.js";
 import type { ViewCleanup } from "./index.js";
 
 interface Filters {
@@ -365,7 +366,12 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     setText(reviewCount, String(heldTransactions.length));
 
     if (heldTransactions.length === 0) {
-      reviewQueue.append(el("li", "review-list__empty", "Nothing waiting on you."));
+      reviewQueue.append(
+        uiStateItem("empty", {
+          title: "Nothing waiting on you.",
+          detail: "Low-confidence captures land here for a quick decision.",
+        }),
+      );
       return;
     }
     for (const transaction of heldTransactions) {
@@ -441,11 +447,26 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     }
 
     if (transactions.length === 0) {
-      const row = el("tr", "table__empty");
-      const cellElement = cell("", "No transactions match these filters.");
-      cellElement.colSpan = 8;
-      row.append(cellElement);
-      ledgerBody.append(row);
+      const filtered =
+        filters.type !== "" ||
+        filters.status !== "" ||
+        filters.receipt_id !== "" ||
+        (filters.customer_id ?? "") !== "";
+      ledgerBody.append(
+        uiStateRow(
+          "empty",
+          filtered
+            ? {
+                title: "No transactions match these filters.",
+                detail: "Clear a filter to see more of the ledger.",
+              }
+            : {
+                title: "No transactions recorded yet.",
+                detail: "Sales and restocks appear here as they are captured.",
+              },
+          8,
+        ),
+      );
       return;
     }
     for (const transaction of transactions) {
@@ -502,12 +523,24 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       console.error("ListenLedger: could not load transactions", error);
       if (ledgerBody !== null) {
         clear(ledgerBody);
-        const row = el("tr", "table__empty");
-        const cellElement = cell("", "Could not reach the server. Retrying on reconnect.");
-        cellElement.className = "table__error";
-        cellElement.colSpan = 8;
-        row.append(cellElement);
-        ledgerBody.append(row);
+        ledgerBody.append(
+          uiStateRow(
+            "error",
+            {
+              title: "Could not load the ledger.",
+              detail: "We'll retry automatically when the connection returns.",
+              actionLabel: "Retry",
+              onAction: () => {
+                void refetch();
+              },
+            },
+            8,
+          ),
+        );
+      }
+      if (reviewQueue !== null) {
+        clear(reviewQueue);
+        reviewQueue.append(uiStateItem("error", { title: "Could not load the review queue." }));
       }
     }
   }

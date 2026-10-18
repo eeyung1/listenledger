@@ -48,7 +48,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 - [x] F02. Build the desktop sidebar and shop/account top bar with active navigation and accessible labels.
 - [ ] F03. Build mobile bottom navigation and More menu with safe-area spacing, usable close behaviour, and no content obstruction.
 - [ ] F04. Register the new page routes and lifecycle handlers; preserve old links, browser back/forward, page titles, and unknown-route handling. Do not ship dead navigation entries.
-- [ ] F05. Standardize loading, empty, validation, failed-save, and disconnected states with useful recovery actions.
+- [x] F05. Standardize loading, empty, validation, failed-save, and disconnected states with useful recovery actions.
 - [ ] F06. Verify shared shell at 360, 390, 768, and 1440px, including keyboard navigation and no page-level horizontal overflow.
 
 ## Phase 2 — Home and Counter
@@ -129,8 +129,11 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 | Planning document | [PR #39](https://github.com/eeyung1/listenledger/pull/39) | All four CI jobs passed before merge | Not applicable; no UI change | Plan established |
 | F01 | [PR #40](https://github.com/eeyung1/listenledger/pull/40) | Typecheck/build and 63 existing frontend tests passed; exact-head repository CI required before merge | Chromium rendered-template checks at 360/390/768/1440px for four current pages and Customer Book dialog; viewport containment, 44px button sizing, button alias parity, reduced motion, screenshots | Empty/intercepted test responses; not full authenticated or physical microphone acceptance. New shell, per-page layouts, modal focus lifecycle, and real-device checks remain pending. |
 | F02 | PR #43 | Typecheck/build and all 73 frontend tests passed (including 5 shell nav tests); repository CI required before merge | Shell navigation unit and DOM rendering tests verify sidebar and mobile stand-in nav | Mobile bottom navigation (F03) and route additions (F04) to follow in subsequent PRs |
+| F05 | [PR #58](https://github.com/eeyung1/listenledger/pull/58) | `npm run typecheck --prefix frontend`; `npm test --prefix frontend` (90 tests, 0 failures) | Unit tests cover the shared state blocks, form status, connection labels and the disconnected banner lifecycle; integration tests mount Inventory (failed load → shared error + Retry; empty catalogue → next step) and Transactions (empty review queue and ledger) | Automated DOM checks only; the banner and states have not been inspected at real viewports or on a device (F06/F40) |
 
 ## Next action
 
 Do not proceed to F03 during the product feature freeze. Next: finish P0 in realProductpath.md, then collect P1 field evidence. Resume this redesign only when the product gates permit it. Tick only completed and verified items.
+
+Owner directive (2026-10-18) authorizes resuming the existing `frontreadme.md` checklist while the real-product field gates remain in progress. This does not waive any P0–P7 evidence, privacy, or device-acceptance requirements and does not authorize unrelated milestones. Continue with F04 only when the planned routes can be implemented end-to-end without dead navigation; tick items only after implementation and relevant verification.
 

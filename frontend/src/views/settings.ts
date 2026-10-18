@@ -29,6 +29,7 @@ import {
 } from "../api.js";
 import { clear, el, formatDate, hook, setText } from "../format.js";
 import { CONNECTION_STATUS_EVENT, type ConnectionStatusDetail } from "../ws.js";
+import { setFormStatus, uiStateItem } from "../ui_state.js";
 import type { ViewCleanup } from "./index.js";
 
 export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
@@ -94,7 +95,12 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     clear(deviceList);
 
     if (devices.length === 0) {
-      deviceList.append(el("li", "device-list__empty", "No edge capture devices paired yet."));
+      deviceList.append(
+        uiStateItem("empty", {
+          title: "No edge capture devices paired yet.",
+          detail: "Pairing is optional — a phone microphone works on its own.",
+        }),
+      );
       return;
     }
 
@@ -253,7 +259,12 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
       clear(recList);
 
       if (res.reconciliations.length === 0) {
-        recList.append(el("li", "reconciliation-list__empty", "No reconciliation audits performed yet."));
+        recList.append(
+          uiStateItem("empty", {
+            title: "No reconciliation audits performed yet.",
+            detail: "Audits you run in Advanced/Pilot appear here with their discrepancies.",
+          }),
+        );
         return;
       }
 
@@ -328,10 +339,11 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     } catch (err: unknown) {
       if (disposed || signal.aborted) return;
       console.error("Failed to load settings:", err);
-      if (settingsStatus) {
-        settingsStatus.hidden = false;
-        settingsStatus.textContent = "Could not load settings. Retrying on reconnect.";
-      }
+      setFormStatus(
+        settingsStatus,
+        "error",
+        "Could not load settings. We'll retry when the connection returns.",
+      );
     }
   }
 
@@ -347,8 +359,7 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     if (!settingsForm || !saveBtn || !settingsStatus) return;
 
     saveBtn.disabled = true;
-    settingsStatus.hidden = false;
-    settingsStatus.textContent = "Saving…";
+    setFormStatus(settingsStatus, "info", "Saving…");
 
     try {
       const updated = await updateSettings({
@@ -360,12 +371,16 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
         restock_phrase: restockPhraseInput?.value.trim(),
       });
       populateForm(updated);
-      settingsStatus.textContent = "Settings saved successfully.";
+      setFormStatus(settingsStatus, "success", "Settings saved successfully.");
       setTimeout(() => {
         if (!disposed && settingsStatus) settingsStatus.hidden = true;
       }, 3000);
     } catch (err: unknown) {
-      settingsStatus.textContent = err instanceof Error ? err.message : "Save failed";
+      setFormStatus(
+        settingsStatus,
+        "error",
+        err instanceof Error ? err.message : "Save failed",
+      );
     } finally {
       saveBtn.disabled = false;
     }

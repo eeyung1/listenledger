@@ -119,8 +119,10 @@
     -->
     <ul class="feed" data-hook="live-feed">
       <!-- data-hook: empty state, hidden once the first event arrives -->
-      <li class="feed__empty" data-hook="live-feed-empty">
-        Waiting for the first transaction.
+      <li class="ui-state ui-state--empty" data-state="empty" role="status" data-hook="live-feed-empty">
+        <span class="ui-state__icon" aria-hidden="true">○</span>
+        <p class="ui-state__title">Waiting for the first transaction.</p>
+        <p class="ui-state__detail">Captured sales and restocks appear here as they are recorded.</p>
       </li>
     </ul>
   </section>
@@ -128,8 +130,10 @@
   <section class="panel" aria-labelledby="low-stock-heading">
     <h2 class="panel__title" id="low-stock-heading">Low stock</h2>
     <ul class="alert-list" data-hook="low-stock-list">
-      <li class="alert-list__empty" data-hook="low-stock-empty">
-        Nothing below its reorder level.
+      <li class="ui-state ui-state--empty" data-state="empty" role="status" data-hook="low-stock-empty">
+        <span class="ui-state__icon" aria-hidden="true">○</span>
+        <p class="ui-state__title">Nothing below its reorder level.</p>
+        <p class="ui-state__detail">Products appear here as their stock runs low.</p>
       </li>
     </ul>
   </section>
