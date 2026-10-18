@@ -25,6 +25,8 @@ P4.4's canonical implementation is [PR #56](https://github.com/eeyung1/listenled
 
 Concurrent contributors must follow [AGENTS.md](AGENTS.md): use an isolated worktree, acquire an atomic feature/file claim through [the coordination tool](scripts/agent_coordination.py), and reserve migration versions before creating files. Claims and reservations live in the primary checkout's shared meeting log; all worktrees use the same OS lock. Run `python3 scripts/agent_coordination.py migrations` before committing migrations. CI checks duplicate versions, dialect parity, and competing claim behavior. Coordination tooling is separate from the unrelated LangGraph orchestrator.
 
+Account access now presents explicit **Sign in**, **Create account**, and **Recover account** actions with contextual fields and submit labels (frontend F36). Recovery still requires the saved private code and acknowledgement of its replacement before entering the shop. Pending requests lock account actions and prevent duplicate submission; failed requests allow retry. Automated DOM/API regressions cover these flows; hosted and real-browser acceptance remain pending.
+
 Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 
 **Stage: ledger/dashboard and mobile counter speech capture ready for controlled deployment preparation; live hosting and genuine voice/shop acceptance are pending.** Authentication, atomic receipts and stock movements, retries, review correction/rejection, reversals, catalogue forms/import, manual entry, daily summaries, settings, device pairing, CSV exports, pilot reconciliation tooling, operational expense tracking, customer credit & debt ledger ("Customer Book" / "Gbese"), and in-browser mobile counter microphone speech capture are implemented.
@@ -433,5 +435,4 @@ API writes require the session cookie and `X-ListenLedger-Request: 1`; cross-ori
 ## Beyond the first MVP
 
 Dedicated rechargeable hardware, receipt-photo OCR, additional languages, overlapping speakers/multiple counters, customer credit and debt ledger (I-Owe-You / customer book), cross-shop multi-branch analytics, and commercial billing remain later work. Preserve the hardware-plus-software vision while proving accurate capture on existing hardware first.
-
 

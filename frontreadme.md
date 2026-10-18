@@ -96,7 +96,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 - [ ] F33. Organize settings into Shop details, Voice settings, Account, and Optional devices.
 - [ ] F34. Move technical thresholds, pilot audits, and reconciliation tools into Advanced/Pilot without removing functionality.
 - [ ] F35. Explain that browser microphones do not require external-device pairing; make privacy statements match actual speech-processing behaviour.
-- [ ] F36. Replace the authentication mode dropdown with clear Sign in/Create account/Recover account flows.
+- [x] F36. Replace the authentication mode dropdown with clear Sign in/Create account/Recover account flows.
 - [ ] F37. Preserve recovery-code, session, logout, and validation behaviour; focus onboarding on shop details, products, microphone test, and first capture.
 - [ ] F38. Verify accessible forms/dialogs, focus management, keyboard dismissal, and usable mobile layouts.
 
@@ -126,6 +126,7 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 
 | Feature IDs | PR / commit | Automated verification | Browser / live verification | Remaining limitations |
 | --- | --- | --- | --- | --- |
+| F36 | [PR #59](https://github.com/eeyung1/listenledger/pull/59) / `514d2dc` | Typecheck/build pass; full frontend suite 13 test-file groups pass, including six new auth regressions for account actions, request payloads/headers, recovery acknowledgement, retries, duplicate-submit suppression and existing sessions | Simulated DOM/fetch responses only | Real-browser keyboard, viewport and hosted account acceptance remain F38/F40/F43; no capture or device gate closed |
 | Planning document | [PR #39](https://github.com/eeyung1/listenledger/pull/39) | All four CI jobs passed before merge | Not applicable; no UI change | Plan established |
 | F01 | [PR #40](https://github.com/eeyung1/listenledger/pull/40) | Typecheck/build and 63 existing frontend tests passed; exact-head repository CI required before merge | Chromium rendered-template checks at 360/390/768/1440px for four current pages and Customer Book dialog; viewport containment, 44px button sizing, button alias parity, reduced motion, screenshots | Empty/intercepted test responses; not full authenticated or physical microphone acceptance. New shell, per-page layouts, modal focus lifecycle, and real-device checks remain pending. |
 | F02 | PR #43 | Typecheck/build and all 73 frontend tests passed (including 5 shell nav tests); repository CI required before merge | Shell navigation unit and DOM rendering tests verify sidebar and mobile stand-in nav | Mobile bottom navigation (F03) and route additions (F04) to follow in subsequent PRs |

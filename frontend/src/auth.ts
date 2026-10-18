@@ -12,6 +12,8 @@ function setShellChromeVisible(visible: boolean): void {
  for (const node of document.querySelectorAll<HTMLElement>("[data-shell-chrome]")) node.hidden = !visible;
 }
 
+type AuthMode = "login" | "signup" | "recover";
+
 export async function requireIdentity(): Promise<Identity> {
  const session = await fetch("/api/auth/session");
  if (session.ok) return await session.json() as Identity;
@@ -20,38 +22,63 @@ export async function requireIdentity(): Promise<Identity> {
  return new Promise<Identity>((resolve) => {
   const root = document.getElementById("app")!;
   const section = el("section", "auth-panel");
-  const title = el("h1", "", "Welcome to ListenLedger");
-  const form = document.createElement("form");
-  const mode = document.createElement("select");
-  mode.setAttribute("aria-label", "Account action");
-  for (const [value, text] of [["login", "Sign in"], ["signup", "Create account"], ["recover", "Recover account"]]) {
-   const option = document.createElement("option"); option.value = value!; option.textContent = text!; mode.append(option);
-  }
-  form.append(mode);
-  function field(label: string, type: string, autocomplete: string): HTMLInputElement {
+  const title = el("h1", "");
+  const description = el("p", ""); description.id = "auth-description";
+  const actions = el("div", "form__actions");
+  actions.setAttribute("role", "group"); actions.setAttribute("aria-label", "Account action");
+  const form = document.createElement("form"); form.id = "auth-form";
+  form.setAttribute("aria-describedby", description.id);
+  let mode: AuthMode = "login";
+  let submitting = false;
+  const modeButtons = new Map<AuthMode, HTMLButtonElement>();
+  const labels: Record<AuthMode, string> = {login: "Sign in", signup: "Create account", recover: "Recover account"};
+  function field(label: string, name: string, type: string, autocomplete: string): HTMLInputElement {
    const wrapper = document.createElement("label"); wrapper.textContent = label;
-   const input = document.createElement("input"); input.type = type; input.autocomplete = autocomplete as AutoFill; input.required = true;
+   const input = document.createElement("input"); input.type = type; input.setAttribute("name", name);
+   input.autocomplete = autocomplete as AutoFill; input.required = true;
    wrapper.append(input); form.append(wrapper); return input;
   }
-  const email = field("Email", "email", "email");
-  const password = field("Password (12–128 characters)", "password", "current-password"); password.minLength = 12; password.maxLength = 128;
-  const shop = field("Shop name", "text", "organization"); shop.maxLength = 120;
-  const recovery = field("Recovery code", "password", "off");
-  const hint = el("p", "", "Recovery uses the private code saved when you created your account. Keep it somewhere safe; email recovery is not configured.");
-  const status = el("p", ""); status.setAttribute("role", "status");
-  const button = document.createElement("button"); button.type = "submit"; button.textContent = "Continue";
-  function changeMode(): void {
-   shop.parentElement!.hidden = mode.value !== "signup"; shop.required = mode.value === "signup";
-   recovery.parentElement!.hidden = mode.value !== "recover"; recovery.required = mode.value === "recover";
-   password.autocomplete = mode.value === "login" ? "current-password" : "new-password";
-   status.textContent = "";
+  const email = field("Email", "email", "email", "email");
+  const password = field("Password (12–128 characters)", "password", "password", "current-password");
+  password.minLength = 12; password.maxLength = 128;
+  const shop = field("Shop name", "shop_name", "text", "organization"); shop.maxLength = 120;
+  const recovery = field("Recovery code", "recovery_code", "password", "off");
+  const hint = el("p", "", "Use the private recovery code saved when you created your account. Email recovery is not configured. A successful reset replaces your code and signs out other sessions.");
+  const status = el("p", ""); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+  const button = document.createElement("button"); button.type = "submit"; button.className = "button button--primary";
+  function renderMode(): void {
+   title.textContent = mode === "login" ? "Sign in to ListenLedger" : mode === "signup" ? "Create your account" : "Recover your account";
+   description.textContent = mode === "login" ? "Use your email and password to open your shop."
+    : mode === "signup" ? "Create an owner account and set up your shop." : "Use your recovery code and choose a new password.";
+   for (const [value, action] of modeButtons) {
+    action.setAttribute("aria-pressed", String(value === mode));
+    action.className = value === mode ? "button button--primary button--sm" : "button button--secondary button--sm";
+   }
+   shop.parentElement!.hidden = mode !== "signup"; shop.required = mode === "signup"; shop.disabled = mode !== "signup";
+   recovery.parentElement!.hidden = mode !== "recover"; recovery.required = mode === "recover"; recovery.disabled = mode !== "recover";
+   password.autocomplete = mode === "login" ? "current-password" : "new-password";
+   hint.hidden = mode !== "recover";
+   button.textContent = mode === "recover" ? "Reset password" : labels[mode]; status.textContent = "";
   }
-  mode.addEventListener("change", changeMode); changeMode();
-  form.append(hint, status, button); section.append(title, form); root.replaceChildren(section);
+  for (const value of ["login", "signup", "recover"] as const) {
+   const action = document.createElement("button"); action.type = "button"; action.textContent = labels[value];
+   action.setAttribute("aria-controls", form.id);
+   action.addEventListener("click", () => {
+    if (submitting || mode === value) return;
+    mode = value; password.value = ""; recovery.value = ""; renderMode(); email.focus?.();
+   });
+   modeButtons.set(value, action); actions.append(action);
+  }
+  renderMode(); form.append(hint, status, button);
+  section.append(title, actions, description, form); root.replaceChildren(section);
   form.addEventListener("submit", async (event) => {
-   event.preventDefault(); button.disabled = true; status.textContent = "Please wait…";
+   event.preventDefault(); if (submitting) return;
+   submitting = true; button.disabled = true;
+   for (const action of modeButtons.values()) action.disabled = true;
+   form.setAttribute("aria-busy", "true"); const submittedMode = mode;
+   status.textContent = submittedMode === "login" ? "Signing in…" : submittedMode === "signup" ? "Creating account…" : "Resetting password…";
    try {
-    const response = await fetch(`/api/auth/${mode.value}`, {method: "POST", headers: {"Content-Type": "application/json", "X-ListenLedger-Request": "1"}, body: JSON.stringify({email: email.value, password: password.value, ...(mode.value === "signup" ? {shop_name: shop.value} : {}), ...(mode.value === "recover" ? {recovery_code: recovery.value} : {})})});
+    const response = await fetch(`/api/auth/${submittedMode}`, {method: "POST", headers: {"Content-Type": "application/json", "X-ListenLedger-Request": "1"}, body: JSON.stringify({email: email.value, password: password.value, ...(submittedMode === "signup" ? {shop_name: shop.value} : {}), ...(submittedMode === "recover" ? {recovery_code: recovery.value} : {})})});
     const body = await response.json() as AuthResponse & {error?: string};
     if (!response.ok) throw new Error(body.error ?? "Unable to continue");
     password.value = ""; recovery.value = "";
@@ -59,12 +86,18 @@ export async function requireIdentity(): Promise<Identity> {
     if (body.recovery_code) {
      const panel = el("section", "auth-panel");
      panel.append(el("h2", "", "Save your recovery code"), el("p", "", "This code is shown once. Store it privately; it can reset your password. Recovery replaces the previous code and signs out other sessions."), el("code", "recovery-code", body.recovery_code));
-     const done = document.createElement("button"); done.textContent = "I have saved my code"; done.addEventListener("click", finish); panel.append(done); root.replaceChildren(panel);
+     const done = document.createElement("button"); done.type = "button"; done.className = "button button--primary"; done.textContent = "I have saved my code";
+     done.addEventListener("click", finish); panel.append(done); root.replaceChildren(panel);
     } else finish();
-   } catch (error) {status.textContent = error instanceof Error ? error.message : "Connection failed. Try again."; button.disabled = false;}
+   } catch (error) {
+    status.textContent = error instanceof Error ? error.message : "Connection failed. Try again.";
+    submitting = false; button.disabled = false; for (const action of modeButtons.values()) action.disabled = false;
+    form.setAttribute("aria-busy", "false");
+   }
   });
  });
 }
+
 /**
  * Fills the shop/account top bar: the shop the owner is signed in to, the
  * account it belongs to, and the way out of it.
