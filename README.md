@@ -436,4 +436,3 @@ API writes require the session cookie and `X-ListenLedger-Request: 1`; cross-ori
 
 Dedicated rechargeable hardware, receipt-photo OCR, additional languages, overlapping speakers/multiple counters, customer credit and debt ledger (I-Owe-You / customer book), cross-shop multi-branch analytics, and commercial billing remain later work. Preserve the hardware-plus-software vision while proving accurate capture on existing hardware first.
 
-
