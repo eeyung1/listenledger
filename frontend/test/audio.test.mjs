@@ -13,6 +13,7 @@ import {
   isSpeechSynthesisSupported,
   speakFeedback,
   CounterSpeechListener,
+  DEFAULT_RECOGNITION_LANGUAGE,
   playAudioFeedback,
   calculateAudioRMS,
   estimateNoiseFloor,
@@ -1804,6 +1805,63 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
       cleanup();
       navigator.onLine = previousOnLine;
     }
+  });
+
+  await t.test("26. P4.4 configurable recognition language: default, shop override, and live update", async () => {
+    assert.equal(
+      DEFAULT_RECOGNITION_LANGUAGE,
+      "en-US",
+      "default keeps the pre-P4.4 baseline until P2 selects the winner",
+    );
+
+    const createdRecognizers = [];
+    class MockSpeechRecognition {
+      constructor() {
+        createdRecognizers.push(this);
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.maxAlternatives = 1;
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {
+        this.onend?.(new MockEvent("end"));
+      }
+      stop() {
+        this.onend?.(new MockEvent("end"));
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    // No shop setting: the provisional default is used.
+    const defaultListener = new CounterSpeechListener({});
+    assert.equal(defaultListener.getRecognitionLanguage(), "en-US");
+    await defaultListener.start();
+    assert.equal(createdRecognizers[0].lang, "en-US", "recognizer receives the default language");
+    defaultListener.stop();
+
+    // Explicit shop-configured language is passed to the recognizer.
+    const configuredListener = new CounterSpeechListener({ recognitionLanguage: "yo-NG" });
+    await configuredListener.start();
+    assert.equal(createdRecognizers[1].lang, "yo-NG", "recognizer receives the shop language");
+
+    // A later settings update applies to the live recognizer in place.
+    configuredListener.setRecognitionLanguage("en-US");
+    assert.equal(configuredListener.getRecognitionLanguage(), "en-US");
+    assert.equal(createdRecognizers[1].lang, "en-US", "live recognizer language updates in place");
+
+    // A blank value is ignored so the last good language stands.
+    configuredListener.setRecognitionLanguage("   ");
+    assert.equal(configuredListener.getRecognitionLanguage(), "en-US");
+    configuredListener.stop();
+
+    delete window.SpeechRecognition;
   });
 });
 

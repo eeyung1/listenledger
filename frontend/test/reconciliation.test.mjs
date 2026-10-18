@@ -508,4 +508,74 @@ test("Pilot Dual-Entry Reconciliation, Discrepancy Investigation & Cohort Progre
 
     cleanup();
   });
+
+  await t.test("4. P4.4 recognition language populates and is saved from the settings form", async () => {
+    let patchedPayload = null;
+    const shop = {
+      id: "shop_test_1",
+      name: "Mama Tolu Provisions",
+      currency: "NGN",
+      timezone: "Africa/Lagos",
+      confidence_threshold: 0.85,
+      sale_phrase: "take am",
+      restock_phrase: "drop am",
+      recognition_language: "en-NG",
+    };
+
+    globalThis.fetch = async (url, init) => {
+      const u = String(url);
+      const method = init?.method ?? "GET";
+
+      if (u.includes("/api/settings/target-gates")) {
+        return { ok: true, status: 200, json: async () => ({ is_agreed: false, gates: {} }) };
+      }
+      if (u.includes("/api/settings")) {
+        if (method === "PATCH") {
+          patchedPayload = JSON.parse(String(init.body));
+          return { ok: true, status: 200, json: async () => ({ ...shop, ...patchedPayload }) };
+        }
+        return { ok: true, status: 200, json: async () => ({ shop, devices: [] }) };
+      }
+      if (u.includes("/api/pilot/cohort/evaluate-readiness")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ readiness_status: "blocked", checks: [] }),
+        };
+      }
+      if (u.includes("/api/pilot/cohort")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ cohort_phase: "phase1_controlled", stage_status: "criteria_pending" }),
+        };
+      }
+      if (u.includes("/api/pilot/reconciliations")) {
+        return { ok: true, status: 200, json: async () => ({ reconciliations: [] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    const root = document.createElement("div");
+    root.id = "app";
+    root.innerHTML = SETTINGS_HTML;
+    document.body.append(root);
+
+    const cleanup = mountSettings(root, "shop_test_1");
+    await new Promise((r) => setTimeout(r, 40));
+
+    const langInput = root.querySelector('[data-hook="setting-recognition-language"]');
+    assert.ok(langInput, "recognition language field must be mounted");
+    assert.equal(langInput.value, "en-NG", "form is populated from the shop setting");
+
+    langInput.value = "yo-NG";
+    const form = root.querySelector('[data-hook="settings-form"]');
+    form.dispatchEvent(new MockEvent("submit"));
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.ok(patchedPayload, "settings PATCH must be sent");
+    assert.equal(patchedPayload.recognition_language, "yo-NG", "PATCH carries the recognition language");
+
+    cleanup();
+  });
 });

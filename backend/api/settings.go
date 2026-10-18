@@ -23,6 +23,7 @@ type updateSettingsRequest struct {
 	ConfidenceThreshold *float64 `json:"confidence_threshold"`
 	SalePhrase          *string  `json:"sale_phrase"`
 	RestockPhrase       *string  `json:"restock_phrase"`
+	RecognitionLanguage *string  `json:"recognition_language"`
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +80,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		ConfidenceThreshold: req.ConfidenceThreshold,
 		SalePhrase:          req.SalePhrase,
 		RestockPhrase:       req.RestockPhrase,
+		RecognitionLanguage: req.RecognitionLanguage,
 	})
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {

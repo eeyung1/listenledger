@@ -19,6 +19,7 @@ import {
   fetchExpenses,
   fetchInventory,
   fetchOnboardingStatus,
+  fetchSettings,
   fetchShopCreditSummary,
   fetchSummary,
   fetchTransactions,
@@ -37,6 +38,7 @@ import {
 } from "../api.js";
 import {
   CounterSpeechListener,
+  DEFAULT_RECOGNITION_LANGUAGE,
   isSpeechRecognitionSupported,
   playAudioFeedback,
   speakFeedback,
@@ -100,6 +102,14 @@ const OFFLINE_MIC_HINT =
   "Use manual counter entry while offline; pending captures sync automatically when reconnected.";
 const OFFLINE_MIC_TOAST =
   "📶 Voice capture needs a connection. Use manual counter entry while offline — pending captures sync when reconnected.";
+
+/**
+ * P4.4: recognition language in force for the counter listener on this device.
+ * Initialised to the provisional default and refreshed from the shop's
+ * `recognition_language` setting. Module-scoped so the sound-test modal's
+ * listener shares the loaded value.
+ */
+let counterRecognitionLanguage = DEFAULT_RECOGNITION_LANGUAGE;
 
 export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const state: HomeState = { transactions: [], products: [] };
@@ -592,6 +602,13 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     // localStorage may be unavailable or restricted
   }
 
+  // Counter recognition language (P4.4): set from the shop's configured
+  // `recognition_language` once settings load (see loadRecognitionLanguage).
+  /** Speaks counter feedback in the shop's configured recognition language. */
+  function speak(text: string): boolean {
+    return speakFeedback(text, { lang: counterRecognitionLanguage });
+  }
+
   function updateTTSButton(): void {
     if (!ttsToggleBtn || !ttsBtnIcon || !ttsBtnLabel) return;
     ttsToggleBtn.setAttribute("aria-pressed", String(voiceFeedbackEnabled));
@@ -619,7 +636,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     }
     updateTTSButton();
     if (voiceFeedbackEnabled) {
-      speakFeedback("Voice readout enabled");
+      speak("Voice readout enabled");
     }
   });
 
@@ -673,7 +690,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
       if (synced > 0) {
         showCaptureToast(`✓ Replayed & synced ${synced} offline counter capture(s)`, "success");
         if (voiceFeedbackEnabled) {
-          speakFeedback(`Synced ${synced} offline sales to ledger`);
+          speak(`Synced ${synced} offline sales to ledger`);
         }
         void refetch();
       }
@@ -722,6 +739,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     counterListener = new CounterSpeechListener({
       salePhrase: "thank you",
       restockPhrase: "stock received",
+      recognitionLanguage: counterRecognitionLanguage,
       onWakeLockChange: (active: boolean) => {
         if (wakeLockBadge) {
           wakeLockBadge.style.display = active ? "inline-flex" : "none";
@@ -871,7 +889,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
               "warning",
             );
             if (voiceFeedbackEnabled) {
-              speakFeedback("Offline capture saved. Will sync when network returns.");
+              speak("Offline capture saved. Will sync when network returns.");
             }
             void updateOfflineQueueBadge();
           } catch {
@@ -904,14 +922,14 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
             playAudioFeedback("cancelled");
             showCaptureToast(`🚫 Cancelled: Transaction cancelled aloud ("${candidate.transcript}")`, "warning");
             if (voiceFeedbackEnabled) {
-              speakFeedback("Transaction cancelled");
+              speak("Transaction cancelled");
             }
           } else if (res.requires_review) {
             playAudioFeedback("review");
             const name = first ? first.product_name : "Unrecognized item";
             showCaptureToast(`⚠ Logged for Review: ${name} ("${candidate.transcript}")`, "warning");
             if (voiceFeedbackEnabled) {
-              speakFeedback(`Held for review: ${name}`);
+              speak(`Held for review: ${name}`);
             }
           } else {
             playAudioFeedback("sale");
@@ -929,7 +947,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
               );
               if (voiceFeedbackEnabled) {
                 const creditVoice = first?.customer_name ? ` on credit for ${first.customer_name}` : "";
-                speakFeedback(`Logged ${count} items${creditVoice}: ${itemsSummary}`);
+                speak(`Logged ${count} items${creditVoice}: ${itemsSummary}`);
               }
             } else if (isRestock) {
               const supplierInfo = first?.supplier_name ? ` from ${first.supplier_name}` : "";
@@ -938,7 +956,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
                 : candidate.transcript;
               showCaptureToast(`✓ Logged Restock: ${detail} (+${first ? first.quantity : ""} stock)`, "success");
               if (voiceFeedbackEnabled && first) {
-                speakFeedback(`Stock received: ${first.quantity} ${first.product_name}${supplierInfo}`);
+                speak(`Stock received: ${first.quantity} ${first.product_name}${supplierInfo}`);
               }
             } else {
               const custInfo = first?.customer_name ? ` (Tab: ${first.customer_name})` : "";
@@ -948,7 +966,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
               showCaptureToast(`✓ Logged Sale: ${detail}`, "success");
               if (voiceFeedbackEnabled && first) {
                 const creditVoice = first.customer_name ? ` on credit for ${first.customer_name}` : "";
-                speakFeedback(`Sale: ${first.quantity} ${first.product_name}${creditVoice}`);
+                speak(`Sale: ${first.quantity} ${first.product_name}${creditVoice}`);
               }
             }
           }
@@ -1048,6 +1066,27 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   window.addEventListener("ll:customer-debt-recorded", onCustomerEvent);
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
 
+  // P4.4: apply the shop's configured recognition language to the counter
+  // listener. Guarded so a missing or partial settings response (or an offline
+  // fetch failure) leaves the provisional default in place.
+  async function loadRecognitionLanguage(): Promise<void> {
+    try {
+      const data = await fetchSettings(shopId, abortController.signal);
+      if (disposed || abortController.signal.aborted) return;
+      const configured = data?.shop?.recognition_language?.trim();
+      if (!configured) return;
+      counterRecognitionLanguage = configured;
+      counterListener?.setRecognitionLanguage(configured);
+    } catch {
+      // Keep the provisional default; the settings view re-applies on change.
+    }
+  }
+  void loadRecognitionLanguage();
+  const onSettingsUpdated = (): void => {
+    void loadRecognitionLanguage();
+  };
+  window.addEventListener("ll:settings-updated", onSettingsUpdated);
+
   void refetch();
 
   return () => {
@@ -1069,6 +1108,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     window.removeEventListener("ll:customer-created", onCustomerEvent);
     window.removeEventListener("ll:customer-debt-recorded", onCustomerEvent);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
+    window.removeEventListener("ll:settings-updated", onSettingsUpdated);
     window.removeEventListener("online", onOnlineEvent);
     window.removeEventListener("offline", onOfflineEvent);
   };
@@ -1286,6 +1326,7 @@ function showTestCaptureModal(root: HTMLElement, onDone: () => void): void {
     activeTestListener = new CounterSpeechListener({
       salePhrase: "thank you",
       restockPhrase: "stock received",
+      recognitionLanguage: counterRecognitionLanguage,
       onInterimTranscript: (text: string) => {
         liveTranscriptBox.textContent = `Heard: "${text}"`;
       },
