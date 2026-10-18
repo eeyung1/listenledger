@@ -313,6 +313,10 @@ test("Operational Expenses & Net Profit Suite", async (t) => {
     const profitVal = container.querySelector('[data-hook="kpi-net-profit"]');
     assert.ok(expensesVal);
     assert.ok(profitVal);
+    assert.equal(
+      profitVal.parentNode.querySelector(".kpi__label").textContent,
+      "Sales less expenses",
+    );
     assert.match(expensesVal.textContent, /4,500/);
     assert.match(profitVal.textContent, /10,500/);
 
