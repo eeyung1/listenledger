@@ -57,6 +57,30 @@
           </label>
         </div>
 
+        <label class="form__field">
+          Counter Recognition Language
+          <input
+            type="text"
+            name="recognition_language"
+            data-hook="setting-recognition-language"
+            list="recognition-language-options"
+            required
+            placeholder="en-NG"
+          />
+          <span class="form__hint">
+            Language the phone's speech recognizer listens in, as a BCP-47 tag
+            (e.g., “en-NG” for Nigerian English). P2 will confirm the best default.
+          </span>
+          <datalist id="recognition-language-options">
+            <option value="en-NG">English (Nigeria)</option>
+            <option value="en-US">English (United States)</option>
+            <option value="en-GB">English (United Kingdom)</option>
+            <option value="yo-NG">Yoruba (Nigeria)</option>
+            <option value="ig-NG">Igbo (Nigeria)</option>
+            <option value="ha-NG">Hausa (Nigeria)</option>
+          </datalist>
+        </label>
+
         <div class="form__actions">
           <button type="submit" class="button button--primary" data-hook="save-settings-btn">Save Settings</button>
           <span class="form__status" data-hook="settings-status" hidden></span>

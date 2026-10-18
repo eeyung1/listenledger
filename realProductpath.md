@@ -154,6 +154,7 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 - **Problem:** `recognition.lang = "en-US"` (`audio.ts:781`). Voice readback is also `en-US` (`audio.ts:450`).
 - **Fix:** make the recognition language a shop setting, defaulting to the P2 winner (likely `en-NG`).
 - [ ] **Acceptance:** the language is configurable, and the default is backed by P2 results.
+- [x] Implementation: `recognition_language` is a per-shop setting (migration `0014_recognition_language`, `storage.UpdateShopSettingsParams`, `PATCH /api/settings`), exposed in the settings form and validated as a BCP-47-style tag. `CounterSpeechListener` accepts a `recognitionLanguage` option plus `setRecognitionLanguage()`, and the home counter listener and voice readback use the shop's language. The default keeps the pre-P4.4 `en-US` baseline; the "default backed by P2 results" acceptance stays open until the P2 bake-off runs. Covered by backend and frontend tests.
 
 ### P4.5 Recognizer confidence and alternatives are thrown away
 

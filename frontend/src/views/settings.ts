@@ -45,6 +45,7 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
   const rangeVal = hook(root, "setting-threshold-val");
   const salePhraseInput = hook<HTMLInputElement>(root, "setting-sale-phrase");
   const restockPhraseInput = hook<HTMLInputElement>(root, "setting-restock-phrase");
+  const recognitionLanguageInput = hook<HTMLInputElement>(root, "setting-recognition-language");
   const settingsForm = hook<HTMLFormElement>(root, "settings-form");
   const settingsStatus = hook(root, "settings-status");
   const saveBtn = hook<HTMLButtonElement>(root, "save-settings-btn");
@@ -176,6 +177,7 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     if (rangeVal) setText(rangeVal, `${Math.round(shop.confidence_threshold * 100)}%`);
     if (salePhraseInput) salePhraseInput.value = shop.sale_phrase;
     if (restockPhraseInput) restockPhraseInput.value = shop.restock_phrase;
+    if (recognitionLanguageInput) recognitionLanguageInput.value = shop.recognition_language ?? "";
   }
 
   async function loadTargetGates(): Promise<void> {
@@ -369,6 +371,7 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
         confidence_threshold: rangeInput ? parseFloat(rangeInput.value) : undefined,
         sale_phrase: salePhraseInput?.value.trim(),
         restock_phrase: restockPhraseInput?.value.trim(),
+        recognition_language: recognitionLanguageInput?.value.trim(),
       });
       populateForm(updated);
       setFormStatus(settingsStatus, "success", "Settings saved successfully.");

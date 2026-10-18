@@ -46,6 +46,12 @@ export interface AudioVADMetrics {
 export interface CounterSpeechListenerOptions {
   readonly salePhrase?: string | undefined;
   readonly restockPhrase?: string | undefined;
+  /**
+   * BCP-47 recognition language for the browser SpeechRecognition engine
+   * (P4.4). Comes from the shop's `recognition_language` setting. Falls back to
+   * `DEFAULT_RECOGNITION_LANGUAGE`.
+   */
+  readonly recognitionLanguage?: string | undefined;
   readonly enableVoiceFeedback?: boolean | undefined;
   readonly onStateChange?: ((state: CounterListenerState) => void) | undefined;
   readonly onInterimTranscript?: ((transcript: string) => void) | undefined;
@@ -495,6 +501,13 @@ const RESTART_BACKOFF_RESET_MS = 5000;
 const MAX_RESTART_FAILURES = 5;
 
 /**
+ * Default counter recognition language (P4.4). Keeps the pre-P4.4 `en-US`
+ * baseline until the P2 speech-to-text bake-off measures and selects the
+ * winner; each shop can override it via its `recognition_language` setting.
+ */
+export const DEFAULT_RECOGNITION_LANGUAGE = "en-US";
+
+/**
  * Continuous Counter Ambient Speech Listener.
  *
  * Manages the browser microphone and SpeechRecognition session, maintaining
@@ -550,8 +563,32 @@ export class CounterSpeechListener {
   private vadSilenceDebounce = 0;
   private currentAudioLevel = 0;
 
+  // Recognition language (P4.4). Mutable so the shop setting can be applied
+  // after construction but before/while a session runs.
+  private recognitionLanguage: string;
+
   constructor(options: CounterSpeechListenerOptions = {}) {
     this.options = options;
+    this.recognitionLanguage =
+      options.recognitionLanguage?.trim() || DEFAULT_RECOGNITION_LANGUAGE;
+  }
+
+  /**
+   * Applies a new recognition language (P4.4). Updates a live recognizer in
+   * place; an empty value is ignored so the last good language stands.
+   */
+  public setRecognitionLanguage(language: string): void {
+    const tag = language.trim();
+    if (!tag) return;
+    this.recognitionLanguage = tag;
+    if (this.recognition) {
+      this.recognition.lang = tag;
+    }
+  }
+
+  /** Returns the recognition language currently in force. */
+  public getRecognitionLanguage(): string {
+    return this.recognitionLanguage;
   }
 
   public getState(): CounterListenerState {
@@ -794,7 +831,7 @@ export class CounterSpeechListener {
     const recognition = new RecognizerClass();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = this.recognitionLanguage;
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {

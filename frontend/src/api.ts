@@ -495,6 +495,7 @@ export interface ShopSettings {
   readonly confidence_threshold: number;
   readonly sale_phrase: string;
   readonly restock_phrase: string;
+  readonly recognition_language: string;
   readonly staff_trained_at?: string | null | undefined;
 }
 
@@ -554,6 +555,7 @@ export interface UpdateSettingsInput {
   readonly confidence_threshold?: number | undefined;
   readonly sale_phrase?: string | undefined;
   readonly restock_phrase?: string | undefined;
+  readonly recognition_language?: string | undefined;
 }
 
 /** GET /api/settings — shop configuration and paired devices. */

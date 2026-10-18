@@ -130,3 +130,63 @@ func TestPurgeTranscripts_InvalidTimestamp(t *testing.T) {
 		t.Errorf("expected 400 Bad Request, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestUpdateSettings_RecognitionLanguage_P4_4(t *testing.T) {
+	handler, _, _, shopID := testServerFixture(t)
+
+	// 1. Default language keeps the pre-P4.4 en-US baseline (P4.4).
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/settings?shop_id="+shopID, nil)
+	rrGet := httptest.NewRecorder()
+	handler.ServeHTTP(rrGet, reqGet)
+	if rrGet.Code != http.StatusOK {
+		t.Fatalf("GET /api/settings: expected 200, got %d: %s", rrGet.Code, rrGet.Body.String())
+	}
+	var got settingsResponse
+	if err := json.Unmarshal(rrGet.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if got.Shop.RecognitionLanguage != "en-US" {
+		t.Errorf("expected default recognition_language en-US, got %q", got.Shop.RecognitionLanguage)
+	}
+
+	// 2. A valid language tag is persisted and echoed back.
+	patchBody := []byte(`{"recognition_language": "yo-NG"}`)
+	reqPatch := httptest.NewRequest(http.MethodPatch, "/api/settings?shop_id="+shopID, bytes.NewReader(patchBody))
+	reqPatch.Header.Set("Content-Type", "application/json")
+	rrPatch := httptest.NewRecorder()
+	handler.ServeHTTP(rrPatch, reqPatch)
+	if rrPatch.Code != http.StatusOK {
+		t.Fatalf("PATCH valid language: expected 200, got %d: %s", rrPatch.Code, rrPatch.Body.String())
+	}
+	var updated struct {
+		RecognitionLanguage string `json:"recognition_language"`
+	}
+	if err := json.Unmarshal(rrPatch.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode patched shop: %v", err)
+	}
+	if updated.RecognitionLanguage != "yo-NG" {
+		t.Errorf("expected recognition_language yo-NG, got %q", updated.RecognitionLanguage)
+	}
+
+	// 3. Invalid and empty tags are rejected with 400 and do not change the value.
+	for _, invalid := range []string{`{"recognition_language": "!!"}`, `{"recognition_language": "e"}`, `{"recognition_language": ""}`} {
+		reqBad := httptest.NewRequest(http.MethodPatch, "/api/settings?shop_id="+shopID, bytes.NewReader([]byte(invalid)))
+		reqBad.Header.Set("Content-Type", "application/json")
+		rrBad := httptest.NewRecorder()
+		handler.ServeHTTP(rrBad, reqBad)
+		if rrBad.Code != http.StatusBadRequest {
+			t.Errorf("PATCH %s: expected 400, got %d: %s", invalid, rrBad.Code, rrBad.Body.String())
+		}
+	}
+
+	reqGet2 := httptest.NewRequest(http.MethodGet, "/api/settings?shop_id="+shopID, nil)
+	rrGet2 := httptest.NewRecorder()
+	handler.ServeHTTP(rrGet2, reqGet2)
+	var after settingsResponse
+	if err := json.Unmarshal(rrGet2.Body.Bytes(), &after); err != nil {
+		t.Fatalf("decode settings after invalid patches: %v", err)
+	}
+	if after.Shop.RecognitionLanguage != "yo-NG" {
+		t.Errorf("expected recognition_language to remain yo-NG after rejected updates, got %q", after.Shop.RecognitionLanguage)
+	}
+}

@@ -138,18 +138,24 @@ type Shop struct {
 	ConfidenceThreshold float64 `json:"confidence_threshold"`
 	SalePhrase          string  `json:"sale_phrase"`
 	RestockPhrase       string  `json:"restock_phrase"`
+	RecognitionLanguage string  `json:"recognition_language"`
 	StaffTrainedAt      *string `json:"staff_trained_at,omitempty"`
 }
 
+// DefaultRecognitionLanguage is the counter recognition language for shops that
+// have not overridden it. It keeps the pre-P4.4 en-US baseline until the P2
+// speech-to-text bake-off measures and selects the winner.
+const DefaultRecognitionLanguage = "en-US"
+
 // GetShop retrieves a shop by ID, including its thresholds and boundary phrases.
 func (s *Store) GetShop(ctx context.Context, shopID string) (Shop, error) {
-	query := `SELECT id, owner_id, name, currency, timezone, confidence_threshold, sale_phrase, restock_phrase, staff_trained_at
+	query := `SELECT id, owner_id, name, currency, timezone, confidence_threshold, sale_phrase, restock_phrase, recognition_language, staff_trained_at
 		FROM shops WHERE id = ?`
 	var sh Shop
 	var staffTrained sql.NullString
 	err := s.db.QueryRowContext(ctx, s.rebind(query), shopID).Scan(
 		&sh.ID, &sh.OwnerID, &sh.Name, &sh.Currency, &sh.Timezone,
-		&sh.ConfidenceThreshold, &sh.SalePhrase, &sh.RestockPhrase, &staffTrained,
+		&sh.ConfidenceThreshold, &sh.SalePhrase, &sh.RestockPhrase, &sh.RecognitionLanguage, &staffTrained,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -193,6 +199,7 @@ type UpdateShopSettingsParams struct {
 	ConfidenceThreshold *float64 `json:"confidence_threshold"`
 	SalePhrase          *string  `json:"sale_phrase"`
 	RestockPhrase       *string  `json:"restock_phrase"`
+	RecognitionLanguage *string  `json:"recognition_language"`
 }
 
 // UpdateShopSettings updates the configuration for an existing shop.
@@ -248,16 +255,24 @@ func (s *Store) UpdateShopSettings(ctx context.Context, shopID string, params Up
 		}
 		current.RestockPhrase = phrase
 	}
+	if params.RecognitionLanguage != nil {
+		lang, err := normalizeRecognitionLanguage(*params.RecognitionLanguage)
+		if err != nil {
+			return Shop{}, err
+		}
+		current.RecognitionLanguage = lang
+	}
 	if strings.EqualFold(current.SalePhrase, current.RestockPhrase) {
 		return Shop{}, errors.New("storage: sale phrase and restock phrase must be distinct")
 	}
 
 	const query = `UPDATE shops SET name = ?, currency = ?, timezone = ?,
-		confidence_threshold = ?, sale_phrase = ?, restock_phrase = ?
+		confidence_threshold = ?, sale_phrase = ?, restock_phrase = ?, recognition_language = ?
 		WHERE id = ?`
 	result, err := s.db.ExecContext(ctx, s.rebind(query),
 		current.Name, current.Currency, current.Timezone,
 		current.ConfidenceThreshold, current.SalePhrase, current.RestockPhrase,
+		current.RecognitionLanguage,
 		shopID,
 	)
 	if err != nil {
@@ -271,4 +286,51 @@ func (s *Store) UpdateShopSettings(ctx context.Context, shopID string, params Up
 		return Shop{}, ErrNotFound
 	}
 	return current, nil
+}
+
+// normalizeRecognitionLanguage validates a BCP-47 style recognition language tag
+// ("en", "en-NG", "yo-NG") and returns it trimmed. It deliberately keeps the
+// caller's casing so a value the owner typed round-trips exactly; the browser
+// recognizer treats language tags case-insensitively.
+func normalizeRecognitionLanguage(raw string) (string, error) {
+	tag := strings.TrimSpace(raw)
+	if tag == "" {
+		return "", errors.New("storage: recognition language cannot be empty")
+	}
+	parts := strings.Split(tag, "-")
+	if !isAlphaASCII(parts[0]) || len(parts[0]) < 2 || len(parts[0]) > 3 {
+		return "", fmt.Errorf("storage: invalid recognition language %q", raw)
+	}
+	for _, part := range parts[1:] {
+		if !isAlphaNumericASCII(part) || len(part) < 2 || len(part) > 8 {
+			return "", fmt.Errorf("storage: invalid recognition language %q", raw)
+		}
+	}
+	return tag, nil
+}
+
+func isAlphaASCII(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
+		}
+	}
+	return true
+}
+
+func isAlphaNumericASCII(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
 }
