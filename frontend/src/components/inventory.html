@@ -67,8 +67,13 @@
       </thead>
       <!-- Rows are appended here by the data layer. -->
       <tbody data-hook="catalogue-body">
-        <tr class="table__loading" data-hook="catalogue-loading">
-          <td colspan="7">Loading catalogue…</td>
+        <tr class="ui-state-row" data-hook="catalogue-loading">
+          <td class="ui-state-cell" colspan="7">
+            <div class="ui-state ui-state--loading" data-state="loading" role="status">
+              <span class="ui-state__icon" aria-hidden="true">⏳</span>
+              <p class="ui-state__title">Loading catalogue…</p>
+            </div>
+          </td>
         </tr>
       </tbody>
     </table>

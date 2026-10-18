@@ -31,8 +31,10 @@
       the system doubted, and the raw transcript for context.
     -->
     <ul class="review-list" data-hook="review-queue">
-      <li class="review-list__empty" data-hook="review-queue-empty">
-        Nothing waiting on you.
+      <li class="ui-state ui-state--empty" data-state="empty" role="status" data-hook="review-queue-empty">
+        <span class="ui-state__icon" aria-hidden="true">○</span>
+        <p class="ui-state__title">Nothing waiting on you.</p>
+        <p class="ui-state__detail">Low-confidence captures land here for a quick decision.</p>
       </li>
     </ul>
   </section>
@@ -83,8 +85,14 @@
       </thead>
       <!-- Rows are appended here by the update layer. -->
       <tbody data-hook="ledger-body">
-        <tr class="table__empty" data-hook="ledger-empty">
-          <td colspan="8">No transactions recorded yet.</td>
+        <tr class="ui-state-row" data-hook="ledger-empty">
+          <td class="ui-state-cell" colspan="8">
+            <div class="ui-state ui-state--empty" data-state="empty" role="status">
+              <span class="ui-state__icon" aria-hidden="true">○</span>
+              <p class="ui-state__title">No transactions recorded yet.</p>
+              <p class="ui-state__detail">Sales and restocks appear here as they are captured.</p>
+            </div>
+          </td>
         </tr>
       </tbody>
     </table>

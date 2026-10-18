@@ -60,7 +60,6 @@ import {
 import {
   CONNECTION_STATUS_EVENT,
   getSocket,
-  type ConnectionStatus,
   type ConnectionStatusDetail,
 } from "../ws.js";
 import {
@@ -70,18 +69,12 @@ import {
   isOnline,
   syncOfflineQueue,
 } from "../offline_queue.js";
+import { connectionStatusLabel, uiStateItem } from "../ui_state.js";
 import { showCustomerBookModal } from "./customers.js";
 import type { ViewCleanup } from "./index.js";
 
 /** How many movements the overview feed shows before it stops growing. */
 const FEED_LIMIT = 20;
-
-const CONNECTION_LABELS: Readonly<Record<ConnectionStatus, string>> = {
-  connecting: "Connecting…",
-  open: "Live",
-  reconnecting: "Reconnecting…",
-  closed: "Offline",
-};
 
 interface HomeState {
   transactions: Transaction[];
@@ -108,7 +101,6 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   const signal = abortController.signal;
 
   const feedList = hook(root, "live-feed");
-  const feedEmpty = hook(root, "live-feed-empty");
   const lowStockList = hook(root, "low-stock-list");
   const connectionLabel = hook(root, "connection-status");
   const onboardingContainer = hook(root, "onboarding-checklist-container");
@@ -353,7 +345,12 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
     const recent = state.transactions.slice(0, FEED_LIMIT);
     if (recent.length === 0) {
-      feedList.append(el("li", "feed__empty", "Waiting for the first transaction."));
+      feedList.append(
+        uiStateItem("empty", {
+          title: "Waiting for the first transaction.",
+          detail: "Captured sales and restocks appear here as they are recorded.",
+        }),
+      );
       return;
     }
     for (const transaction of recent) {
@@ -367,7 +364,12 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
     const low = state.products.filter(isLowStock);
     if (low.length === 0) {
-      lowStockList.append(el("li", "alert-list__empty", "Nothing below its reorder level."));
+      lowStockList.append(
+        uiStateItem("empty", {
+          title: "Nothing below its reorder level.",
+          detail: "Products appear here as their stock runs low.",
+        }),
+      );
       return;
     }
 
@@ -443,13 +445,21 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     } catch (error) {
       if (disposed || signal.aborted) return;
       console.error("ListenLedger: could not load the overview", error);
-      // The template's empty state is still in place, because a failed first
-      // fetch means renderFeed never ran to replace it. Reusing it keeps the
-      // failure visible where the feed will appear.
-      setText(
-        feedEmpty,
-        "Could not reach the server. The live feed will fill in when the connection returns.",
-      );
+      // The feed is where a failed first load is most visible, so the error
+      // replaces its empty state rather than leaving "Waiting…" on screen.
+      if (feedList !== null) {
+        clear(feedList);
+        feedList.append(
+          uiStateItem("error", {
+            title: "Could not reach the server.",
+            detail: "The live feed will fill in when the connection returns.",
+            actionLabel: "Retry",
+            onAction: () => {
+              void refetch();
+            },
+          }),
+        );
+      }
     }
   }
 
@@ -511,7 +521,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
   const onConnectionStatus = (event: Event): void => {
     const detail = (event as CustomEvent<ConnectionStatusDetail>).detail;
-    setText(connectionLabel, CONNECTION_LABELS[detail.status] ?? detail.status);
+    setText(connectionLabel, connectionStatusLabel(detail.status));
     if (connectionLabel !== null) {
       connectionLabel.dataset.status = detail.status;
     }

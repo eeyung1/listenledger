@@ -99,8 +99,10 @@
       </div>
 
       <ul class="device-list" data-hook="device-list">
-        <li class="device-list__empty" data-hook="device-list-empty">
-          No edge capture devices paired yet.
+        <li class="ui-state ui-state--empty" data-state="empty" role="status" data-hook="device-list-empty">
+          <span class="ui-state__icon" aria-hidden="true">○</span>
+          <p class="ui-state__title">No edge capture devices paired yet.</p>
+          <p class="ui-state__detail">Pairing is optional — a phone microphone works on its own.</p>
         </li>
       </ul>
     </section>
@@ -242,8 +244,10 @@
       <div class="reconciliation-history">
         <h3 class="form__legend">Reconciliation Sessions & Discrepancy Audits</h3>
         <ul class="reconciliation-list" data-hook="reconciliation-list">
-          <li class="reconciliation-list__empty" data-hook="reconciliation-list-empty">
-            No reconciliation audits performed yet.
+          <li class="ui-state ui-state--empty" data-state="empty" role="status" data-hook="reconciliation-list-empty">
+            <span class="ui-state__icon" aria-hidden="true">○</span>
+            <p class="ui-state__title">No reconciliation audits performed yet.</p>
+            <p class="ui-state__detail">Audits you run in Advanced/Pilot appear here with their discrepancies.</p>
           </li>
         </ul>
       </div>

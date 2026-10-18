@@ -38,6 +38,7 @@ import {
   setText,
 } from "../format.js";
 import { CONNECTION_STATUS_EVENT, getSocket, type ConnectionStatusDetail } from "../ws.js";
+import { uiStateRow, type UiStateOptions } from "../ui_state.js";
 import type { ViewCleanup } from "./index.js";
 
 type CatalogueTab = "active" | "archived" | "all";
@@ -649,19 +650,26 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     }
 
     if (matches.length === 0) {
-      const row = el("tr", "table__empty");
-      let message = "No products yet. Add the first one to get started.";
+      let title = "No products yet. Add the first one to get started.";
       if (needle !== "") {
-        message = "No products match this search.";
+        title = "No products match this search.";
       } else if (currentTab === "archived") {
-        message = "No archived products in catalogue.";
+        title = "No archived products in catalogue.";
       } else if (currentTab === "active" && products.length > 0) {
-        message = "All products are currently archived.";
+        title = "All products are currently archived.";
       }
-      const cellElement = cell("", message);
-      cellElement.colSpan = 7;
-      row.append(cellElement);
-      body.append(row);
+      // Only an empty catalogue has an obvious next step; a filtered-to-nothing
+      // result does not, so it offers no action rather than a misleading one.
+      const brandNewCatalogue = needle === "" && products.length === 0;
+      const emptyOptions: UiStateOptions = brandNewCatalogue
+        ? {
+            title,
+            detail: "Products are what voice capture matches against.",
+            actionLabel: "Add product",
+            onAction: () => showProductModal(),
+          }
+        : { title };
+      body.append(uiStateRow("empty", emptyOptions, 7));
       return;
     }
     for (const product of matches) {
@@ -690,12 +698,20 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
       console.error("ListenLedger: could not load the catalogue", error);
       if (body !== null) {
         clear(body);
-        const row = el("tr", "table__empty");
-        const cellElement = cell("", "Could not reach the server. Retrying on reconnect.");
-        cellElement.className = "table__error";
-        cellElement.colSpan = 7;
-        row.append(cellElement);
-        body.append(row);
+        body.append(
+          uiStateRow(
+            "error",
+            {
+              title: "Could not load the catalogue.",
+              detail: "We'll retry automatically when the connection returns.",
+              actionLabel: "Retry",
+              onAction: () => {
+                void refetch();
+              },
+            },
+            7,
+          ),
+        );
       }
     }
   }

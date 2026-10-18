@@ -1791,3 +1791,119 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* ── F05 shared UI states (src/ui_state.ts) ──────────────────────────────
+   One look for loading, empty, failed-load and disconnected states, on every
+   page. Views build these blocks from src/ui_state.ts rather than styling
+   their own. */
+.ui-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  color: var(--color-muted);
+}
+
+.ui-state__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.ui-state__title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.ui-state__detail {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.ui-state__action {
+  margin-top: var(--space-2);
+}
+
+.ui-state--loading .ui-state__icon {
+  animation: ui-state-pulse 1.2s ease-in-out infinite;
+}
+
+.ui-state--error .ui-state__icon,
+.ui-state--error .ui-state__title {
+  color: var(--color-danger);
+}
+
+.ui-state--offline .ui-state__icon,
+.ui-state--offline .ui-state__title {
+  color: var(--color-warning);
+}
+
+@keyframes ui-state-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* A state rendered inside a table body fills the row it occupies. */
+.ui-state-cell {
+  padding: 0;
+}
+
+.ui-state-row .ui-state {
+  width: 100%;
+}
+
+/* Whole-shell disconnected banner. */
+.app-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: min(92vw, 640px);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  box-shadow: 0 6px 20px rgba(24, 53, 47, 0.18);
+  font-size: 0.9rem;
+}
+
+.app-banner--offline {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.app-banner__message {
+  margin: 0;
+}
+
+.app-banner__retry {
+  flex: none;
+}
+
+/* Inline form status: saving / saved / failed-save. */
+.form__status {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.form__status--info {
+  color: var(--color-info);
+}
+
+.form__status--success {
+  color: var(--color-success);
+}
+
+.form__status--error {
+  color: var(--color-danger);
+}
