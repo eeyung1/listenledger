@@ -21,6 +21,8 @@ Supabase schema versions 1–12 are applied. The Render runtime uses `-require-p
 
 ## Current status
 
+Settings groups its technical review threshold and existing pilot agreement/reconciliation panels under a collapsed **Advanced / Pilot** disclosure (F34). Shop details and voice closing phrases stay in the main form. Threshold changes still save with **Save Settings**; parked pilot panels retain their existing visibility. Automated regressions verify field loading, percentage updates, persistence/retry and preserved pilot controls; native-browser keyboard/layout acceptance remains pending.
+
 Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 
 **Stage: ledger/dashboard and mobile counter speech capture ready for controlled deployment preparation; live hosting and genuine voice/shop acceptance are pending.** Authentication, atomic receipts and stock movements, retries, review correction/rejection, reversals, catalogue forms/import, manual entry, daily summaries, settings, device pairing, CSV exports, pilot reconciliation tooling, operational expense tracking, customer credit & debt ledger ("Customer Book" / "Gbese"), and in-browser mobile counter microphone speech capture are implemented.
