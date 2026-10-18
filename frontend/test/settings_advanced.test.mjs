@@ -7,7 +7,7 @@ import { mountSettings } from "../dist/views/settings.js";
 const html = fs.readFileSync(new URL("../src/components/settings.html", import.meta.url), "utf8");
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const hook = (root, name) => root.querySelector(`[data-hook="${name}"]`);
-const shop = {id: "shop_advanced", owner_id: "owner_test", name: "Test shop", currency: "NGN", timezone: "Africa/Lagos", confidence_threshold: 0.85, sale_phrase: "thank you", restock_phrase: "stock received"};
+const shop = {id: "shop_advanced", owner_id: "owner_test", name: "Test shop", currency: "NGN", timezone: "Africa/Lagos", confidence_threshold: 0.85, sale_phrase: "thank you", restock_phrase: "stock received", recognition_language: "en-NG"};
 const response = (status, body) => ({ok: status >= 200 && status < 300, status, json: async () => body});
 
 function setup() {
@@ -61,7 +61,7 @@ test("F34: relocated threshold loads, updates its percentage and persists throug
   range.value = "0.90"; range.dispatchEvent(new MockEvent("input"));
   assert.equal(hook(root, "setting-threshold-val").textContent, "90%");
   hook(root, "settings-form").dispatchEvent(new MockEvent("submit")); await flush();
-  assert.deepEqual(patches[0], {name: shop.name, currency: "NGN", timezone: shop.timezone, confidence_threshold: 0.9, sale_phrase: shop.sale_phrase, restock_phrase: shop.restock_phrase});
+  assert.deepEqual(patches[0], {name: shop.name, currency: "NGN", timezone: shop.timezone, confidence_threshold: 0.9, sale_phrase: shop.sale_phrase, restock_phrase: shop.restock_phrase, recognition_language: "en-NG"});
   assert.match(hook(root, "settings-status").textContent, /Settings save rejected/);
   assert.equal(range.value, "0.90");
   assert.equal(hook(root, "save-settings-btn").disabled, false);
