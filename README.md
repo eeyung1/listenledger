@@ -21,6 +21,10 @@ Supabase schema versions 1–12 are applied. The Render runtime uses `-require-p
 
 ## Current status
 
+P4.4's canonical implementation is [PR #56](https://github.com/eeyung1/listenledger/pull/56) (`56166be`): a saved shop recognition-language setting, Settings input, and counter listener/readback wiring. Codex's duplicate local implementation has been withdrawn. Only PR #56's migration `0014_recognition_language.sql` (one file per database dialect) should be deployed. The default remains `en-US`; P2 measurements and real-device acceptance are still pending. Apply schema changes through the administrator release sequence above.
+
+Concurrent contributors must follow [AGENTS.md](AGENTS.md): use an isolated worktree, acquire an atomic feature/file claim through [the coordination tool](scripts/agent_coordination.py), and reserve migration versions before creating files. Claims and reservations live in the primary checkout's shared meeting log; all worktrees use the same OS lock. Run `python3 scripts/agent_coordination.py migrations` before committing migrations. CI checks duplicate versions, dialect parity, and competing claim behavior. Coordination tooling is separate from the unrelated LangGraph orchestrator.
+
 Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 
 **Stage: ledger/dashboard and mobile counter speech capture ready for controlled deployment preparation; live hosting and genuine voice/shop acceptance are pending.** Authentication, atomic receipts and stock movements, retries, review correction/rejection, reversals, catalogue forms/import, manual entry, daily summaries, settings, device pairing, CSV exports, pilot reconciliation tooling, operational expense tracking, customer credit & debt ledger ("Customer Book" / "Gbese"), and in-browser mobile counter microphone speech capture are implemented.
