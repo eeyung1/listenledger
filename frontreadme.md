@@ -56,7 +56,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 ### Home
 
 - [ ] F07. Present daily sales, daily expenses, outstanding customer debt, and review count with explicit time scopes.
-- [ ] F08. Rename the existing sales-minus-expenses metric to "Sales less expenses" wherever cost of goods sold is excluded.
+- [x] F08. Rename the existing sales-minus-expenses metric to "Sales less expenses" wherever cost of goods sold is excluded.
 - [ ] F09. Show recent activity, actionable review/low-stock alerts, and a prominent Open counter action.
 - [ ] F10. Collapse onboarding into a compact progress banner; remove microphone operation from Home once Counter is functional.
 
@@ -130,10 +130,10 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 | F01 | [PR #40](https://github.com/eeyung1/listenledger/pull/40) | Typecheck/build and 63 existing frontend tests passed; exact-head repository CI required before merge | Chromium rendered-template checks at 360/390/768/1440px for four current pages and Customer Book dialog; viewport containment, 44px button sizing, button alias parity, reduced motion, screenshots | Empty/intercepted test responses; not full authenticated or physical microphone acceptance. New shell, per-page layouts, modal focus lifecycle, and real-device checks remain pending. |
 | F02 | PR #43 | Typecheck/build and all 73 frontend tests passed (including 5 shell nav tests); repository CI required before merge | Shell navigation unit and DOM rendering tests verify sidebar and mobile stand-in nav | Mobile bottom navigation (F03) and route additions (F04) to follow in subsequent PRs |
 | F05 | [PR #58](https://github.com/eeyung1/listenledger/pull/58) | `npm run typecheck --prefix frontend`; `npm test --prefix frontend` (90 tests, 0 failures) | Unit tests cover the shared state blocks, form status, connection labels and the disconnected banner lifecycle; integration tests mount Inventory (failed load → shared error + Retry; empty catalogue → next step) and Transactions (empty review queue and ledger) | Automated DOM checks only; the banner and states have not been inspected at real viewports or on a device (F06/F40) |
+| F08 | [PR #62](https://github.com/eeyung1/listenledger/pull/62) (`0a45997`) | `npm test --prefix frontend`: TypeScript compilation and 80 tests passed, 0 failed | Mock-DOM regression checks the Home KPI label and confirms the displayed amount is unchanged | No real-browser or viewport check. KPI remains sales minus expenses; cost of goods sold is not included. |
 
 ## Next action
 
 Do not proceed to F03 during the product feature freeze. Next: finish P0 in realProductpath.md, then collect P1 field evidence. Resume this redesign only when the product gates permit it. Tick only completed and verified items.
 
 Owner directive (2026-10-18) authorizes resuming the existing `frontreadme.md` checklist while the real-product field gates remain in progress. This does not waive any P0–P7 evidence, privacy, or device-acceptance requirements and does not authorize unrelated milestones. Continue with F04 only when the planned routes can be implemented end-to-end without dead navigation; tick items only after implementation and relevant verification.
-
