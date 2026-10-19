@@ -116,12 +116,16 @@ type ParsedAnchors struct {
 	ProductMention string
 	Quantity       int
 	QuantityFound  bool
-	Unit           models.Unit
-	UnitFound      bool
-	AmountMinor    int64
-	AmountPhrase   string
-	AmountFound    bool
-	Currency       string
+	// QuantityInferred is true when Quantity was defaulted to 1 because the
+	// speaker named no quantity, rather than being heard (P5.5). Callers must
+	// not treat an inferred quantity as spoken evidence.
+	QuantityInferred bool
+	Unit             models.Unit
+	UnitFound        bool
+	AmountMinor      int64
+	AmountPhrase     string
+	AmountFound      bool
+	Currency         string
 }
 
 // ParseSpokenSegment extracts product mention, quantity, unit, and amount from one spoken clause.
@@ -165,9 +169,10 @@ func ParseSpokenSegment(text string, defaultCurrency string) ParsedAnchors {
 	}
 
 	// 3. Extract Quantity with self-correction handling
-	if qty, ok := resolveSpokenQuantity(cleaned, lower, res); ok {
+	if qty, ok, inferred := resolveSpokenQuantity(cleaned, lower, res); ok {
 		res.Quantity = qty
 		res.QuantityFound = true
+		res.QuantityInferred = inferred
 	}
 
 	// 4. Extract Product Mention
@@ -367,7 +372,9 @@ func extractSpokenAmount(cleaned, lower string) (int64, string, bool) {
 	return 0, "", false
 }
 
-func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool) {
+// resolveSpokenQuantity returns the quantity, whether one was found, and whether
+// it was inferred (defaulted to 1 because an amount was named but no quantity).
+func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool, bool) {
 	cleanLower := lower
 	cleanCleaned := cleaned
 	if res.AmountPhrase != "" {
@@ -399,13 +406,13 @@ func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool)
 				if res.AmountFound && int64(val*100) == res.AmountMinor {
 					continue
 				}
-				return val, true
+				return val, true, false
 			}
 		}
 
 		// Check words after marker
 		if qty, ok := extractSpokenQuantity(afterLower); ok {
-			return qty, true
+			return qty, true, false
 		}
 	}
 
@@ -417,13 +424,13 @@ func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool)
 			if res.AmountFound && int64(val*100) == res.AmountMinor {
 				continue
 			}
-			return val, true
+			return val, true, false
 		}
 	}
 
 	// Words check
 	if qty, ok := extractSpokenQuantity(cleanLower); ok {
-		return qty, true
+		return qty, true, false
 	}
 
 	// If no explicit quantity was extracted, but an amount was found (e.g. "Two k Peak milk thank you"):
@@ -431,11 +438,11 @@ func resolveSpokenQuantity(cleaned, lower string, res ParsedAnchors) (int, bool)
 	if res.AmountFound {
 		prod := cleanProductMention(cleaned, res)
 		if strings.Trim(prod, "- \t\r\n") != "" {
-			return 1, true
+			return 1, true, true
 		}
 	}
 
-	return 0, false
+	return 0, false, false
 }
 
 func extractSpokenQuantity(text string) (int, bool) {

@@ -693,8 +693,13 @@ func TestNigerianMarketColloquialNumbersAndUnits(t *testing.T) {
 	if l1.Quantity != 1 {
 		t.Errorf("expected quantity 1, got %d", l1.Quantity)
 	}
-	if l1.Status != models.StatusConfirmed {
-		t.Errorf("expected status confirmed, got %s (reasons: %v)", l1.Status, res1.Lines[0].ReviewReasons)
+	// P5.5: "Two k" is the price (₦2,000), so the quantity 1 was inferred rather
+	// than spoken. It must not confirm at a spoken quantity's 0.98.
+	if l1.Status != models.StatusReviewRequired {
+		t.Errorf("expected status review_required for an inferred quantity, got %s (reasons: %v)", l1.Status, res1.Lines[0].ReviewReasons)
+	}
+	if q := l1.Confidence.Quantity; q == nil || *q >= 0.75 {
+		t.Errorf("expected inferred quantity confidence below the review threshold, got %v", q)
 	}
 
 	// 2. "Three cartons Milo k-fifty thank you" -> quantity 3, carton, 50,000 NGN (5,000,000 kobo)
@@ -1212,5 +1217,94 @@ func TestP51PlainProductsStillParse(t *testing.T) {
 	line := res.Lines[0]
 	if line.Transaction.ProductID != "prd_milo" || line.Transaction.Quantity != 2 || line.Transaction.Amount.Amount != 400000 {
 		t.Fatalf("plain Milo sale parsed as %+v", line.Transaction)
+	}
+}
+
+// P5.5: the parser must distinguish a quantity it heard from one it defaulted.
+func TestParseSpokenSegment_QuantityInferredFlag(t *testing.T) {
+	cases := []struct {
+		input    string
+		quantity int
+		found    bool
+		inferred bool
+	}{
+		{"Milo, four thousand naira", 1, true, true},
+		{"Two Milo, four thousand naira", 2, true, false},
+		{"Milo", 0, false, false},
+	}
+	for _, tc := range cases {
+		anchors := validate.ParseSpokenSegment(tc.input, "NGN")
+		if anchors.Quantity != tc.quantity || anchors.QuantityFound != tc.found || anchors.QuantityInferred != tc.inferred {
+			t.Errorf("ParseSpokenSegment(%q) = qty %d (found=%v, inferred=%v), want qty %d (found=%v, inferred=%v)",
+				tc.input, anchors.Quantity, anchors.QuantityFound, anchors.QuantityInferred,
+				tc.quantity, tc.found, tc.inferred)
+		}
+	}
+}
+
+// P5.5: an inferred quantity is a guess, so it must score below a spoken one and
+// hold the movement for a human instead of auto-confirming stock from a number
+// nobody said (MVP_READINESS_AUDIT.md finding 5).
+func TestValidate_InferredQuantityIsHeldForReview(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+
+	inferred, err := engine.Validate(context.Background(), validate.CaptureRequest{
+		CaptureID:  "cap_inferred_qty",
+		Transcript: "Milo, two thousand naira. Thank you.",
+	}, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(inferred.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(inferred.Lines))
+	}
+	line := inferred.Lines[0].Transaction
+	if line.Quantity != 1 {
+		t.Errorf("expected the defaulted quantity 1, got %d", line.Quantity)
+	}
+	if line.Status != models.StatusReviewRequired {
+		t.Errorf("expected an inferred quantity to be held for review, got %s (reasons: %v)",
+			line.Status, inferred.Lines[0].ReviewReasons)
+	}
+	if q := line.Confidence.Quantity; q == nil || *q >= 0.75 {
+		t.Errorf("expected an inferred quantity confidence below the review threshold, got %v", q)
+	}
+
+	spoken, err := engine.Validate(context.Background(), validate.CaptureRequest{
+		CaptureID:  "cap_spoken_qty",
+		Transcript: "One Milo, two thousand naira. Thank you.",
+	}, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(spoken.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(spoken.Lines))
+	}
+	spokenLine := spoken.Lines[0].Transaction
+	if spokenLine.Status != models.StatusConfirmed {
+		t.Errorf("expected an explicitly spoken quantity to confirm, got %s (reasons: %v)",
+			spokenLine.Status, spoken.Lines[0].ReviewReasons)
+	}
+	if q := spokenLine.Confidence.Quantity; q == nil || *q != 0.98 {
+		t.Errorf("expected a spoken quantity confidence of 0.98, got %v", q)
+	}
+
+	// A caller cannot lower its own confidence: extracted_lines is client JSON
+	// and the inferred flag is not settable through it.
+	client, err := engine.Validate(context.Background(), validate.CaptureRequest{
+		CaptureID: "cap_client_qty",
+		ExtractedLines: []validate.CaptureLineInput{{
+			ProductName: "Milo",
+			Quantity:    1,
+			Unit:        models.Unit("pack"),
+			Amount:      &models.Money{Amount: 200000, Currency: "NGN"},
+		}},
+	}, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if q := client.Lines[0].Transaction.Confidence.Quantity; q == nil || *q != 0.98 {
+		t.Errorf("expected a client-supplied quantity to stay at 0.98, got %v", q)
 	}
 }
