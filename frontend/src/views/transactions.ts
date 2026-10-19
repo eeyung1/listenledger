@@ -32,7 +32,7 @@ import {
   type TransactionType,
   type Unit,
 } from "../api.js";
-import { enqueueManualTransaction, isNetworkError, syncOfflineQueue } from "../offline_queue.js";
+import { enqueueManualTransaction, isNetworkError, setActiveQueueShop, syncOfflineQueue } from "../offline_queue.js";
 import {
   applyFilteredTransactionToList,
   applyTransactionToList,
@@ -62,6 +62,7 @@ interface Filters {
 }
 
 export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanup {
+  setActiveQueueShop(shopId);
   let transactions: Transaction[] = [];
   let heldTransactions: Transaction[] = [];
   let disposed = false;
@@ -1227,14 +1228,14 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       void refetch();
     }
     // A socket reconnect usually means the network is back — replay anything
-    // queued offline (spoken captures and manual entries alike).
+    // queued offline (spoken captures and manual entries alike) for this shop.
     if (detail.status === "open") {
-      void syncOfflineQueue();
+      void syncOfflineQueue({ shopId, getActiveShopId: () => (disposed ? null : shopId) });
     }
   };
 
   const onOnlineBack = (): void => {
-    void syncOfflineQueue();
+    void syncOfflineQueue({ shopId, getActiveShopId: () => (disposed ? null : shopId) });
   };
 
   const onManualClick = (): void => {
@@ -1256,6 +1257,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
 
   return () => {
     disposed = true;
+    setActiveQueueShop(null);
     abortController.abort();
     window.removeEventListener("ll:transaction-received", onTransactionReceived);
     window.removeEventListener("ll:transaction-review-required", onTransactionReviewRequired);

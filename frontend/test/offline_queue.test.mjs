@@ -9,12 +9,16 @@ import {
   removeQueuedCapture,
   markCaptureSyncing,
   markCaptureFailed,
+  markCaptureQuarantined,
   clearQueue,
   isOnline,
   isNetworkError,
   syncOfflineQueue,
   getActiveStorageDriver,
   generateQueueId,
+  setActiveQueueShop,
+  getActiveQueueShop,
+  readAllRawCaptures,
 } from "../dist/offline_queue.js";
 import { createManualTransaction } from "../dist/api.js";
 
@@ -23,6 +27,7 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
   const originalFetch = globalThis.fetch;
 
   t.beforeEach(async () => {
+    setActiveQueueShop(null);
     await clearQueue();
     globalThis.fetch = originalFetch;
     if (typeof navigator !== "undefined") {
@@ -31,6 +36,7 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
   });
 
   t.afterEach(async () => {
+    setActiveQueueShop(null);
     await clearQueue();
     globalThis.fetch = originalFetch;
     if (typeof navigator !== "undefined") {
@@ -331,6 +337,239 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
     assert.equal(bodies.length, 2);
     assert.equal(bodies[0].request_id, "man_lost_ack_1");
     assert.equal(bodies[1].request_id, "man_lost_ack_1", "retry reuses the original request id");
+  });
+
+  await t.test("8. P4.8 Queue Isolation: Scoped reads and badge counts bind strictly to active shop", async () => {
+    // Enqueue 2 items for shop_alpha and 1 item for shop_beta
+    await enqueueCapture({
+      shop_id: "shop_alpha",
+      transcript: "Two Milo thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+    await enqueueCapture({
+      shop_id: "shop_alpha",
+      transcript: "One Indomie thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+    await enqueueCapture({
+      shop_id: "shop_beta",
+      transcript: "Three cartons milk thank you",
+      type: "restock",
+      closing_phrase: "thank you",
+    });
+
+    // Explicit shop scoping via argument
+    assert.equal(await getQueuedCount("shop_alpha"), 2);
+    assert.equal(await getQueuedCount("shop_beta"), 1);
+    assert.equal(await getQueuedCount("shop_other"), 0);
+
+    const raw = await readAllRawCaptures();
+    assert.equal(raw.length, 3, "storage stores all items across shops");
+
+    // Setting active authenticated shop drives default scoped reads
+    setActiveQueueShop("shop_alpha");
+    assert.equal(getActiveQueueShop(), "shop_alpha");
+    assert.equal(await getQueuedCount(), 2);
+    const alphaItems = await getQueuedCaptures();
+    assert.equal(alphaItems.length, 2);
+    assert.equal(alphaItems[0].transcript, "Two Milo thank you");
+    assert.equal(alphaItems[1].transcript, "One Indomie thank you");
+
+    // Switching active authenticated shop switches returned captures immediately
+    setActiveQueueShop("shop_beta");
+    assert.equal(getActiveQueueShop(), "shop_beta");
+    assert.equal(await getQueuedCount(), 1);
+    const betaItems = await getQueuedCaptures();
+    assert.equal(betaItems.length, 1);
+    assert.equal(betaItems[0].transcript, "Three cartons milk thank you");
+  });
+
+  await t.test("9. P4.8 Queue Isolation: syncOfflineQueue replays active shop items and preserves other shops pending data", async () => {
+    await enqueueCapture({
+      shop_id: "shop_alpha",
+      transcript: "Spoken sale alpha thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+    await enqueueManualTransaction("shop_alpha", {
+      request_id: "man_alpha_1",
+      type: "sale",
+      product_id: "prod_1",
+      quantity: 1,
+      unit: "pack",
+    });
+    await enqueueCapture({
+      shop_id: "shop_beta",
+      transcript: "Spoken sale beta thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+
+    const postedUrls = [];
+    globalThis.fetch = async (url) => {
+      postedUrls.push(String(url));
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ capture_id: "cap_replayed", transaction: { id: "tx_1" } }),
+      };
+    };
+
+    // Replay with active shop set to shop_alpha
+    setActiveQueueShop("shop_alpha");
+    const stats = await syncOfflineQueue();
+
+    assert.equal(stats.synced, 2, "only shop_alpha's 2 items replayed");
+    assert.equal(stats.failed, 0);
+    assert.equal(stats.skipped, 1, "shop_beta item skipped and preserved");
+    assert.equal(postedUrls.length, 2);
+
+    // shop_alpha queue is empty
+    assert.equal(await getQueuedCount("shop_alpha"), 0);
+
+    // shop_beta item remains queued and untouched in storage
+    assert.equal(await getQueuedCount("shop_beta"), 1);
+    const remainingBeta = await getQueuedCaptures("shop_beta");
+    assert.equal(remainingBeta.length, 1);
+    assert.equal(remainingBeta[0].transcript, "Spoken sale beta thank you");
+    assert.equal(remainingBeta[0].status, "queued");
+  });
+
+  await t.test("10. P4.8 Queue Isolation: Legacy unscoped entries without shop_id are quarantined and never replayed", async () => {
+    // Enqueue an unscoped entry without shop_id (legacy capture)
+    setActiveQueueShop(null);
+    const legacyItem = await enqueueCapture({
+      transcript: "Stray unscoped capture thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+    assert.equal(legacyItem.shop_id, undefined);
+
+    // Enqueue a valid capture for active shop
+    await enqueueCapture({
+      shop_id: "shop_alpha",
+      transcript: "Legit shop alpha sale thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+
+    const postedCaptures = [];
+    globalThis.fetch = async (url, init = {}) => {
+      postedCaptures.push(JSON.parse(String(init.body)));
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ capture_id: "cap_ok" }),
+      };
+    };
+
+    // Sync under shop_alpha
+    setActiveQueueShop("shop_alpha");
+    const stats = await syncOfflineQueue();
+
+    assert.equal(stats.synced, 1, "only valid shop_alpha item synced");
+    assert.equal(stats.quarantined, 1, "legacy unscoped item quarantined");
+    assert.equal(postedCaptures.length, 1);
+    assert.equal(postedCaptures[0].transcript, "Legit shop alpha sale thank you");
+
+    // The unscoped item must not be in pending queue badge
+    assert.equal(await getQueuedCount("shop_alpha"), 0);
+    assert.equal(await getQueuedCount(), 0);
+
+    // Inspect underlying storage: the item is quarantined with explanation
+    const allRaw = await readAllRawCaptures();
+    const quarantined = allRaw.find((i) => i.queue_id === legacyItem.queue_id);
+    assert.ok(quarantined);
+    assert.equal(quarantined.status, "quarantined");
+    assert.ok(quarantined.last_error?.includes("Quarantined"));
+  });
+
+  await t.test("11. P4.8 Queue Isolation: In-flight identity change (logout/account switch mid-sync) halts replay immediately", async () => {
+    await enqueueCapture({
+      shop_id: "shop_alpha",
+      transcript: "Capture 1 thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+    await enqueueCapture({
+      shop_id: "shop_alpha",
+      transcript: "Capture 2 thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+    await enqueueCapture({
+      shop_id: "shop_alpha",
+      transcript: "Capture 3 thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+
+    let currentIdentity = "shop_alpha";
+    const getActiveShopId = () => currentIdentity;
+
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      if (calls === 1) {
+        // User signs out or switches tab/account during the first upload
+        currentIdentity = null;
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ capture_id: "cap_1" }),
+        };
+      }
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ capture_id: `cap_${calls}` }),
+      };
+    };
+
+    const stats = await syncOfflineQueue({
+      shopId: "shop_alpha",
+      getActiveShopId,
+    });
+
+    assert.equal(stats.synced, 1, "first item succeeded");
+    assert.equal(calls, 1, "sync halted immediately upon mid-flight logout/switch");
+
+    // Remaining 2 items for shop_alpha remain safely queued
+    assert.equal(await getQueuedCount("shop_alpha"), 2);
+    const remaining = await getQueuedCaptures("shop_alpha");
+    assert.equal(remaining.length, 2);
+    assert.equal(remaining[0].transcript, "Capture 2 thank you");
+    assert.equal(remaining[1].transcript, "Capture 3 thank you");
+  });
+
+  await t.test("12. P4.8 Queue Isolation: Shop-scoped clearQueue removes only specified shop entries", async () => {
+    await enqueueCapture({
+      shop_id: "shop_alpha",
+      transcript: "Alpha capture thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+    await enqueueCapture({
+      shop_id: "shop_beta",
+      transcript: "Beta capture thank you",
+      type: "sale",
+      closing_phrase: "thank you",
+    });
+
+    assert.equal(await getQueuedCount("shop_alpha"), 1);
+    assert.equal(await getQueuedCount("shop_beta"), 1);
+
+    // Clear only shop_alpha
+    await clearQueue("shop_alpha");
+
+    assert.equal(await getQueuedCount("shop_alpha"), 0);
+    assert.equal(await getQueuedCount("shop_beta"), 1);
+
+    const remaining = await readAllRawCaptures();
+    assert.equal(remaining.length, 1);
+    assert.equal(remaining[0].shop_id, "shop_beta");
   });
 });
 
