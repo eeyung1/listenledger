@@ -49,7 +49,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 - [ ] F03. Build mobile bottom navigation and More menu with safe-area spacing, usable close behaviour, and no content obstruction.
 - [ ] F04. Register the new page routes and lifecycle handlers; preserve old links, browser back/forward, page titles, and unknown-route handling. Do not ship dead navigation entries.
 - [x] F05. Standardize loading, empty, validation, failed-save, and disconnected states with useful recovery actions.
-- [ ] F06. Verify shared shell at 360, 390, 768, and 1440px, including keyboard navigation and no page-level horizontal overflow.
+- [x] F06. Verify shared shell at 360, 390, 768, and 1440px, including keyboard navigation and no page-level horizontal overflow.
 
 ## Phase 2 — Home and Counter
 
@@ -94,7 +94,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 ## Phase 5 — Settings, authentication, and onboarding
 
 - [ ] F33. Organize settings into Shop details, Voice settings, Account, and Optional devices.
-- [ ] F34. Move technical thresholds, pilot audits, and reconciliation tools into Advanced/Pilot without removing functionality.
+- [x] F34. Move technical thresholds, pilot audits, and reconciliation tools into Advanced/Pilot without removing functionality.
 - [ ] F35. Explain that browser microphones do not require external-device pairing; make privacy statements match actual speech-processing behaviour.
 - [x] F36. Replace the authentication mode dropdown with clear Sign in/Create account/Recover account flows.
 - [ ] F37. Preserve recovery-code, session, logout, and validation behaviour; focus onboarding on shop details, products, microphone test, and first capture.
@@ -126,11 +126,13 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 
 | Feature IDs | PR / commit | Automated verification | Browser / live verification | Remaining limitations |
 | --- | --- | --- | --- | --- |
+| F34 | [PR #60](https://github.com/eeyung1/listenledger/pull/60) | Typecheck/build and full frontend suite pass; two new tests verify grouped controls and relocated threshold load/update/save/error/retry; all 50 existing hooks preserved | Focused real headless Chrome check at 360/390/768/1440px (stubbed API): Enter/Space toggle, Tab reaches slider, ArrowRight updates value, native FormData association, save request with recognition language, and zero horizontal overflow; screenshots/report in /tmp/f34-browser-evidence | Existing parked panels retain their visibility; real-device and hosted pilot acceptance remain open |
 | F36 | [PR #59](https://github.com/eeyung1/listenledger/pull/59) / `514d2dc` | Typecheck/build pass; full frontend suite 13 test-file groups pass, including six new auth regressions for account actions, request payloads/headers, recovery acknowledgement, retries, duplicate-submit suppression and existing sessions | Simulated DOM/fetch responses only | Real-browser keyboard, viewport and hosted account acceptance remain F38/F40/F43; no capture or device gate closed |
 | Planning document | [PR #39](https://github.com/eeyung1/listenledger/pull/39) | All four CI jobs passed before merge | Not applicable; no UI change | Plan established |
 | F01 | [PR #40](https://github.com/eeyung1/listenledger/pull/40) | Typecheck/build and 63 existing frontend tests passed; exact-head repository CI required before merge | Chromium rendered-template checks at 360/390/768/1440px for four current pages and Customer Book dialog; viewport containment, 44px button sizing, button alias parity, reduced motion, screenshots | Empty/intercepted test responses; not full authenticated or physical microphone acceptance. New shell, per-page layouts, modal focus lifecycle, and real-device checks remain pending. |
 | F02 | PR #43 | Typecheck/build and all 73 frontend tests passed (including 5 shell nav tests); repository CI required before merge | Shell navigation unit and DOM rendering tests verify sidebar and mobile stand-in nav | Mobile bottom navigation (F03) and route additions (F04) to follow in subsequent PRs |
 | F05 | [PR #58](https://github.com/eeyung1/listenledger/pull/58) | `npm run typecheck --prefix frontend`; `npm test --prefix frontend` (90 tests, 0 failures) | Unit tests cover the shared state blocks, form status, connection labels and the disconnected banner lifecycle; integration tests mount Inventory (failed load → shared error + Retry; empty catalogue → next step) and Transactions (empty review queue and ledger) | Automated DOM checks only; the banner and states have not been inspected at real viewports or on a device (F06/F40) |
+| F06 | [PR #61](https://github.com/eeyung1/listenledger/pull/61) | Browser harness run against `204f982`; typecheck and existing 90-test suite pass; owner reports all CI checks green on PR #61 | Headless Chrome via CDP, stubbed API, `/home`, `/transactions`, `/inventory`, `/settings` at 360/390/768/1440px: no horizontal overflow, all visible destinations reachable by Tab and activatable by Enter, focus ring and `aria-current` verified; screenshots captured | Stubbed data, not live service. Run predates F03 More-menu integration; repeat after F03 is integrated. No real-device/physical microphone checks. |
 | F08 | [PR #62](https://github.com/eeyung1/listenledger/pull/62) (`0a45997`) | `npm test --prefix frontend`: TypeScript compilation and 80 tests passed, 0 failed | Mock-DOM regression checks the Home KPI label and confirms the displayed amount is unchanged | No real-browser or viewport check. KPI remains sales minus expenses; cost of goods sold is not included. |
 
 ## Next action

@@ -16,7 +16,7 @@
     <!-- Shop Configuration Form -->
     <section class="panel" aria-labelledby="shop-settings-heading">
       <h2 class="panel__title" id="shop-settings-heading">Shop Details & Voice Boundaries</h2>
-      <form class="form settings-form" data-hook="settings-form">
+      <form class="form settings-form" id="shop-settings-form" data-hook="settings-form">
         <label class="form__field">
           Shop Name
           <input type="text" name="name" data-hook="setting-name" required maxlength="100" />
@@ -32,17 +32,6 @@
             <input type="text" name="timezone" data-hook="setting-timezone" required />
           </label>
         </div>
-
-        <label class="form__field">
-          Review Confidence Threshold
-          <div class="range-field">
-            <input type="range" name="confidence_threshold" min="0.50" max="1.00" step="0.01" data-hook="setting-threshold-range" />
-            <span class="range-field__value" data-hook="setting-threshold-val">75%</span>
-          </div>
-          <span class="form__hint">
-            Captures where any anchor (product, quantity, or amount) falls below this threshold are held for owner review.
-          </span>
-        </label>
 
         <div class="form__row">
           <label class="form__field">
@@ -131,6 +120,21 @@
       </ul>
     </section>
 
+    <details class="panel" data-hook="advanced-pilot-settings">
+      <summary><strong>Advanced / Pilot</strong></summary>
+      <p class="panel__hint">Configure when uncertain captures are held for owner review.</p>
+        <label class="form__field">
+          Review Confidence Threshold
+          <div class="range-field">
+            <input type="range" name="confidence_threshold" min="0.50" max="1.00" step="0.01" data-hook="setting-threshold-range" form="shop-settings-form" />
+            <span class="range-field__value" data-hook="setting-threshold-val">75%</span>
+          </div>
+          <span class="form__hint">
+            Captures where any anchor (product, quantity, or amount) falls below this threshold are held for owner review.
+          </span>
+        </label>
+
+      <p class="form__hint">Save threshold changes using Save Settings in Shop Details above.</p>
     <!-- Pilot Target Gates & Accuracy Agreements Panel -->
     <section class="panel" hidden data-pilot-parked="target-gates-heading" aria-labelledby="target-gates-heading">
       <div class="panel__header">
@@ -277,6 +281,8 @@
       </div>
     </section>
 
+    </details>
+
     <!-- Privacy & Hardware Notice -->
     <section class="panel panel--privacy" aria-labelledby="privacy-heading">
       <h2 class="panel__title" id="privacy-heading">Voice processing and trial privacy</h2>
@@ -289,4 +295,3 @@
     </section>
   </div>
 </section>
-
