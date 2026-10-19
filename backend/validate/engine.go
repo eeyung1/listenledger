@@ -58,6 +58,10 @@ type CaptureLineInput struct {
 	Unit        models.Unit        `json:"unit"`
 	Amount      *models.Money      `json:"amount,omitempty"`
 	Confidence  *models.Confidence `json:"confidence,omitempty"`
+	// QuantityInferred is set by the server when it parsed the transcript and
+	// defaulted the quantity to 1 because none was spoken (P5.5). It is never
+	// read from client JSON: a caller cannot lower its own confidence.
+	QuantityInferred bool `json:"-"`
 }
 
 // CaptureRequest is the edge intake payload for POST /api/captures.
@@ -239,6 +243,7 @@ func (e *Engine) Validate(
 					Amount:   anchors.AmountMinor,
 					Currency: anchors.Currency,
 				},
+				QuantityInferred: anchors.QuantityInferred,
 			})
 		}
 	}
@@ -303,6 +308,14 @@ func (e *Engine) Validate(
 		} else if qty > 10000 {
 			qtyConf = 0.50
 			reviewReasons = append(reviewReasons, "implausibly_large_quantity")
+		} else if line.QuantityInferred {
+			// P5.5: the parser defaulted the quantity to 1 because the speaker
+			// named none. That is a guess, not spoken evidence, so it must not
+			// report the 0.98 of a heard quantity. 0.60 sits below the default
+			// 0.75 review threshold, so a guessed quantity is held for a human
+			// instead of auto-confirming an inventory movement (roadmap P5.5:
+			// "lower confidence when a value was defaulted or inferred").
+			qtyConf = 0.60
 		}
 
 		// Unit Validation
