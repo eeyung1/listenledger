@@ -1099,3 +1099,118 @@ func TestP5InstructionDoesNotVoidASale(t *testing.T) {
 		t.Fatalf("expected the Milo sale to survive the instruction, got lines %+v", res.Lines)
 	}
 }
+
+// --- P5.1: number words inside brand names ---
+
+func p51Catalogue() []models.Product {
+	return []models.Product{
+		{ID: "prd_five_alive", ShopID: "shop_1", Name: "Five Alive", SKU: "FA-500",
+			Price: models.Money{Amount: 100000, Currency: "NGN"}, Quantity: 40, BaseUnit: "pack"},
+		{ID: "prd_seven_up", ShopID: "shop_1", Name: "Seven Up", SKU: "7UP-50",
+			Aliases: []string{"7Up"}, Price: models.Money{Amount: 100000, Currency: "NGN"}, Quantity: 40, BaseUnit: "bottle"},
+		{ID: "prd_three_crowns", ShopID: "shop_1", Name: "Three Crowns", SKU: "TC-400",
+			Price: models.Money{Amount: 100000, Currency: "NGN"}, Quantity: 30, BaseUnit: "tin"},
+		{ID: "prd_milo", ShopID: "shop_1", Name: "Milo 500g", SKU: "MILO-500",
+			Aliases:  []string{"Milo", "Nestle Milo", "Milo bottle"},
+			Price:    models.Money{Amount: 200000, Currency: "NGN"},
+			Quantity: 20, BaseUnit: "pack",
+			Packaging: []models.PackagingRelation{{From: "carton", To: "pack", Factor: 12}}},
+	}
+}
+
+func TestP51NumberBearingBrandNamesParse(t *testing.T) {
+	names := []string{"Five Alive", "Seven Up", "7Up", "Three Crowns", "Milo 500g", "Milo bottle", "Milo"}
+
+	cases := []struct {
+		input    string
+		product  string
+		quantity int
+		amount   int64
+	}{
+		{"Two Five Alive, one thousand naira", "Five Alive", 2, 100000},
+		{"Two Seven Up, one thousand naira", "Seven Up", 2, 100000},
+		{"Two 7Up, one thousand naira", "7Up", 2, 100000},
+		{"Two Three Crowns, one thousand naira", "Three Crowns", 2, 100000},
+	}
+	for _, tc := range cases {
+		anchors := validate.ParseSpokenSegmentWithProducts(tc.input, "NGN", names)
+		if anchors.ProductMention != tc.product {
+			t.Errorf("product for %q = %q, want %q", tc.input, anchors.ProductMention, tc.product)
+		}
+		if anchors.Quantity != tc.quantity || !anchors.QuantityFound {
+			t.Errorf("quantity for %q = %d (found=%v), want %d", tc.input, anchors.Quantity, anchors.QuantityFound, tc.quantity)
+		}
+		if anchors.AmountMinor != tc.amount {
+			t.Errorf("amount for %q = %d, want %d", tc.input, anchors.AmountMinor, tc.amount)
+		}
+	}
+}
+
+func TestP51BrandNameContainingUnitKeepsTheUnit(t *testing.T) {
+	anchors := validate.ParseSpokenSegmentWithProducts("two Milo bottle five hundred naira", "NGN", []string{"Milo bottle"})
+	if anchors.ProductMention != "Milo bottle" {
+		t.Fatalf("product = %q, want %q", anchors.ProductMention, "Milo bottle")
+	}
+	if !anchors.UnitFound || anchors.Unit != models.Unit("bottle") {
+		t.Fatalf("unit = %q (found=%v), want bottle", anchors.Unit, anchors.UnitFound)
+	}
+	if anchors.Quantity != 2 {
+		t.Fatalf("quantity = %d, want 2", anchors.Quantity)
+	}
+	if anchors.AmountMinor != 50000 {
+		t.Fatalf("amount = %d, want 50000", anchors.AmountMinor)
+	}
+}
+
+func TestP51EngineMatchesNumberBearingBrands(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := p51Catalogue()
+
+	cases := []struct {
+		transcript string
+		productID  string
+	}{
+		{"Two Five Alive, one thousand naira thank you", "prd_five_alive"},
+		{"Two Seven Up, one thousand naira thank you", "prd_seven_up"},
+		{"Two 7Up, one thousand naira thank you", "prd_seven_up"},
+		{"Two Three Crowns, one thousand naira thank you", "prd_three_crowns"},
+	}
+	for _, tc := range cases {
+		req := validate.CaptureRequest{CaptureID: "cap_p51", Transcript: tc.transcript}
+		res, err := engine.Validate(context.Background(), req, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+		if err != nil {
+			t.Fatalf("unexpected error for %q: %v", tc.transcript, err)
+		}
+		if len(res.Lines) != 1 {
+			t.Fatalf("expected one line for %q, got %d (%+v)", tc.transcript, len(res.Lines), res.Lines)
+		}
+		line := res.Lines[0]
+		if line.Transaction.ProductID != tc.productID {
+			t.Errorf("product for %q = %q, want %q", tc.transcript, line.Transaction.ProductID, tc.productID)
+		}
+		if line.Transaction.Quantity != 2 {
+			t.Errorf("quantity for %q = %d, want 2", tc.transcript, line.Transaction.Quantity)
+		}
+		if line.Transaction.Amount.Amount != 100000 {
+			t.Errorf("amount for %q = %d, want 100000", tc.transcript, line.Transaction.Amount.Amount)
+		}
+	}
+}
+
+func TestP51PlainProductsStillParse(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := p51Catalogue()
+
+	req := validate.CaptureRequest{CaptureID: "cap_p51_plain", Transcript: "two Milo 4000 naira thank you"}
+	res, err := engine.Validate(context.Background(), req, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.Lines) != 1 {
+		t.Fatalf("expected one line, got %d (%+v)", len(res.Lines), res.Lines)
+	}
+	line := res.Lines[0]
+	if line.Transaction.ProductID != "prd_milo" || line.Transaction.Quantity != 2 || line.Transaction.Amount.Amount != 400000 {
+		t.Fatalf("plain Milo sale parsed as %+v", line.Transaction)
+	}
+}
