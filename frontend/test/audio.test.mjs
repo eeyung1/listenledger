@@ -12,6 +12,7 @@ import {
   isWakeLockSupported,
   isSpeechSynthesisSupported,
   speakFeedback,
+  estimateReadbackMs,
   CounterSpeechListener,
   DEFAULT_RECOGNITION_LANGUAGE,
   playAudioFeedback,
@@ -1947,6 +1948,349 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.equal(candidates[1].transcript, "Two Milo, four thousand naira Thank you");
 
     listener.stop();
+    delete window.SpeechRecognition;
+  });
+
+  await t.test("28. P4.9 readback guard: the phone's own confirmation is never captured", async () => {
+    let recognitionInstance = null;
+    let startCount = 0;
+    let abortCount = 0;
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionInstance = this;
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        startCount++;
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {
+        abortCount++;
+        this.onend?.(new MockEvent("end"));
+      }
+      stop() {
+        this.onend?.(new MockEvent("end"));
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const spoken = [];
+    let lastUtterance = null;
+    window.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+      }
+    };
+    window.speechSynthesis = {
+      cancel: () => {},
+      speak: (utterance) => {
+        lastUtterance = utterance;
+        spoken.push(utterance.text);
+      },
+    };
+
+    const finalResult = (transcript) => {
+      const r = [{ transcript, confidence: 0.9 }];
+      r.isFinal = true;
+      return r;
+    };
+
+    const candidates = [];
+    const interim = [];
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      restockPhrase: "Stock received",
+      onBoundaryDetected: (cand) => candidates.push(cand),
+      onInterimTranscript: (text) => interim.push(text),
+    });
+
+    await listener.start();
+    assert.equal(startCount, 1);
+    assert.equal(listener.isListening(), true);
+
+    // The counter speaks its own confirmation: recognition is suspended first.
+    assert.equal(listener.announce("Stock received: 3 Milo 500g"), true);
+    assert.equal(abortCount, 1, "the live session is aborted before we speak");
+    assert.equal(startCount, 1, "no restart while the readback is playing");
+    assert.equal(listener.isListening(), true, "the dock still reports listening");
+    assert.deepEqual(spoken, ["Stock received: 3 Milo 500g"]);
+
+    // The microphone hears the readback. It must not become a capture, and it
+    // must not survive into the next session's transcript.
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [finalResult("Stock received 3 Milo 500g")],
+    });
+    assert.equal(candidates.length, 0, "the readback is not captured");
+    assert.equal(interim.length, 0, "the readback is not shown as heard speech");
+
+    // When the utterance ends a fresh, clean session starts.
+    lastUtterance.onend();
+    assert.equal(startCount, 2, "a fresh session resumes after the readback");
+    assert.equal(listener.isListening(), true);
+
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [finalResult("Two Milo, four thousand naira Thank you")],
+    });
+    assert.equal(candidates.length, 1, "exactly one sale is captured");
+    assert.equal(candidates[0].type, "sale");
+    assert.equal(
+      candidates[0].transcript,
+      "Two Milo, four thousand naira Thank you",
+      "the readback text is not spliced into the sale",
+    );
+
+    listener.stop();
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
+    delete window.SpeechRecognition;
+  });
+
+  await t.test("29. P4.9 readback guard: a readback that never ends still resumes", async () => {
+    let startCount = 0;
+    let abortCount = 0;
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        startCount++;
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {
+        abortCount++;
+      }
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    // A synthesiser that never reports `onend` and never claims to be speaking.
+    window.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+      }
+    };
+    window.speechSynthesis = {
+      cancel: () => {},
+      speak: () => {},
+    };
+
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      restockPhrase: "Stock received",
+    });
+    await listener.start();
+
+    assert.equal(listener.announce("Sale: 2 Milo"), true);
+    assert.equal(abortCount, 1);
+    assert.equal(startCount, 1);
+
+    // The fallback window is derived from the utterance length; wait past it.
+    await new Promise((r) => setTimeout(r, estimateReadbackMs("Sale: 2 Milo") + 400));
+    assert.equal(startCount, 2, "the listener resumes even without an onend event");
+    assert.equal(listener.isListening(), true);
+
+    listener.stop();
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
+    delete window.SpeechRecognition;
+  });
+
+  await t.test("30. P4.9 readback guard: announce() while idle just speaks", () => {
+    const spoken = [];
+    window.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+      }
+    };
+    window.speechSynthesis = {
+      cancel: () => {},
+      speak: (utterance) => spoken.push(utterance.text),
+    };
+
+    const listener = new CounterSpeechListener({});
+    assert.equal(listener.isListening(), false);
+    assert.equal(listener.announce("Voice readout enabled"), true);
+    assert.deepEqual(spoken, ["Voice readout enabled"]);
+    assert.equal(listener.isListening(), false, "an idle listener is not started");
+
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
+  });
+
+  await t.test("31. P4.9 readback guard: stop() during a readback leaves the listener stopped", async () => {
+    let startCount = 0;
+    let abortCount = 0;
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        startCount++;
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {
+        abortCount++;
+      }
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    let lastUtterance = null;
+    window.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+      }
+    };
+    window.speechSynthesis = {
+      cancel: () => {},
+      speak: (utterance) => {
+        lastUtterance = utterance;
+      },
+    };
+
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      restockPhrase: "Stock received",
+    });
+    await listener.start();
+
+    assert.equal(listener.announce("Stock received: 3 Milo 500g"), true);
+    assert.equal(abortCount, 1);
+
+    listener.stop();
+    assert.equal(listener.isListening(), false);
+    assert.equal(startCount, 1, "stopping does not restart the session");
+
+    // A late onend from the abandoned utterance must not bring it back.
+    lastUtterance.onend();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(startCount, 1, "a stopped listener stays stopped");
+    assert.equal(listener.isListening(), false);
+
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
+    delete window.SpeechRecognition;
+  });
+
+  await t.test("32. P4.9 home voice readout suspends recognition while the phone speaks", async () => {
+    let startCount = 0;
+    let abortCount = 0;
+    class MockSpeechRecognition {
+      constructor() {
+        this.continuous = true;
+        this.interimResults = true;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        startCount++;
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {
+        abortCount++;
+      }
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const spokenUtterances = [];
+    let lastUtterance = null;
+    window.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+      }
+    };
+    window.speechSynthesis = {
+      cancel: () => {},
+      speak: (utterance) => {
+        lastUtterance = utterance;
+        spokenUtterances.push(utterance.text);
+      },
+    };
+
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes("/api/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            today_sales_count: 2,
+            today_sales_amount: { amount: 1000000, currency: "NGN" },
+            pending_reviews: 0,
+            low_stock_count: 0,
+            active_devices_count: 1,
+            today_expenses_count: 0,
+            today_expenses_amount: { amount: 0, currency: "NGN" },
+            today_net_profit: { amount: 1000000, currency: "NGN" },
+          }),
+        };
+      }
+      if (u.includes("/api/transactions")) {
+        return { ok: true, status: 200, json: async () => ({ transactions: [], total: 0, limit: 20, offset: 0 }) };
+      }
+      if (u.includes("/api/inventory")) {
+        return { ok: true, status: 200, json: async () => ({ products: [], low_stock_count: 0 }) };
+      }
+      if (u.includes("/api/onboarding/status")) {
+        return { ok: true, status: 200, json: async () => ({ is_complete: true, steps: {} }) };
+      }
+      if (u.includes("/api/devices")) {
+        return { ok: true, status: 200, json: async () => ({ devices: [] }) };
+      }
+      if (u.includes("/api/customers/credit-summary")) {
+        return { ok: true, status: 200, json: async () => ({ total_outstanding_debt: { amount: 0, currency: "NGN" } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    document.body.innerHTML = HOME_HTML;
+    const cleanup = mountHome(document.body, "shop_test");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const micToggleBtn = document.querySelector("[data-hook='counter-mic-toggle-btn']");
+    const ttsToggleBtn = document.querySelector("[data-hook='counter-tts-toggle-btn']");
+    assert.notEqual(micToggleBtn, null, "mic toggle button must be mounted");
+    assert.notEqual(ttsToggleBtn, null, "voice readout toggle button must be mounted");
+
+    micToggleBtn.dispatchEvent(new MockEvent("click"));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(startCount, 1, "the counter listener is running");
+
+    ttsToggleBtn.dispatchEvent(new MockEvent("click"));
+    assert.deepEqual(spokenUtterances, ["Voice readout enabled"]);
+    assert.equal(abortCount, 1, "the readback suspends recognition");
+    assert.equal(startCount, 1, "no restart while the phone is speaking");
+
+    lastUtterance.onend();
+    assert.equal(startCount, 2, "recognition resumes once the readback ends");
+
+    cleanup();
+    delete window.speechSynthesis;
+    delete window.SpeechSynthesisUtterance;
     delete window.SpeechRecognition;
   });
 });
