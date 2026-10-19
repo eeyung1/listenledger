@@ -1589,10 +1589,12 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     };
 
     const candidates = [];
+    const suppressed = [];
     const listener = new CounterSpeechListener({
       salePhrase: "Thank you",
       restockPhrase: "Stock received",
       onBoundaryDetected: (cand) => candidates.push(cand),
+      onBoundarySuppressed: (text) => suppressed.push(text),
     });
 
     await listener.start();
@@ -1614,12 +1616,11 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.equal(candidates[0].closingPhrase, "Thank you");
     assert.equal(candidates[0].transcript, "Two Milo, four thousand naira Thank you");
 
-    // The recovered anchors are consumed, so a later standalone closing phrase
-    // does not re-merge them. It is emitted on its own (suppressing anchorless
-    // captures is P4.2, tracked separately). The second sale starts a new
-    // recognition session, which is what resets the P4.3 replay guard for the
-    // same result position (done deterministically instead of waiting out the
-    // escalating P4.7 restart delay).
+    // P4.2: a later standalone closing phrase with no anchors is idle chatter,
+    // not a sale, and is suppressed instead of being submitted. The recovered
+    // anchors above were already consumed, so nothing re-merges. Start a new
+    // recognition session deterministically to reset the P4.3 replay guard for
+    // the same result position.
     recognitionInstance.onend?.();
     await new Promise((r) => setTimeout(r, 10));
     listener.stop();
@@ -1627,8 +1628,8 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     await new Promise((r) => setTimeout(r, 20));
     recognitionInstance.onresult({ resultIndex: 0, results: [finalResult("Thank you")] });
     await new Promise((r) => setTimeout(r, 20));
-    assert.equal(candidates.length, 2, "a later closing phrase is a separate capture");
-    assert.equal(candidates[1].transcript, "Thank you");
+    assert.equal(candidates.length, 1, "an anchorless closing phrase is not submitted");
+    assert.deepEqual(suppressed, ["Thank you"], "the stray closing phrase is reported as suppressed");
 
     listener.stop();
   });
@@ -1697,7 +1698,8 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
 
     // A genuinely new finalized result can record a separate sale. Start a new
     // recognition session deterministically (the escalating P4.7 restart delay
-    // makes waiting for it flaky); onstart resets the replay guard.
+    // makes waiting for it flaky); onstart resets the replay guard. The new
+    // result carries anchors, since a bare "Thank you" is now suppressed (P4.2).
     recognitionInstance.onend?.();
     await new Promise((r) => setTimeout(r, 10));
     listener.stop();
@@ -1705,7 +1707,7 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     await new Promise((r) => setTimeout(r, 20));
     recognitionInstance.onresult({
       resultIndex: 0,
-      results: [result("Thank you", true)],
+      results: [result("One Milo, two thousand naira Thank you", true)],
     });
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(candidates.length, 2, "a separate sale is recorded");
@@ -1861,6 +1863,90 @@ test("Counter Audio & Speech-to-Text Pipeline Suite", async (t) => {
     assert.equal(configuredListener.getRecognitionLanguage(), "en-US");
     configuredListener.stop();
 
+    delete window.SpeechRecognition;
+  });
+
+  await t.test("27. P4.2 anchor-less closing phrases are not submitted; cancellations and anchored sales still are", async () => {
+    let recognitionInstance = null;
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionInstance = this;
+        this.continuous = false;
+        this.interimResults = false;
+        this.lang = "en-US";
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+      }
+      start() {
+        this.onstart?.(new MockEvent("start"));
+      }
+      abort() {}
+      stop() {}
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+
+    const finalResult = (transcript) => {
+      const r = [{ transcript, confidence: 0.9 }];
+      r.isFinal = true;
+      return r;
+    };
+
+    const candidates = [];
+    const suppressed = [];
+    const listener = new CounterSpeechListener({
+      salePhrase: "Thank you",
+      restockPhrase: "Stock received",
+      onBoundaryDetected: (cand) => candidates.push(cand),
+      onBoundarySuppressed: (text) => suppressed.push(text),
+    });
+
+    const restartSession = async () => {
+      recognitionInstance.onend?.();
+      await new Promise((r) => setTimeout(r, 10));
+      listener.stop();
+      await listener.start();
+      await new Promise((r) => setTimeout(r, 20));
+    };
+
+    await listener.start();
+
+    // A stray closing phrase with no anchors is idle chatter, not a sale.
+    recognitionInstance.onresult({ resultIndex: 0, results: [finalResult("thank you")] });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(candidates.length, 0, "an anchor-less closing phrase must not be submitted");
+    assert.deepEqual(suppressed, ["thank you"]);
+
+    // Background chatter that happens to end in the closing phrase is dropped too.
+    await restartSession();
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [finalResult("See you tomorrow my brother, thank you")],
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(candidates.length, 0, "chatter ending in a closing phrase is not submitted");
+    assert.deepEqual(suppressed, ["thank you", "See you tomorrow my brother, thank you"]);
+
+    // A spoken cancellation has no anchors but must still reach the server.
+    await restartSession();
+    recognitionInstance.onresult({ resultIndex: 0, results: [finalResult("cancel that")] });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(candidates.length, 1, "a spoken cancellation is still forwarded");
+    assert.equal(candidates[0].type, "cancelled");
+
+    // A normal sale with anchors is unaffected.
+    await restartSession();
+    recognitionInstance.onresult({
+      resultIndex: 0,
+      results: [finalResult("Two Milo, four thousand naira Thank you")],
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(candidates.length, 2, "an anchor-bearing sale is submitted");
+    assert.equal(candidates[1].type, "sale");
+    assert.equal(candidates[1].transcript, "Two Milo, four thousand naira Thank you");
+
+    listener.stop();
     delete window.SpeechRecognition;
   });
 });

@@ -56,6 +56,11 @@ export interface CounterSpeechListenerOptions {
   readonly onStateChange?: ((state: CounterListenerState) => void) | undefined;
   readonly onInterimTranscript?: ((transcript: string) => void) | undefined;
   readonly onBoundaryDetected?: ((candidate: BoundaryCaptureCandidate) => void) | undefined;
+  /**
+   * Reports a closing phrase that carried no anchors (P4.2). Such an utterance
+   * is idle chatter, not a sale, and is deliberately not submitted.
+   */
+  readonly onBoundarySuppressed?: ((transcript: string) => void) | undefined;
   readonly onError?: ((error: Error) => void) | undefined;
   readonly onAudioLevel?: ((level: number) => void) | undefined;
   readonly onWakeLockChange?: ((active: boolean) => void) | undefined;
@@ -913,6 +918,15 @@ export class CounterSpeechListener {
 
         this.lastBoundaryResultIndex = event.resultIndex;
         this.lastBoundaryResultsLength = event.results.length;
+
+        // P4.2: a closing phrase with no anchors at all is a stray "thank you"
+        // or background chatter. Do not submit it — it would become a review
+        // queue item. Spoken cancellations are always forwarded so they can
+        // void a prior entry.
+        if (boundaryType !== "cancelled" && !utteranceHasAnchors(assembled)) {
+          this.options.onBoundarySuppressed?.(assembled);
+          return;
+        }
 
         this.options.onBoundaryDetected?.({
           transcript: assembled,

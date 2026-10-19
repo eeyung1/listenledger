@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/eeyung1/listenledger-backend/models"
@@ -12,6 +13,20 @@ import (
 
 // DefaultReviewThreshold applies when a shop has not configured an explicit threshold.
 const DefaultReviewThreshold = 0.75
+
+// anchorlessSuppressed counts captures whose transcript contained no product,
+// quantity or amount anchors and were therefore dropped (P4.2) instead of being
+// turned into an "Unintelligible speech" review item. It is a process-local
+// diagnostic metric, never a correctness input.
+var anchorlessSuppressed int64
+
+// AnchorlessSuppressedCount reports how many anchor-less captures this process
+// has dropped since start. A steadily rising count with an otherwise clean
+// review queue means closing phrases and background chatter are being filtered
+// rather than queued for a human.
+func AnchorlessSuppressedCount() int64 {
+	return atomic.LoadInt64(&anchorlessSuppressed)
+}
 
 // CaptureLineInput represents pre-extracted or client-supplied structured anchors for one line.
 type CaptureLineInput struct {
@@ -57,6 +72,10 @@ type ValidationResult struct {
 	IsCreditSale   bool
 	Lines          []ValidatedLine
 	RequiresReview bool
+	// AnchorlessSuppressed is true when the transcript carried no anchors at all
+	// and was dropped rather than held for review (P4.2). Lines is empty and
+	// RequiresReview is false in that case.
+	AnchorlessSuppressed bool
 }
 
 // Engine encapsulates catalogue matching, transcript parsing, and confidence evaluation.
@@ -201,14 +220,25 @@ func (e *Engine) Validate(
 		}
 	}
 
+	anchorless := false
 	if len(linesToProcess) == 0 {
-		// Even empty or unintelligible speech is held rather than ignored
-		linesToProcess = append(linesToProcess, CaptureLineInput{
-			ProductName: "Unintelligible speech",
-			Quantity:    0,
-			Unit:        models.Unit("piece"),
-			Amount:      &models.Money{Amount: 0, Currency: currency},
-		})
+		// P4.2: a transcript with no anchors at all is a stray closing phrase or
+		// background chatter, not a sale. Drop it instead of creating an
+		// "Unintelligible speech" review item, and record it as a diagnostic.
+		// Spoken cancellations and genuinely empty requests keep the placeholder
+		// so their intent is still captured rather than silently discarded.
+		if !isCancelled && strings.TrimSpace(req.Transcript) != "" {
+			anchorless = true
+			atomic.AddInt64(&anchorlessSuppressed, 1)
+		} else {
+			// Even empty or unintelligible speech is held rather than ignored
+			linesToProcess = append(linesToProcess, CaptureLineInput{
+				ProductName: "Unintelligible speech",
+				Quantity:    0,
+				Unit:        models.Unit("piece"),
+				Amount:      &models.Money{Amount: 0, Currency: currency},
+			})
+		}
 	}
 
 	var validatedLines []ValidatedLine
@@ -377,14 +407,15 @@ func (e *Engine) Validate(
 	}
 
 	return ValidationResult{
-		CaptureID:      req.CaptureID,
-		Type:           txnType,
-		ClosingPhrase:  closingPhrase,
-		CustomerID:     customerID,
-		CustomerName:   customerName,
-		IsCreditSale:   isCreditSale,
-		Lines:          validatedLines,
-		RequiresReview: anyReview,
+		CaptureID:            req.CaptureID,
+		Type:                 txnType,
+		ClosingPhrase:        closingPhrase,
+		CustomerID:           customerID,
+		CustomerName:         customerName,
+		IsCreditSale:         isCreditSale,
+		Lines:                validatedLines,
+		RequiresReview:       anyReview,
+		AnchorlessSuppressed: anchorless,
 	}, nil
 }
 
