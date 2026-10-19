@@ -829,6 +829,12 @@ func (s *Server) reverseTransaction(w http.ResponseWriter, r *http.Request, id s
 }
 
 type manualTransactionRequest struct {
+	// RequestID is minted by the client once, before the first POST, and reused
+	// for every retry (P4.8). It is the idempotency key, so a manual entry that
+	// committed but whose response was lost replays instead of being recorded
+	// twice. It may also arrive as the Idempotency-Key header for parity with
+	// the capture endpoint.
+	RequestID string                 `json:"request_id"`
 	Type      models.TransactionType `json:"type"`
 	ProductID string                 `json:"product_id"`
 	Quantity  int                    `json:"quantity"`
@@ -837,9 +843,42 @@ type manualTransactionRequest struct {
 	Notes     string                 `json:"notes,omitempty"`
 }
 
+// manualRequestFingerprint is the stable, caller-controlled shape of a manual
+// entry, used to tell a genuine retry (same id, same content → replay) from a
+// conflicting reuse (same id, different content → 409). It deliberately
+// excludes server-minted ids, timestamps and catalogue-derived prices: those
+// change on every attempt (or when the catalogue is edited) and must not turn a
+// harmless retry into a conflict.
+type manualRequestFingerprint struct {
+	Type      models.TransactionType `json:"type"`
+	ProductID string                 `json:"product_id"`
+	Quantity  int                    `json:"quantity"`
+	Unit      models.Unit            `json:"unit"`
+	Amount    *int64                 `json:"amount,omitempty"`
+	Notes     string                 `json:"notes"`
+}
+
 type manualTransactionResponse struct {
 	Transaction models.Transaction `json:"transaction"`
 	Product     *models.Product    `json:"product,omitempty"`
+}
+
+// manualFingerprint derives the idempotency fingerprint from the caller's
+// request fields only. product_id is expected to be trimmed already, and notes
+// is the trimmed transcript note the handler computed.
+func manualFingerprint(req manualTransactionRequest, notes string) manualRequestFingerprint {
+	fp := manualRequestFingerprint{
+		Type:      req.Type,
+		ProductID: req.ProductID,
+		Quantity:  req.Quantity,
+		Unit:      req.Unit,
+		Notes:     notes,
+	}
+	if req.Amount != nil {
+		amount := req.Amount.Amount
+		fp.Amount = &amount
+	}
+	return fp
 }
 
 func (s *Server) handleTransactionsManual(w http.ResponseWriter, r *http.Request) {
@@ -855,6 +894,19 @@ func (s *Server) handleTransactionsManual(w http.ResponseWriter, r *http.Request
 
 	var req manualTransactionRequest
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	// P4.8: require a stable, client-minted request id before anything else so a
+	// caller cannot fall back to the old "mint a fresh key per request" path.
+	// A body field and the Idempotency-Key header are both accepted; the body
+	// wins when present.
+	requestKey := strings.TrimSpace(req.RequestID)
+	if requestKey == "" {
+		requestKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	}
+	if requestKey == "" || len(requestKey) > 128 {
+		writeError(w, http.StatusBadRequest, "request_id is required (maximum 128 bytes)")
 		return
 	}
 
@@ -946,14 +998,17 @@ func (s *Server) handleTransactionsManual(w http.ResponseWriter, r *http.Request
 		Transcript:  transcript,
 	}
 
-	idempotencyKey := fmt.Sprintf("man_%s_%d", id, now.UnixNano())
-	payloadBytes, _ := json.Marshal(txn)
+	idempotencyKey := requestKey
+	fingerprint := manualFingerprint(req, notes)
+	payloadBytes, _ := json.Marshal(fingerprint)
 	sum := sha256.Sum256(payloadBytes)
 	hashStr := hex.EncodeToString(sum[:])
 
 	result, err := s.store.RecordMovement(r.Context(), txn, idempotencyKey, hashStr)
 	if err != nil {
 		switch {
+		case errors.Is(err, storage.ErrConflict):
+			writeError(w, http.StatusConflict, err.Error())
 		case errors.Is(err, storage.ErrInsufficientStock):
 			writeError(w, http.StatusConflict, err.Error())
 		case errors.Is(err, storage.ErrCurrency), errors.Is(err, models.ErrPackaging), errors.Is(err, storage.ErrInvalidMovement):
@@ -961,6 +1016,23 @@ func (s *Server) handleTransactionsManual(w http.ResponseWriter, r *http.Request
 		default:
 			s.fail(w, r, "record manual transaction", err)
 		}
+		return
+	}
+
+	if result.Replayed {
+		// A retry of a request that committed but whose response was lost. Return
+		// the original transaction without moving stock a second time or
+		// re-broadcasting events, so connected dashboards do not double-count it.
+		var product *models.Product
+		if result.Transaction.ProductID != "" {
+			if p, err := s.store.GetProductByID(r.Context(), shopID, result.Transaction.ProductID); err == nil {
+				product = &p
+			}
+		}
+		writeJSON(w, http.StatusOK, manualTransactionResponse{
+			Transaction: result.Transaction,
+			Product:     product,
+		})
 		return
 	}
 

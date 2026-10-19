@@ -20,6 +20,7 @@ import {
   fetchInventory,
   fetchTransactionDecision,
   fetchTransactions,
+  generateManualRequestId,
   getExportTransactionsUrl,
   rejectTransaction,
   reverseTransaction,
@@ -1102,6 +1103,10 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       statusMsg.hidden = true;
 
       const input: ManualTransactionInput = {
+        // P4.8: mint the id once here. The same value is used for the online
+        // POST and, if that fails at the transport, for the queued replay — so a
+        // committed entry whose response was lost is deduplicated server-side.
+        request_id: generateManualRequestId(),
         type: typeSelect.value as TransactionType,
         product_id: prodId,
         quantity: qty,

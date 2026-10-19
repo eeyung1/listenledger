@@ -624,12 +624,37 @@ export async function importCatalogue(
 }
 
 export interface ManualTransactionInput {
+  /**
+   * Stable, browser-minted id for one manual entry (P4.8). Generated once
+   * before the first POST and reused for every retry — including the offline
+   * queue replay — so a request that committed but whose response was lost is
+   * replayed instead of recorded twice.
+   */
+  request_id: string;
   type: TransactionType;
   product_id: string;
   quantity: number;
   unit: Unit;
   amount?: Money | undefined;
   notes?: string | undefined;
+}
+
+/**
+ * Mints a manual request id in the browser (P4.8), mirroring `generateCaptureId`
+ * for the spoken path. The value must be created once per entry and carried
+ * through the queue; generating it at POST time would defeat the retry safety.
+ */
+export function generateManualRequestId(now: number = Date.now()): string {
+  const cryptoObj = typeof crypto !== "undefined" ? crypto : undefined;
+  if (typeof cryptoObj?.randomUUID === "function") {
+    try {
+      return `man_${cryptoObj.randomUUID()}`;
+    } catch {
+      // fall through to the deterministic fallback
+    }
+  }
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `man_${now.toString(36)}_${rand}`;
 }
 
 /** POST /api/transactions/manual — record a manual sale or restock fallback. */
@@ -641,6 +666,9 @@ export async function createManualTransaction(
     headers: {
       "Content-Type": "application/json",
       "X-ListenLedger-Request": "1",
+      // Sent both in the body and as the P4.3-style header so either can serve
+      // as the server-side idempotency key for a retry.
+      "Idempotency-Key": input.request_id,
     },
     body: JSON.stringify(input),
   });

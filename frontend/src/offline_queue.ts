@@ -458,16 +458,10 @@ export async function syncOfflineQueue(
         let result: CaptureResult | undefined;
         if (item.kind === "manual-transaction" && item.manual_payload) {
           // P4.8: manual counter entries replay into the manual-transaction
-          // endpoint, not /api/captures.
-          const payload = item.manual_payload;
-          await createManualTransaction({
-            type: payload.type,
-            product_id: payload.product_id,
-            quantity: payload.quantity,
-            unit: payload.unit,
-            amount: payload.amount,
-            notes: payload.notes,
-          });
+          // endpoint, not /api/captures. The stored payload keeps the entry's
+          // original request_id, so the server can replay a committed entry
+          // whose response was lost rather than recording it twice.
+          await createManualTransaction({ ...item.manual_payload });
         } else {
           result = await postCapture({
             capture_id: item.capture_id || item.queue_id,

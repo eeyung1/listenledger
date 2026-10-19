@@ -318,7 +318,7 @@ func TestPreventBaseUnitMutationWithHistoricalMovements(t *testing.T) {
 	}
 
 	// Record a manual sale transaction to establish historical stock movements
-	manualBody := fmt.Sprintf(`{"type":"sale","product_id":"%s","quantity":2,"unit":"piece","amount":{"amount":800000,"currency":"NGN"}}`, created.ID)
+	manualBody := fmt.Sprintf(`{"request_id":"man_onboard_hist_1","type":"sale","product_id":"%s","quantity":2,"unit":"piece","amount":{"amount":800000,"currency":"NGN"}}`, created.ID)
 	mReq := httptest.NewRequest(http.MethodPost, "/api/transactions/manual", strings.NewReader(manualBody))
 	mRec := httptest.NewRecorder()
 	handler.ServeHTTP(mRec, mReq)
