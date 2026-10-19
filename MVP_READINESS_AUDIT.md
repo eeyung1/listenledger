@@ -66,6 +66,8 @@ The server correctly derives the destination shop from the current authenticated
 
 Required repair: scope reads, badges and replay to the active identity; preserve other accounts' entries; recheck identity across in-flight sync and reject/quarantine legacy unscoped entries. Validate with account A → logout → account B → reconnect, including multiple tabs.
 
+Repaired on branch `feat/p4-8-queue-shop-isolation` (base `71787e7`): queue reads (`getQueuedCaptures`) and counter badges (`getQueuedCount`) bind to the active authenticated shop; `syncOfflineQueue` replays only captures matching the active shop while preserving other shops' pending data in local storage; legacy unscoped entries missing `shop_id` are quarantined rather than submitted under arbitrary accounts; and in-flight identity checks immediately abort replay if the user signs out or switches accounts mid-sync. Covered by unit tests 8–12 in `frontend/test/offline_queue.test.mjs`. Multi-account physical-device acceptance remains open.
+
 ### 3. Manual fallback is only partially available offline — high priority
 
 Opening the manual form in `frontend/src/views/transactions.ts` always fetches inventory. On failure the product selector contains “Failed to load products”; submission requires a selected product. Thus a form loaded while online can queue a later failed POST, but opening the form after an outage is not a complete fallback. Initial app authentication and route templates also require network access; no offline app-shell/catalogue implementation was found in the reviewed path.

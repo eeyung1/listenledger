@@ -69,6 +69,7 @@ import {
   getQueuedCount,
   isNetworkError,
   isOnline,
+  setActiveQueueShop,
   syncOfflineQueue,
 } from "../offline_queue.js";
 import { connectionStatusLabel, uiStateItem } from "../ui_state.js";
@@ -105,6 +106,7 @@ const OFFLINE_MIC_TOAST =
 let counterRecognitionLanguage = DEFAULT_RECOGNITION_LANGUAGE;
 
 export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
+  setActiveQueueShop(shopId);
   const state: HomeState = { transactions: [], products: [] };
   let disposed = false;
   const abortController = new AbortController();
@@ -665,7 +667,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   async function updateOfflineQueueBadge(): Promise<void> {
     if (!offlineBadge) return;
     try {
-      const count = await getQueuedCount();
+      const count = await getQueuedCount(shopId);
       if (count > 0) {
         offlineBadge.style.display = "inline-flex";
         setText(offlineBadge, `📦 ${count} Queued Offline`);
@@ -681,7 +683,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
   let isSyncRunning = false;
   async function triggerOfflineSync(): Promise<void> {
     if (isSyncRunning || !isOnline()) return;
-    const count = await getQueuedCount();
+    const count = await getQueuedCount(shopId);
     if (count === 0) return;
 
     isSyncRunning = true;
@@ -691,10 +693,14 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
     }
 
     try {
-      const { synced, failed } = await syncOfflineQueue((item, result) => {
-        if (result) {
-          showCaptureToast(`✓ Synced offline capture: "${item.transcript}"`, "success");
-        }
+      const { synced, failed } = await syncOfflineQueue({
+        shopId,
+        getActiveShopId: () => (disposed ? null : shopId),
+        onProgress: (item, result) => {
+          if (result) {
+            showCaptureToast(`✓ Synced offline capture: "${item.transcript}"`, "success");
+          }
+        },
       });
 
       if (synced > 0) {
@@ -1101,6 +1107,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
   return () => {
     disposed = true;
+    setActiveQueueShop(null);
     abortController.abort();
     if (counterListener) {
       counterListener.stop();
