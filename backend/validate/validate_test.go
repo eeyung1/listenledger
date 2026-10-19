@@ -902,3 +902,112 @@ func TestColloquialParserVariants(t *testing.T) {
 		}
 	}
 }
+
+// --- P4.2: stray closing phrases and chatter must not become review items ---
+
+func TestP42StrayClosingPhraseIsNotHeldForReview(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+
+	before := validate.AnchorlessSuppressedCount()
+
+	// Roadmap P4.2 acceptance: ten stray "thank you"s create zero review items.
+	// These are transcripts the parser resolves to no anchors at all, so they
+	// used to become an "Unintelligible speech" review line.
+	strays := []string{
+		"Thank you.",
+		"thank you",
+		"Thank you",
+		"thank you.",
+		"THANK YOU.",
+		"Thank you!",
+		"thank you!",
+		"Thank you..",
+		" thank you",
+		"Thank you. ",
+	}
+	for _, transcript := range strays {
+		req := validate.CaptureRequest{CaptureID: "cap_stray", Transcript: transcript}
+		res, err := engine.Validate(context.Background(), req, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+		if err != nil {
+			t.Fatalf("Validate(%q) unexpected error: %v", transcript, err)
+		}
+		if !res.AnchorlessSuppressed {
+			t.Errorf("Validate(%q): expected AnchorlessSuppressed true", transcript)
+		}
+		if len(res.Lines) != 0 {
+			product := ""
+			if len(res.Lines) > 0 {
+				product = res.Lines[0].Transaction.ProductName
+			}
+			t.Errorf("Validate(%q): expected no lines, got %d (first line %q)", transcript, len(res.Lines), product)
+		}
+		if res.RequiresReview {
+			t.Errorf("Validate(%q): expected no review requirement", transcript)
+		}
+	}
+
+	if got := validate.AnchorlessSuppressedCount() - before; got != int64(len(strays)) {
+		t.Errorf("AnchorlessSuppressedCount increased by %d, want %d", got, len(strays))
+	}
+}
+
+func TestP42LegitimatePartialSaleIsStillValidated(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+
+	// A product mention with no quantity or amount is a partial-sale anchor, not
+	// idle chatter. It must still be captured and held for review, not dropped.
+	req := validate.CaptureRequest{CaptureID: "cap_partial", Transcript: "Milo"}
+	res, err := engine.Validate(context.Background(), req, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.AnchorlessSuppressed {
+		t.Fatalf("a product mention must not be treated as anchor-less chatter")
+	}
+	if len(res.Lines) != 1 {
+		t.Fatalf("expected 1 line for the partial sale, got %d", len(res.Lines))
+	}
+	if !res.RequiresReview || res.Lines[0].Transaction.Status != models.StatusReviewRequired {
+		t.Errorf("expected the partial sale to be held for review, got status %s", res.Lines[0].Transaction.Status)
+	}
+}
+
+func TestP42SpokenCancellationWithoutAnchorsIsStillRecorded(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+
+	// "cancel that" carries no anchors, but it must still be recorded so the
+	// spoken cancellation can void a prior entry.
+	req := validate.CaptureRequest{CaptureID: "cap_cancel", Transcript: "cancel that"}
+	res, err := engine.Validate(context.Background(), req, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.AnchorlessSuppressed {
+		t.Fatalf("a spoken cancellation must not be suppressed")
+	}
+	if len(res.Lines) != 1 || res.Lines[0].Transaction.Status != models.StatusCancelled {
+		t.Fatalf("expected one cancelled line, got %+v", res.Lines)
+	}
+}
+
+func TestP42EmptyTranscriptKeepsReviewPlaceholder(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+
+	// A genuinely empty request is not closing-phrase chatter; keep the existing
+	// review placeholder rather than silently discarding it.
+	req := validate.CaptureRequest{CaptureID: "cap_empty", Transcript: ""}
+	res, err := engine.Validate(context.Background(), req, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.AnchorlessSuppressed {
+		t.Fatalf("an empty transcript must not be reported as anchor-less chatter")
+	}
+	if len(res.Lines) != 1 || res.Lines[0].Transaction.ProductName != "Unintelligible speech" {
+		t.Fatalf("expected the unintelligible-speech placeholder, got %+v", res.Lines)
+	}
+}

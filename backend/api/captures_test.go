@@ -13,6 +13,7 @@ import (
 	"github.com/eeyung1/listenledger-backend/api"
 	"github.com/eeyung1/listenledger-backend/models"
 	"github.com/eeyung1/listenledger-backend/storage"
+	"github.com/eeyung1/listenledger-backend/validate"
 )
 
 type dummyPublisher struct{}
@@ -739,5 +740,77 @@ func TestCaptures_ReplayedCaptureIDRecordsOnce(t *testing.T) {
 	}
 	if milo.Quantity != 18 {
 		t.Fatalf("replay double-recorded stock: expected 18, got %d", milo.Quantity)
+	}
+}
+
+func TestP42AnchorlessCaptureCreatesNoLedgerOrReviewEntries(t *testing.T) {
+	store, handler, shopID := setupCaptureTest(t)
+	defer store.Close()
+
+	before := validate.AnchorlessSuppressedCount()
+
+	// P4.2: a stray closing phrase with no anchors must not create a review item
+	// (or any ledger row).
+	body := bytes.NewBufferString(`{
+		"capture_id": "cap_stray_1",
+		"transcript": "Thank you."
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/captures", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var capRes struct {
+		CaptureID      string               `json:"capture_id"`
+		Transactions   []models.Transaction `json:"transactions"`
+		RequiresReview bool                 `json:"requires_review"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &capRes); err != nil {
+		t.Fatalf("decode capture response: %v", err)
+	}
+	if len(capRes.Transactions) != 0 {
+		t.Fatalf("expected no transactions for anchor-less chatter, got %d", len(capRes.Transactions))
+	}
+	if capRes.RequiresReview {
+		t.Fatalf("expected no review requirement for anchor-less chatter")
+	}
+
+	// Nothing reached the ledger, in any status.
+	all, total, err := store.QueryTransactions(context.Background(), shopID, storage.TransactionFilter{Limit: 50})
+	if err != nil {
+		t.Fatalf("QueryTransactions: %v", err)
+	}
+	if total != 0 || len(all) != 0 {
+		t.Fatalf("expected zero stored transactions, got total=%d rows=%d", total, len(all))
+	}
+
+	// A genuine sale on the same shop still records normally afterwards.
+	saleBody := bytes.NewBufferString(`{
+		"capture_id": "cap_sale_after",
+		"transcript": "Two Milo, four thousand naira. Thank you."
+	}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/captures", saleBody)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for the real sale, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var saleRes struct {
+		Transactions []models.Transaction `json:"transactions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &saleRes); err != nil {
+		t.Fatalf("decode sale response: %v", err)
+	}
+	if len(saleRes.Transactions) != 1 {
+		t.Fatalf("expected the real sale to record one transaction, got %d", len(saleRes.Transactions))
+	}
+
+	// The diagnostic metric moved by exactly the one suppressed capture.
+	if got := validate.AnchorlessSuppressedCount() - before; got != 1 {
+		t.Fatalf("expected exactly one suppressed capture, count moved by %d", got)
 	}
 }

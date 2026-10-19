@@ -145,6 +145,19 @@ func (s *Server) handleCaptures(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// P4.2: an anchor-less capture (a stray closing phrase or background
+	// chatter) produced no lines. Record it as a diagnostic metric rather than
+	// a review item, then fall through to return an accepted receipt with no
+	// movements. The transcript itself is not logged.
+	if validationRes.AnchorlessSuppressed {
+		s.log.Info("capture: suppressed transcript with no anchors",
+			"shop_id", shopID,
+			"capture_id", req.CaptureID,
+			"transcript_chars", len(req.Transcript),
+			"suppressed_total", validate.AnchorlessSuppressedCount(),
+		)
+	}
+
 	// 4. Record movements atomically
 	idempotencyBase := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if idempotencyBase == "" {
