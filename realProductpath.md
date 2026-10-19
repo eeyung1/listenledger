@@ -2,11 +2,13 @@
 
 This document sets the delivery priority for ListenLedger. It comes from a codebase review on **16 October 2026** at `db85661`, which was merged to `main` as #42. Line references were checked against `main` at `72af068`. Until the gates below are passed, it takes precedence over the milestone roadmap in [README.md](README.md) and [frontreadme.md](frontreadme.md).
 
+**Readiness audit — 19 October 2026, source baseline `4337c78`:** approximately **55% ready / 45% remaining** to a field-validated MVP, with a judgment range of **40–50% remaining**. This is an evidence-weighted readiness estimate, not measured development effort or a delivery-date forecast. See [the detailed codebase audit](MVP_READINESS_AUDIT.md) for scoring, code findings and verification limits, and [the field acceptance register](#real-world-testing-register--19-october-2026) below for every remaining field gate. Original problem descriptions and old line numbers below describe the earlier review; dated implementation notes and this audit take precedence. No field gate is closed by a merge or automated test.
+
 ## The only question that matters
 
 > **Can a microphone + software reliably turn a structured real-world sales conversation into an accurate inventory transaction without manual data entry?** — Blueprint §24
 
-**Status: unanswered.** No real counter audio has been recorded or evaluated. No shop has used the system. `TRIAL_REPORT.md` scores 20 hand-written sentences and is not evidence. Everything below exists to answer this question as fast and cheaply as possible.
+**Status: unanswered in the available evidence.** This checkout contains no completed field-session evidence rows, labelled real-counter dataset or documented shop pilot results. This does not establish that no unreported testing has occurred elsewhere. `TRIAL_REPORT.md` scores 20 synthetic interactions and is not field evidence. Everything below exists to answer this question as fast and cheaply as possible.
 
 ## Working rules while this document is open
 
@@ -54,10 +56,11 @@ These are not needed to answer the core question. Stop extending them. Hide them
 - [x] P0a: Replace inaccurate privacy claims with current browser-processing and retention behaviour; explain the transcript queue's connectivity limits.
 - [x] P0a: Align README and frontend priorities with this document's feature freeze.
 - [x] P0b implementation on `fix/p0-disable-audio-retention`: disable browser snippet recording, strip uploads and new queue entries, discard audio at server intake, and reject detected credit attribution before any ledger write.
-- [ ] P0b release: attach real-device evidence, verify exact-head CI, merge and verify the deployed build (working rule 2).
+- [x] P0b source integration: merged in PR #48 (`1208fb7`); source at `4337c78` discards incoming audio and rejects detected customer/credit attribution before ledger writes.
+- [ ] P0b release acceptance: attach real-device evidence, verify exact-head CI and verify the deployed build (working rule 2). Merge history alone does not satisfy this gate.
 - [ ] Verify P0b on a real device and deployed build, then close the parent P0 gate.
 
-P0a is a UI-only increment: hidden controls are not an API authorization boundary. Spoken credit attribution is rejected in the P0b candidate; it is not disabled in the live P0a build merely by hiding the credit book. No P1–P7 evidence or capture accuracy is claimed. Automated checks and desktop-browser inspection validate this interface change only.
+P0a is a UI-only increment: hidden controls are not an API authorization boundary. Spoken credit attribution is rejected in merged P0b source; the currently deployed commit and behaviour must still be verified. No P1–P7 evidence or capture accuracy is claimed. Automated checks and desktop-browser inspection validate implementation only.
 
 
 ---
@@ -151,7 +154,7 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 
 ### P4.4 Recognition language is American English
 
-- [x] Configurable language implementation: canonical PR #56 (`56166be`, opencode) persists `recognition_language`, exposes a Settings input, and wires the counter listener/readback. Codex's duplicate local implementation is withdrawn; keep only PR #56's migration 0014 per dialect. Default stays en-US pending P2 evidence. Implementation is prepared, not merged or field-accepted.
+- [x] Configurable language implementation: canonical PR #56 (`56166be`, opencode), merged as `19e3287`, persists `recognition_language`, exposes a Settings input, and wires the counter listener/readback. Codex's duplicate local implementation is withdrawn; keep only PR #56's migration 0014 per dialect. Default stays en-US pending P2 evidence. Source integration is complete; deployed schema and real-device acceptance remain unverified by this audit.
 
 - **Problem:** `recognition.lang = "en-US"` (`audio.ts:781`). Voice readback is also `en-US` (`audio.ts:450`).
 - **Fix:** make the recognition language a shop setting, defaulting to the P2 winner (likely `en-NG`).
@@ -179,7 +182,10 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 - **Problem:** Chrome's default Web Speech recognition runs on Google's servers. Without a network connection there is no transcript to queue, so the IndexedDB queue only covers failures between recognition and POST.
 - **Fix:** use on-device recognition where the chosen engine supports it. Otherwise, state plainly in the UI that voice capture needs a connection, and keep manual entry as the offline fallback.
 - [x] Implementation on branch `feat/p4-8-honest-offline-voice-capture`: the counter dock now states plainly when offline ("Voice capture needs a connection — speech is recognized in the cloud; use manual counter entry while offline; pending captures sync when reconnected"), the mic toggle reads "Voice Offline" and refuses to start a doomed recognition session offline, an outage while listening stops the listener instead of feeding the P4.7 backoff, and reconnecting restores the idle dock and resumes offline sync. Manual counter entry in the Ledger remains the offline fallback. Covered by a mounted-view connectivity test. Merged to main via PR #52 (`6cc3d51`).
-- [x] Fallback completion on branch `feat/p4-8b-manual-entry-offline-fallback`: manual counter entry actually works offline now — a manual POST that hits a network failure is queued on-device with a `kind: "manual-transaction"` entry and replays into `/api/transactions/manual` exactly once when connectivity returns (the ledger view auto-replays on `online`/socket-reconnect events). Previously the form just died with "Failed to record manual transaction". Covered by `offline_queue.test.mjs` test 6.
+- [x] Fallback queue implementation, merged in PR #55 (`b31b58f`): a failed manual POST can be queued with `kind: "manual-transaction"` and replayed into `/api/transactions/manual`. Test 6 in `offline_queue.test.mjs` covers a failed request followed by one successful replay.
+- [ ] Fallback correctness: preserve a stable manual request ID through the initial POST and every replay. The current endpoint generates a new server key on every request, so a committed request with a lost response can be recorded twice. The existing test does not exercise that case.
+- [ ] Offline availability: make catalogue selection available when the manual form is opened after connectivity is lost. It currently fetches inventory on opening; a failed fetch leaves no selectable product. Offline page reload also depends on network-only authentication/templates.
+- [ ] Queue isolation: bind replay and queue display to the active authenticated shop. Entries store `shop_id`, but `syncOfflineQueue()` currently replays all entries without checking it. A spoken transcript from a previous account can be submitted under the next account's session. Preserve other shops' pending data without replaying it.
 
 ### P4.9 Features that do not improve accuracy
 
@@ -234,8 +240,10 @@ Measure every change against the **real transcript set from P1/P2**, not hand-wr
 ## P6 — Privacy and raw audio
 
 - **Problem:**
-  - Since #42, the app stores up to ~15 seconds of base64 counter audio, including customers' voices, on each transaction (`audio.ts:555-575`, `audio.ts:917-944`, playback in `frontend/src/views/transactions.ts`). This conflicts with Blueprint §17 (discard unnecessary raw audio) and the open items in README §10.
-  - Saved snippets are probably unplayable after ~15 seconds of listening, because `audioChunks.shift()` (`audio.ts:935-937`) drops the first WebM chunk, which holds the container header.
+  - Historical #42 behaviour retained base64 counter audio. Merged P0b now disables new browser recording, strips new queue/upload audio and discards incoming snippets. This is implemented source behaviour, not proof of the currently deployed release.
+  - Legacy audio can remain in transaction rows and old browser queues. Transaction reads still select `audio_data`, and UI playback still exists. An explicit transcript/audio purge endpoint exists, but this audit found no scheduled retention enforcement or per-shop audio opt-in. P0b is not a purge of legacy data.
+  - The earlier WebM-header/playback concern applies to old recordings or a future re-enabled recorder; do not treat it as a current active recorder defect. Any future recording implementation needs a fresh playback test after 20+ seconds.
+  - `STAFF_TRAINING.md` and legacy `RUNBOOK.md` sections still say audio is never uploaded or processed in the cloud. Reconcile those instructions with the actual browser speech service before giving them to a shop. Disabling application snippet storage does not establish on-device speech processing.
 - **Decision for the pilot:**
   - [ ] Audio retention is opt-in per shop, and only for review-required captures.
   - [ ] Short retention (for example 7 days), with deletion enforced automatically.
@@ -289,12 +297,16 @@ Fill in one row per field session. Link to the labelled ground-truth sheet, not 
 
 | Finding | How it was established |
 |---|---|
-| P4.1 lost sales on pause, P4.2 review flood, P4.3 missing capture ID | Code reading; confirm on a real device |
-| P4.4 `en-US`, P4.5 single alternative, P4.9 inert features | Code reading |
-| P4.6 mic contention, P4.7 restart beeps | Unverified risk; test on devices |
-| P5.1 brand names, P5.2 unit order | Traced by hand through `parser.go`; add failing tests first |
-| P5.3–P5.5 | Code reading |
-| P6 unplayable snippets | Code reading plus known MediaRecorder/WebM behaviour; confirm by playback after 20+ seconds of listening |
+| P4.1 pause handling and P4.3 capture IDs | Fixes merged and regression-tested; physical-device acceptance still open |
+| P4.2 review flood | Bare “Thank you” reproduced as a review-required engine result in the 19 October synthetic probe; suppression still missing |
+| P4.4 language and P4.9 inert features | Configurable language and removal implemented; en-US baseline remains pending P2; device sanity still open |
+| P4.5 single alternative | Still present in current source; evaluation support and field measurement pending |
+| P4.6 mic contention, P4.7 restart beeps | Recorder removed and restart backoff merged; analyser/recognizer coexistence and audible device behaviour remain unverified |
+| P4.8 fallback safety and availability | Manual retry duplication reproduced against a temporary API/store; all-shop replay reproduced with mocked transport; network-dependent catalogue selection confirmed by source reading |
+| P5.1 brand names, P5.2 unit order | Reproduced with current parser on 19 October: Five Alive/Seven Up/Three Crowns lose number words; one 7Up example passes; repeated mixed-unit input varies |
+| P5.3 cancellation | “Drop that bag there…” reproduced as cancellation in the current parser |
+| P5.4–P5.5 matching/confidence | Current code uses spelling similarity and heuristic confidence; default-to-one reproduced; real-transcript calibration pending |
+| P6 snippets and policy | New recording disabled; legacy audio and future recorder playback still need checking; notices and retention enforcement remain open |
 | Edge mock fail-open (P0) | Code reading |
 
 Update this table when a finding is confirmed, fixed or disproved.
@@ -304,9 +316,9 @@ Update this table when a finding is confirmed, fixed or disproved.
 
 P0a merged as PR #47 (`a0adf3299b1cba77da2f1fe06bec479d908f9f24`); Render deploy `dep-db9qp0flk1mc73c7nu2g` is live and `/readyz` returned 200 with the database connected. The live Settings template contains the parked panels and corrected privacy wording.
 
-P0b remains a candidate, not deployed. No physical-device or real-shop evidence has been supplied. This change does not solve P4 recognition reliability, erase existing stored audio, or implement the P6 retention policy. Legacy local queue snippets are not uploaded by the new client, but pre-existing local data is not purged.
+**19 October correction:** P0b is merged in source through PR #48 (`1208fb7`). Current deployment and physical-device acceptance were not verified in this audit; no corresponding evidence is present in this register. This change does not solve P4 recognition reliability, erase existing stored audio, or implement the P6 retention policy. Legacy local queue snippets are not uploaded by the new client, but pre-existing local data is not purged. The preceding P0a deployment record is historical, not current release verification.
 
-Before merging P0b, run the candidate against an isolated test shop on a real phone:
+Before closing P0b release acceptance, run the actual release against an isolated test shop on a real phone:
 
 1. Record device/browser version, candidate commit and test time; screen-record Start Listening → a test sale → Stop Listening. Verify transcript capture and microphone release.
 2. Inspect that test capture's network request: no `audio_data`. Confirm its server row has empty `audio_data`, and its receipt/stock movement is correct.
@@ -314,3 +326,47 @@ Before merging P0b, run the candidate against an isolated test shop on a real ph
 4. Submit a legacy client payload containing a snippet; verify it is discarded while the transcript is retained.
 5. Try a spoken credit phrase and explicit customer attribution; verify an explanatory rejection and no ledger or stock change.
 6. Attach the screen recording (without customer data) and measured observations to the PR. Leave the P0 parent unchecked until this evidence and deployment verification are complete.
+
+## Real-world testing register — 19 October 2026
+
+**Every row below remains open.** Implementation and synthetic regression results are separate from acceptance. Use at least two physical Android phones with Chrome and one iPhone with Safari for browser capture checks; record exact OS/browser versions. Restrict any supported-device claim to devices that pass.
+
+| Feature / gate | Current source status | Required real-world test and evidence |
+|---|---|---|
+| P0 pilot scope and safe intake | Parked UI and P0b guards merged | On the deployed build, confirm parked actions are hidden, credit capture explains rejection with no movement, microphone stops, and fresh/legacy-client requests retain no audio. Record release SHA and observed payload/row results. |
+| P1 natural counter speech and training | No labelled real dataset in checkout | Consent and notice; record ≥3 hours including a busy period; label products, quantities, units, amount, speaker, language and timing. Compare natural speech with one trained cashier; measure compliance, friction and willingness to pay. Keep recordings encrypted and outside Git. |
+| P2 recognition engine and language | Web Speech; configurable language; en-US baseline | Compare en-US, en-NG, Whisper candidates and an appropriate cloud candidate against the same P1 ground truth. Measure full-sale and per-anchor accuracy, false captures, latency, connectivity and cost. Choose the default only from measured results. |
+| P3 ambient versus push-to-talk | No measured choice; current listener is continuous | Compare each mode for one trading day using the same catalogue/protocol. Measure capture, clean capture, correction effort and cashier preference. A Start/Stop toggle alone is not evidence of a completed push-to-talk workflow. |
+| P4.1 delayed closing phrase | Rolling buffer merged | Speak a sale, wait 10 seconds, then close it; verify exactly one correct receipt. Include recognizer restarts, consecutive customers and pauses near the look-back limit. |
+| P4.2 stray closing phrases | Missing no-anchor suppression; server creates review items | After fixing the guard, 10 unrelated “thank you” phrases create zero review items; also test customer speech, adjacent sales and background conversations. |
+| P4.3 spoken capture deduplication | Final-result gate and stable capture ID merged | Interim/final/repeated results, session restarts and an interrupted acknowledgement must produce one receipt and one stock movement per sale on each device. Include successive sales in one recognition session. |
+| P4.4 language persistence | Canonical implementation merged | Change language, reload/restart, verify recognizer and readback use the saved tag on actual browsers. Attach P2 results before changing en-US default. Verify migration 0014 in the deployed schema. |
+| P4.5 alternatives and recognizer confidence | Still one alternative; confidence not propagated | Implement evaluation support, then compare catalogue matching with alternative hypotheses on real misrecognitions. Confirm confidence affects review safely; do not treat heuristic scores as accuracy percentages. |
+| P4.6 microphone resources | Recognizer plus getUserMedia/analyser remain; recorder removed | Start/stop repeatedly; deny/revoke permission; interrupt with a call, background the tab and lock/unlock the screen. Verify capture, truthful status, mic release and absence of resource contention. |
+| P4.7 restart and error recovery | Backoff and failure state merged | Test flaky network and repeated recognition failures for a full counter session. Observe beeps, time to recovery, battery/heat and clear “not listening” feedback. |
+| P4.8 offline voice messaging | Implemented; recognition still needs connectivity | Disconnect before start and mid-session; cashier must understand that queued transcripts are not offline recognition. Reconnect without creating duplicate captures. |
+| P4.8 manual fallback and durable queue | Queue exists; retry, shop binding and catalogue gaps found | Fix gaps first; then open the form after an outage, queue entries, kill/reopen the browser, lose a server acknowledgement and reconnect. Exactly one movement per entry, no lost durable work, truthful volatile-storage warnings, and no replay into another account/shop. |
+| P4.9 simplified capture UI | Inert grammar/spectrum features removed | Verify real sales still capture and UI-only signal indicators are not understood as proof of recognition quality. |
+| Voice readback, wake lock and navigation cleanup | Implemented controls; physical behaviour unverified | With readback enabled, verify it cannot trigger a second sale/restock. Navigate away, background/foreground and stop; check streams, recognizer, wake lock and timers are released or recovered as promised. |
+| P5.1 number-bearing product names | Catalogue-first parsing missing | Measure Five Alive, Seven Up, 7Up and Three Crowns on real audio/transcripts, with quantity and price variants. Verify exact product, quantity and amount after repair. |
+| P5.2 units and multi-line restocks | Unit selection iterates a Go map | After deterministic parsing, speak mixed carton/pack/bottle receipts; verify each line, conversion, supplier, receipt total and purchase cost. No silent partial receipt or sales-revenue inflation. |
+| P5.3 cancellation | Server matches cancellation substrings anywhere | Separate genuine cancellations from “drop that bag there…” and other ordinary speech. Verify cancelled/unrelated phrases never remove a genuine sale silently. |
+| P5.4 phonetic matching and aliases | Spelling matcher exists; phonetic learning missing | Evaluate real mishearings such as “peek”/Peak and similar catalogue names; test an owner's correction/alias workflow if added. Measure wrong confident matches as well as successful matches. |
+| P5.5 confidence and review thresholds | Fixed heuristic scores; defaulted quantity can score highly | Label correct/incorrect outcomes and calibrate review thresholds. Check omitted quantities and ambiguous anchors. Measure false confirmations and review effort, not just aggregate parser accuracy. |
+| P5.6 optional LLM extraction | Comparative experiment pending | Compare rules with strict catalogue-ID JSON extraction on the same real set, including latency/cost/offline effects. Adoption is conditional on a measured win, not an MVP requirement by itself. |
+| Owner onboarding, catalogue and review | APIs/UI and automated coverage exist | A new owner loads 20–50 products/opening stock, sets packaging/aliases, corrects/rejects/confirms a capture, records manual sale/restock and reverses an error without developer help. Compare resulting stock/revenue with independent records. |
+| Realtime, account isolation and recovery | Backend foundations and regression tests exist | Use two real accounts/devices; test login/recovery/logout, stale sessions, disconnect/reconnect, filters and daily totals. Check local queue isolation separately from server authorization. |
+| P6 notices, retention, deletion and access | New snippet retention disabled; legacy data/policy remain | Agree the pilot policy, give staff truthful instructions, show notice, exercise deletion/access controls and prove legacy audio is handled. If retention stays disabled, do not re-enable it merely to complete optional opt-in recording work. |
+| Hosted operation and recovery | Deployment/backup tooling exists; current live state unverified | Verify exact deployed SHA, HTTPS/assets, readiness, schema 0014, restricted role, restart persistence, backup restoration and outage recovery in an isolated environment. Do not equate a historical /readyz 200 with this acceptance. |
+| P7 two-week controlled pilot | No completed field evidence rows | One shop/counter/cashier beside existing records; daily sales/stock reconciliation, all discrepancies investigated, metrics and willingness to pay recorded. Expand only after agreed targets pass. |
+
+### Starting field testing versus completing the MVP
+
+- **P1 observation/recording:** no additional application code is required. Start once the owner, notice, recording arrangement, secure storage and labelling plan are ready; none is evidenced complete here. This is field research, not a claim that the app is safe to depend on.
+- **Supervised app counter trial:** approximately **30% readiness work remains (25–35% judgment range)**. Use four equal readiness areas: core app availability 90%, safe capture/recovery 50%, privacy/release verification 50%, trial protocol/evidence preparation 90% for the documented plan only. Average readiness is 70%; actual owner agreement and staff preparation remain hard gates. Fix the high-impact capture/queue defects, reconcile notices, verify the release and run the device checks first. Keep independent records authoritative throughout.
+- **Field-validated MVP:** approximately **45% remains (40–50% judgment range)** under the detailed audit's weighted model. A score cannot override P1–P7 acceptance. No physical field gate is evidenced closed in this checkout.
+- Frontend redesign has **7 of 45 items checked (15.6%)**. Its **84.4% remaining** describes that redesign only; dedicated Counter navigation and parked Customer/Expense pages are not prerequisites for P1. Continue authorized redesign work without substituting it for evidence collection.
+
+### Evidence to attach before marking a row accepted
+
+Record date/session ID, owner/cashier preparation, deployed commit, device/OS/browser, engine/language/mode, catalogue version, noise/connectivity conditions, ground-truth counts, failures and corrective actions. Report capture rate, clean capture rate, amount/unit accuracy, false confirmations, duplicates, correction time and protocol compliance with numerator/denominator. Use the proposed targets above only after agreeing them with the owner. Link anonymized labels and measured summaries, never raw customer audio in Git. A fix requires a new run of the failed scenario.
