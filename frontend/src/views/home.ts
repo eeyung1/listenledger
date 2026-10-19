@@ -618,9 +618,18 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
   // Counter recognition language (P4.4): set from the shop's configured
   // `recognition_language` once settings load (see loadRecognitionLanguage).
-  /** Speaks counter feedback in the shop's configured recognition language. */
+  /**
+   * Speaks counter feedback in the shop's configured recognition language.
+   * P4.9: routed through the listener, which stops recognizing while the phone
+   * speaks, so the readback ("Stock received: 3 Milo 500g") cannot come back as
+   * a second movement.
+   */
   function speak(text: string): boolean {
-    return speakFeedback(text, { lang: counterRecognitionLanguage });
+    const options = { lang: counterRecognitionLanguage };
+    if (counterListener) {
+      return counterListener.announce(text, options);
+    }
+    return speakFeedback(text, options);
   }
 
   function updateTTSButton(): void {

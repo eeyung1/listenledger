@@ -464,6 +464,12 @@ export interface SpeakFeedbackOptions {
   readonly rate?: number | undefined;
   readonly pitch?: number | undefined;
   readonly volume?: number | undefined;
+  /**
+   * Called once the utterance finishes or fails (P4.9). Not called when speech
+   * synthesis is unavailable, so a caller that suspends something before
+   * speaking must handle the `false` return itself.
+   */
+  readonly onEnd?: (() => void) | undefined;
 }
 
 /**
@@ -489,6 +495,19 @@ export function speakFeedback(text: string, options: SpeakFeedbackOptions = {}):
     utterance.rate = options.rate ?? 1.15; // Brisk pace for counter efficiency
     utterance.pitch = options.pitch ?? 1.0;
     utterance.volume = options.volume ?? 0.9;
+    if (options.onEnd) {
+      // Fire once, whichever way the utterance ends. Chrome does not always fire
+      // `onend` (muted or interrupted utterances), so callers must also bound
+      // whatever they suspend — see CounterSpeechListener.announce.
+      let ended = false;
+      const notifyEnd = (): void => {
+        if (ended) return;
+        ended = true;
+        options.onEnd?.();
+      };
+      utterance.onend = notifyEnd;
+      utterance.onerror = notifyEnd;
+    }
     synth.speak(utterance);
     return true;
   } catch {
@@ -504,6 +523,39 @@ const RESTART_BASE_DELAY_MS = 150;
 const RESTART_MAX_DELAY_MS = 5000;
 const RESTART_BACKOFF_RESET_MS = 5000;
 const MAX_RESTART_FAILURES = 5;
+
+// P4.9 readback guard. The counter device plays its confirmation through the
+// loudspeaker, so the microphone hears it and the browser transcribes it like any
+// other speech. The readback repeats real anchors ("Sale: 2 Milo 500g",
+// "Stock received: 3 Milo 500g"), so a live recognition session can turn our own
+// voice into a second movement (MVP_READINESS_AUDIT finding 7). While a readback
+// is playing no recognition session runs, so the audio can never become a
+// capture. The windows below only bound that fallback; `announce` normally ends
+// the guard on the utterance's own `onEnd`.
+const READBACK_MIN_SUSPEND_MS = 700;
+const READBACK_PER_CHARACTER_MS = 85;
+const READBACK_BASE_MS = 600;
+const READBACK_MAX_SUSPEND_MS = 15000;
+const READBACK_POLL_MS = 250;
+
+/**
+ * Upper bound (ms) for how long a readback is expected to occupy the speaker.
+ * Used only as the fallback resume point when `onend` never fires.
+ */
+export function estimateReadbackMs(text: string): number {
+  const estimated =
+    READBACK_BASE_MS + READBACK_PER_CHARACTER_MS * Math.max(0, text.trim().length);
+  return Math.min(READBACK_MAX_SUSPEND_MS, Math.max(READBACK_MIN_SUSPEND_MS, Math.round(estimated)));
+}
+
+/** Reports whether the browser speech synthesiser is still producing speech. */
+export function isSpeechSynthesisSpeaking(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const synth = window.speechSynthesis as { speaking?: boolean } | undefined;
+  return Boolean(synth?.speaking);
+}
 
 /**
  * Default counter recognition language (P4.4). Keeps the pre-P4.4 `en-US`
@@ -554,6 +606,14 @@ export class CounterSpeechListener {
   private lastBoundaryResultIndex = -1;
   private lastBoundaryResultsLength = -1;
 
+  // P4.9 readback guard state. `suspendedForReadback` is true from the moment the
+  // counter device starts speaking a confirmation until it stops: no recognition
+  // session runs in that window, so the phone cannot hear itself. `readbackGuardToken`
+  // invalidates end/onend callbacks left over from an earlier readback.
+  private suspendedForReadback = false;
+  private readbackGuardToken = 0;
+  private readbackSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Ambient Voice Activity Detection (VAD) state. UI-only: it drives the
   // ambient noise / voice-active indicators and never affects recognition,
   // capture, or accuracy (P4.9). No adaptive silence timeout is computed —
@@ -594,6 +654,36 @@ export class CounterSpeechListener {
   /** Returns the recognition language currently in force. */
   public getRecognitionLanguage(): string {
     return this.recognitionLanguage;
+  }
+
+  /**
+   * Speaks counter feedback and, while it is playing, stops recognizing (P4.9).
+   *
+   * The microphone hears the phone's own loudspeaker, and a readback repeats the
+   * closing phrase and its anchors ("Stock received: 3 Milo 500g"), so leaving
+   * the recognizer running lets our own voice come back as a second sale or
+   * restock. This aborts the live recognition session first — discarding
+   * whatever the readback produced — and starts a fresh, clean session when the
+   * utterance ends. Speech spoken into that window is dropped by design: a
+   * dropped sale is recoverable, a phantom ledger entry is not.
+   *
+   * Safe to call when the listener is idle (it just speaks) and never throws.
+   */
+  public announce(text: string, options: SpeakFeedbackOptions = {}): boolean {
+    const guarding = this.isListening();
+    const token = this.suspendForReadback(guarding);
+    const spoken = speakFeedback(text, {
+      ...options,
+      onEnd: () => this.endReadbackGuard(token),
+    });
+    if (!spoken) {
+      this.endReadbackGuard(token);
+      return false;
+    }
+    if (guarding) {
+      this.scheduleReadbackSafetyEnd(token, estimateReadbackMs(text));
+    }
+    return true;
   }
 
   public getState(): CounterListenerState {
@@ -677,6 +767,7 @@ export class CounterSpeechListener {
     }
 
     this.isExplicitlyStopped = false;
+    this.resetReadbackGuard();
     this.currentTranscript = "";
     this.speechUtterances = [];
     this.currentSessionFinalText = "";
@@ -706,6 +797,7 @@ export class CounterSpeechListener {
   /** Stops counter speech listening, releases wake lock, and cleans up audio streams. */
   public stop(): void {
     this.isExplicitlyStopped = true;
+    this.resetReadbackGuard();
     this.clearRestartTimer();
     this.restartFailures = 0;
     this.recognitionStartedAt = 0;
@@ -807,6 +899,91 @@ export class CounterSpeechListener {
   }
 
   /**
+   * Aborts the live recognition session for the duration of a readback and
+   * returns the token identifying that guard window. A second call while the
+   * guard is already open only refreshes the token, so the earliest readback
+   * cannot end the window of a later one.
+   */
+  private suspendForReadback(guarding: boolean): number {
+    this.readbackGuardToken++;
+    this.clearReadbackSafetyTimer();
+    if (!guarding || this.suspendedForReadback || this.isExplicitlyStopped || !this.recognition) {
+      return this.readbackGuardToken;
+    }
+    this.suspendedForReadback = true;
+    const abandoned = this.recognition;
+    // Drop the reference first: the aborted instance's handlers then see a
+    // superseded session and stay inert instead of restarting it.
+    this.recognition = null;
+    try {
+      abandoned.abort();
+    } catch {
+      // ignore abort errors
+    }
+    return this.readbackGuardToken;
+  }
+
+  /** Ends a readback guard window and starts a fresh, clean recognition session. */
+  private endReadbackGuard(token: number): void {
+    if (token !== this.readbackGuardToken) return;
+    this.clearReadbackSafetyTimer();
+    if (!this.suspendedForReadback) return;
+    this.suspendedForReadback = false;
+    if (this.isExplicitlyStopped) return;
+    const RecognizerClass = getSpeechRecognitionConstructor();
+    if (!RecognizerClass) return;
+    try {
+      this.initRecognition(RecognizerClass);
+      this.recognition?.start();
+    } catch {
+      // The fresh session reports its own failure through onend/onerror.
+    }
+  }
+
+  /**
+   * Fallback end for a readback window. Some browsers never fire `onend` (muted
+   * or interrupted utterances), and a listener suspended forever would stop
+   * capturing entirely. Waits for the expected playback time, keeps waiting while
+   * the synthesiser reports speech, and gives up at the hard cap.
+   */
+  private scheduleReadbackSafetyEnd(token: number, expectedMs: number): void {
+    this.clearReadbackSafetyTimer();
+    const startedAt = Date.now();
+    const tick = (): void => {
+      this.readbackSafetyTimer = null;
+      if (token !== this.readbackGuardToken || !this.suspendedForReadback) return;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= READBACK_MAX_SUSPEND_MS) {
+        this.endReadbackGuard(token);
+        return;
+      }
+      if (isSpeechSynthesisSpeaking() || elapsed < expectedMs) {
+        const wait = isSpeechSynthesisSpeaking()
+          ? READBACK_POLL_MS
+          : Math.max(READBACK_POLL_MS, expectedMs - elapsed);
+        this.readbackSafetyTimer = setTimeout(tick, Math.min(wait, READBACK_MAX_SUSPEND_MS - elapsed));
+        return;
+      }
+      this.endReadbackGuard(token);
+    };
+    this.readbackSafetyTimer = setTimeout(tick, READBACK_POLL_MS);
+  }
+
+  private clearReadbackSafetyTimer(): void {
+    if (this.readbackSafetyTimer !== null) {
+      clearTimeout(this.readbackSafetyTimer);
+      this.readbackSafetyTimer = null;
+    }
+  }
+
+  /** Invalidates any open readback guard window (used by start/stop). */
+  private resetReadbackGuard(): void {
+    this.readbackGuardToken++;
+    this.clearReadbackSafetyTimer();
+    this.suspendedForReadback = false;
+  }
+
+  /**
    * Appends newly finalized speech to the rolling utterance buffer, updating the
    * current session's entry as it grows and starting a new entry after a
    * recognition restart. Bounded to the most recent 20 utterances.
@@ -840,6 +1017,7 @@ export class CounterSpeechListener {
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
+      if (this.recognition !== recognition) return; // superseded session (P4.9)
       this.recognitionStartedAt = Date.now();
       // A new recognition session delivers a fresh results array, so a boundary
       // guard keyed on the previous session's result positions no longer applies.
@@ -851,6 +1029,7 @@ export class CounterSpeechListener {
     };
 
     recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      if (this.recognition !== recognition) return; // superseded session (P4.9)
       // Gather the full session transcript. Iterating from the first result (not
       // `resultIndex`) keeps earlier text in the same session, and tracking the
       // finalized text separately lets us buffer utterances across restarts.
@@ -938,6 +1117,7 @@ export class CounterSpeechListener {
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
+      if (this.recognition !== recognition) return; // superseded session (P4.9)
       if (this.isExplicitlyStopped) return;
 
       if (event.error === "no-speech") {
@@ -961,6 +1141,7 @@ export class CounterSpeechListener {
     };
 
     recognition.onend = () => {
+      if (this.recognition !== recognition) return; // superseded session (P4.9)
       // If recognition stopped unexpectedly (e.g. mobile browser timeout) and user hasn't stopped it:
       if (this.isExplicitlyStopped) {
         this.setState("idle");
