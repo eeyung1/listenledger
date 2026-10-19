@@ -2,6 +2,7 @@ package validate
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -84,6 +85,32 @@ var (
 	}
 )
 
+type unitMatcher struct {
+	word string
+	unit models.Unit
+	re   *regexp.Regexp
+}
+
+// unitMatchers resolves unit words in a stable, sorted order. ParseSpokenSegment
+// then prefers the earliest match in reading order, so a clause that names more
+// than one unit no longer depends on Go map iteration order (P5.2).
+var unitMatchers = func() []unitMatcher {
+	words := make([]string, 0, len(knownUnits))
+	for word := range knownUnits {
+		words = append(words, word)
+	}
+	sort.Strings(words)
+	matchers := make([]unitMatcher, 0, len(words))
+	for _, word := range words {
+		matchers = append(matchers, unitMatcher{
+			word: word,
+			unit: knownUnits[word],
+			re:   regexp.MustCompile(`\b` + regexp.QuoteMeta(word) + `\b`),
+		})
+	}
+	return matchers
+}()
+
 // ParsedAnchors contains raw tokens extracted from a spoken segment.
 type ParsedAnchors struct {
 	ProductMention string
@@ -111,14 +138,22 @@ func ParseSpokenSegment(text string, defaultCurrency string) ParsedAnchors {
 
 	lower := strings.ToLower(cleaned)
 
-	// 1. Extract Unit
-	for word, unit := range knownUnits {
-		// match standalone word boundary
-		pattern := `\b` + regexp.QuoteMeta(word) + `\b`
-		if matched, _ := regexp.MatchString(pattern, lower); matched {
-			res.Unit = unit
+	// 1. Extract Unit in reading order (not Go map order) so a clause that names
+	// more than one unit resolves deterministically. The earliest unit word wins;
+	// an equal position prefers the longer word, and unitMatchers is sorted
+	// alphabetically to break any remaining tie.
+	bestPos := -1
+	bestWord := ""
+	for _, m := range unitMatchers {
+		loc := m.re.FindStringIndex(lower)
+		if loc == nil {
+			continue
+		}
+		if bestPos == -1 || loc[0] < bestPos || (loc[0] == bestPos && len(m.word) > len(bestWord)) {
+			bestPos = loc[0]
+			bestWord = m.word
+			res.Unit = m.unit
 			res.UnitFound = true
-			break
 		}
 	}
 
@@ -738,6 +773,8 @@ func SplitTranscriptLines(transcript, closingPhrase string) []string {
 	return merged
 }
 
+// cancellationPhrases cancel wherever they appear as whole words: each is
+// unambiguous on its own.
 var cancellationPhrases = []string{
 	"cancel sale",
 	"cancel the sale",
@@ -747,7 +784,6 @@ var cancellationPhrases = []string{
 	"customer canceled",
 	"cancel that",
 	"cancel this",
-	"drop that",
 	"never mind",
 	"don't record",
 	"do not record",
@@ -756,11 +792,36 @@ var cancellationPhrases = []string{
 	"stop recording",
 }
 
-// DetectCancellation checks if the spoken transcript contains an in-flight cancellation phrase (blueprint §18).
+// trailingCancellationPhrases are ordinary verbs with an implicit object
+// ("drop that"). They only cancel when they are the whole utterance or its
+// trailing clause, so "drop that bag there" stays a shop instruction instead of
+// silently voiding a sale (MVP_READINESS_AUDIT.md finding 5 / P5.3).
+var trailingCancellationPhrases = []string{
+	"drop that",
+}
+
+var cancellationPhraseRegexps = func() []*regexp.Regexp {
+	regexps := make([]*regexp.Regexp, 0, len(cancellationPhrases))
+	for _, phrase := range cancellationPhrases {
+		regexps = append(regexps, regexp.MustCompile(`\b`+regexp.QuoteMeta(phrase)+`\b`))
+	}
+	return regexps
+}()
+
+// DetectCancellation checks if the spoken transcript contains an in-flight
+// cancellation phrase (blueprint §18). Matching is word-bounded so a phrase
+// buried inside a longer word cannot cancel a sale.
 func DetectCancellation(transcript string) (string, bool) {
 	lower := strings.ToLower(transcript)
-	for _, phrase := range cancellationPhrases {
-		if strings.Contains(lower, phrase) {
+	for i, re := range cancellationPhraseRegexps {
+		if re.MatchString(lower) {
+			return cancellationPhrases[i], true
+		}
+	}
+
+	normalized := strings.Trim(lower, " \t\r\n.,!?;:")
+	for _, phrase := range trailingCancellationPhrases {
+		if normalized == phrase || strings.HasSuffix(normalized, " "+phrase) {
 			return phrase, true
 		}
 	}

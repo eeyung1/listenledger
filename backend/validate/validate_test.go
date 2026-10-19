@@ -1011,3 +1011,91 @@ func TestP42EmptyTranscriptKeepsReviewPlaceholder(t *testing.T) {
 		t.Fatalf("expected the unintelligible-speech placeholder, got %+v", res.Lines)
 	}
 }
+
+// --- P5.2/P5.3: deterministic unit selection and cancellation precision ---
+
+func TestP5UnitSelectionIsDeterministic(t *testing.T) {
+	// A clause that names more than one unit used to resolve by Go map order, so
+	// the same input could parse as "carton" or "pack" from run to run.
+	const mixed = "two cartons and three packs of Milo"
+
+	first := validate.ParseSpokenSegment(mixed, "NGN")
+	if !first.UnitFound {
+		t.Fatalf("expected a unit to be found in %q", mixed)
+	}
+	if first.Unit != models.Unit("carton") {
+		t.Fatalf("expected the earliest unit (carton), got %q", first.Unit)
+	}
+	for i := 0; i < 200; i++ {
+		got := validate.ParseSpokenSegment(mixed, "NGN")
+		if got.Unit != first.Unit {
+			t.Fatalf("unit selection varied on run %d: %q then %q", i, got.Unit, first.Unit)
+		}
+	}
+}
+
+func TestP5UnitSelectionFollowsReadingOrder(t *testing.T) {
+	if got := validate.ParseSpokenSegment("three packs and two cartons", "NGN").Unit; got != models.Unit("pack") {
+		t.Errorf("expected the first unit pack, got %q", got)
+	}
+	if got := validate.ParseSpokenSegment("three cartons and two packs", "NGN").Unit; got != models.Unit("carton") {
+		t.Errorf("expected the first unit carton, got %q", got)
+	}
+}
+
+func TestP5OrdinaryInstructionsDoNotCancel(t *testing.T) {
+	// P5.3: "drop that" is an ordinary instruction when it carries an object, so
+	// it must not cancel a sale. The audit's example is reproduced verbatim.
+	ordinary := []string{
+		"Drop that bag there, two Milo four thousand naira thank you",
+		"Drop that bag on the counter",
+		"Please drop that crate by the door",
+	}
+	for _, transcript := range ordinary {
+		if phrase, ok := validate.DetectCancellation(transcript); ok {
+			t.Errorf("DetectCancellation(%q) = %q, want no cancellation", transcript, phrase)
+		}
+	}
+
+	// Genuine cancellations still cancel.
+	genuine := []string{
+		"cancel that",
+		"never mind",
+		"customer cancelled the purchase",
+		"Two milo 4000 naira wait customer cancelled",
+		"drop that",
+		"Never mind, drop that",
+	}
+	for _, transcript := range genuine {
+		if _, ok := validate.DetectCancellation(transcript); !ok {
+			t.Errorf("DetectCancellation(%q) = false, want a cancellation", transcript)
+		}
+	}
+}
+
+func TestP5InstructionDoesNotVoidASale(t *testing.T) {
+	engine := validate.NewEngine()
+	catalogue := sampleCatalogue()
+
+	req := validate.CaptureRequest{
+		CaptureID:  "cap_p5_instruction",
+		Transcript: "Drop that bag there, two Milo four thousand naira thank you",
+	}
+	res, err := engine.Validate(context.Background(), req, "shop_1", "NGN", 0.75, "Thank you", "Stock received", catalogue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	matchedMilo := false
+	for _, line := range res.Lines {
+		if line.Transaction.Status == models.StatusCancelled {
+			t.Fatalf("an ordinary instruction cancelled the sale: %+v", line)
+		}
+		if line.Transaction.ProductID == "prd_milo" {
+			matchedMilo = true
+		}
+	}
+	if !matchedMilo {
+		t.Fatalf("expected the Milo sale to survive the instruction, got lines %+v", res.Lines)
+	}
+}
