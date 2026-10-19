@@ -28,6 +28,28 @@ func AnchorlessSuppressedCount() int64 {
 	return atomic.LoadInt64(&anchorlessSuppressed)
 }
 
+// catalogueProductNames lists the active product names and aliases a spoken
+// clause may contain. ParseSpokenSegmentWithProducts removes a matching name
+// before reading numbers, so number words inside a brand name are not mistaken
+// for the quantity or the price shorthand (roadmap P5.1).
+func catalogueProductNames(catalogue []models.Product) []string {
+	var names []string
+	for _, p := range catalogue {
+		if p.IsArchived() {
+			continue
+		}
+		if name := strings.TrimSpace(p.Name); name != "" {
+			names = append(names, name)
+		}
+		for _, alias := range p.Aliases {
+			if alias = strings.TrimSpace(alias); alias != "" {
+				names = append(names, alias)
+			}
+		}
+	}
+	return names
+}
+
 // CaptureLineInput represents pre-extracted or client-supplied structured anchors for one line.
 type CaptureLineInput struct {
 	ProductID   string             `json:"product_id,omitempty"`
@@ -202,9 +224,10 @@ func (e *Engine) Validate(
 	if len(req.ExtractedLines) > 0 {
 		linesToProcess = req.ExtractedLines
 	} else {
+		productNames := catalogueProductNames(catalogue)
 		splitSegments := SplitTranscriptLines(cleanTranscript, closingPhrase)
 		for _, seg := range splitSegments {
-			anchors := ParseSpokenSegment(seg, currency)
+			anchors := ParseSpokenSegmentWithProducts(seg, currency, productNames)
 			if anchors.ProductMention == "" && anchors.Quantity == 0 && anchors.AmountMinor == 0 {
 				continue
 			}

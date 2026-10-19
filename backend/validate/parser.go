@@ -178,6 +178,77 @@ func ParseSpokenSegment(text string, defaultCurrency string) ParsedAnchors {
 	return res
 }
 
+// catalogueNamePattern builds a case-insensitive, word-bounded matcher for a
+// catalogue product name or alias. Runs of non-alphanumeric characters become
+// flexible separators so a catalogue "7Up" matches "7 up" and "Five Alive"
+// matches "Five-Alive".
+func catalogueNamePattern(name string) *regexp.Regexp {
+	fields := regexp.MustCompile(`[^\p{L}\p{N}]+`).Split(strings.TrimSpace(name), -1)
+	tokens := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f != "" {
+			tokens = append(tokens, regexp.QuoteMeta(f))
+		}
+	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	return regexp.MustCompile(`(?i)\b` + strings.Join(tokens, `[\s-]+`) + `\b`)
+}
+
+// ParseSpokenSegmentWithProducts parses one spoken clause, matching a known
+// catalogue name or alias first and masking it out of the text before numbers
+// are read. Number words inside brand names are otherwise mistaken for the
+// quantity or the "<base>-five" price shorthand: "Two Five Alive, one thousand
+// naira" parsed as product "Alive", quantity 1, ₦2,500 (MVP_READINESS_AUDIT.md
+// finding 5, roadmap P5.1). The longest matching name wins, so "Seven Up" beats
+// "Up".
+func ParseSpokenSegmentWithProducts(text, defaultCurrency string, productNames []string) ParsedAnchors {
+	if len(productNames) == 0 {
+		return ParseSpokenSegment(text, defaultCurrency)
+	}
+
+	// Longest name first, then alphabetical, so the result never depends on the
+	// catalogue's order.
+	candidates := append([]string(nil), productNames...)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if len(candidates[i]) != len(candidates[j]) {
+			return len(candidates[i]) > len(candidates[j])
+		}
+		return candidates[i] < candidates[j]
+	})
+
+	for _, name := range candidates {
+		pattern := catalogueNamePattern(name)
+		if pattern == nil {
+			continue
+		}
+		loc := pattern.FindStringIndex(text)
+		if loc == nil {
+			continue
+		}
+
+		// Replace the name with a neutral separator word instead of deleting it,
+		// so a quantity word is not left adjacent to the amount phrase and summed
+		// into it ("two Milo four thousand naira" must stay ₦4,000, not ₦6,000).
+		masked := text[:loc[0]] + " item " + text[loc[1]:]
+		res := ParseSpokenSegment(masked, defaultCurrency)
+		res.ProductMention = strings.TrimSpace(name)
+
+		if !res.UnitFound {
+			// The catalogue name may itself contain a packaging word ("Pepsi
+			// bottle"); keep the unit the unmodified clause would have found.
+			if plain := ParseSpokenSegment(text, defaultCurrency); plain.UnitFound {
+				res.Unit = plain.Unit
+				res.UnitFound = true
+			}
+		}
+		return res
+	}
+
+	return ParseSpokenSegment(text, defaultCurrency)
+}
+
 func parseNumberWords(str string) int64 {
 	words := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(str, ",", " "), "-", " "))
 	var current int64
