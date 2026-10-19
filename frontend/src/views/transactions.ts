@@ -26,6 +26,7 @@ import {
   reverseTransaction,
   ALL_UNITS,
   type ManualTransactionInput,
+  type Product,
   type ReviewCorrections,
   type ReviewDecision,
   type Transaction,
@@ -33,6 +34,7 @@ import {
   type Unit,
 } from "../api.js";
 import { enqueueManualTransaction, isNetworkError, setActiveQueueShop, syncOfflineQueue } from "../offline_queue.js";
+import { getCachedCatalogue, setCachedCatalogue } from "../offline_catalogue.js";
 import {
   applyFilteredTransactionToList,
   applyTransactionToList,
@@ -818,10 +820,10 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       if (e.target === overlay) closeModal();
     });
 
-    void fetchInventory(shopId).then((snapshot) => {
+    function populateCorrectionProducts(products: readonly Product[]): void {
       clear(productSelect);
       let foundExisting = false;
-      for (const p of snapshot.products) {
+      for (const p of products) {
         if (!p.archived_at || p.id === transaction.product_id) {
           const opt = new Option(`${p.name} (${p.sku})`, p.id);
           if (p.id === transaction.product_id) {
@@ -835,6 +837,23 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         const rawOpt = new Option(`[Unmatched] ${transaction.product_name}`, "");
         rawOpt.selected = true;
         productSelect.prepend(rawOpt);
+      }
+    }
+
+    // Pre-populate immediately from local durable cache if available
+    void getCachedCatalogue(shopId).then((cached) => {
+      if (cached && cached.length > 0 && productSelect.options.length <= 1) {
+        populateCorrectionProducts(cached);
+      }
+    });
+
+    void fetchInventory(shopId).then((snapshot) => {
+      void setCachedCatalogue(shopId, snapshot.products);
+      populateCorrectionProducts(snapshot.products);
+    }).catch(async () => {
+      const fallback = await getCachedCatalogue(shopId);
+      if (fallback && fallback.length > 0) {
+        populateCorrectionProducts(fallback);
       }
     });
 
@@ -1006,6 +1025,9 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       "Direct counter entry when ambient noise prevents speech capture. Atomically applies stock movements and records a confirmed ledger entry.",
     );
 
+    const offlineNotice = el("div", "badge badge--offline-queue");
+    offlineNotice.style.display = "none";
+
     const typeLabel = el("label", "form-field", "Direction");
     const typeSelect = el("select", "input") as HTMLSelectElement;
     typeSelect.append(
@@ -1054,7 +1076,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     submitBtn.type = "submit";
     actions.append(cancelBtn, submitBtn);
 
-    form.append(help, typeLabel, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, statusMsg, actions);
+    form.append(help, offlineNotice, typeLabel, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, statusMsg, actions);
     modal.append(header, form);
     overlay.append(modal);
     document.body.append(overlay);
@@ -1069,19 +1091,45 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       if (e.target === overlay) closeModal();
     });
 
-    void fetchInventory(shopId).then((inv) => {
+    function populateProducts(products: readonly Product[], isFromCache: boolean): void {
       productSelect.innerHTML = "";
-      if (inv.products.length === 0) {
+      if (products.length === 0) {
         productSelect.append(new Option("No products in catalogue", ""));
         return;
       }
-      for (const p of inv.products) {
+      for (const p of products) {
         productSelect.append(new Option(`${p.name} (${p.sku})`, p.id));
       }
-      unitSelect.value = inv.products[0]?.base_unit ?? "pack";
-    }).catch(() => {
-      productSelect.innerHTML = "";
-      productSelect.append(new Option("Failed to load products", ""));
+      unitSelect.value = products[0]?.base_unit ?? "pack";
+      if (isFromCache) {
+        offlineNotice.style.display = "inline-flex";
+        setText(offlineNotice, `📦 Offline Catalogue (${products.length} cached)`);
+        offlineNotice.title = "Using offline cached catalogue. Movements will be queued and replayed upon reconnect.";
+      } else {
+        offlineNotice.style.display = "none";
+      }
+    }
+
+    // Pre-populate immediately from local durable cache if available (instant offline availability)
+    void getCachedCatalogue(shopId).then((cached) => {
+      if (cached && cached.length > 0 && productSelect.options.length <= 1) {
+        populateProducts(cached, true);
+      }
+    });
+
+    void fetchInventory(shopId).then((inv) => {
+      void setCachedCatalogue(shopId, inv.products);
+      populateProducts(inv.products, false);
+    }).catch(async () => {
+      const fallback = await getCachedCatalogue(shopId);
+      if (fallback && fallback.length > 0) {
+        populateProducts(fallback, true);
+      } else {
+        productSelect.innerHTML = "";
+        productSelect.append(new Option("Offline: no cached products (connect once to load)", ""));
+        statusMsg.hidden = false;
+        setText(statusMsg, "Offline: no cached catalogue available for this shop. Please connect to internet once to download products.");
+      }
     });
 
     form.addEventListener("submit", async (e) => {
@@ -1130,8 +1178,13 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
           // P4.8: manual counter entry is the offline fallback. When the POST
           // cannot reach the server, queue it on-device; it replays into
           // /api/transactions/manual when the network returns.
-          const optText = productSelect.options[productSelect.selectedIndex]?.text ?? "";
-          const productLabel = optText.replace(/\s*\([^)]*\)\s*$/, "").trim();
+          const selectedOpt =
+            (productSelect.selectedIndex !== undefined && productSelect.selectedIndex >= 0
+              ? productSelect.options[productSelect.selectedIndex]
+              : undefined) ||
+            Array.from(productSelect.options).find((o) => o.value === prodId);
+          const optText = selectedOpt?.text ?? "";
+          const productLabel = optText.replace(/\s*\([^)]*\)\s*$/, "").trim() || undefined;
           await enqueueManualTransaction(shopId, input, productLabel);
           submitBtn.disabled = false;
           submitBtn.textContent = "Record Movement";
