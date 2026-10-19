@@ -149,18 +149,18 @@ cargo run --bin benchmark
 
 ## 4. Privacy & Data Protection Protocols
 
-1. **Zero Raw Voice Retention**:
-   - In accordance with Blueprint §17, raw PCM audio exists solely in ephemeral memory buffers during speech.
-   - Upon detecting voice boundary silence or the closing phrase, the audio buffer is overwritten with zeros and deallocated.
-   - Raw audio is **never** written to local disk or transmitted across network connections.
+1. **Raw Voice Retention**:
+   - The pilot build captures speech in the **browser**: it relies on the browser's speech recognition service, which is a cloud service in Chrome, so microphone audio may leave the device to the browser vendor's speech provider while it is transcribed.
+   - ListenLedger does not receive, store or queue raw audio: the browser posts only the transcript, `POST /api/captures` clears any `audio_data` field, and no new snippet recordings are created. The parked edge appliance (`edge/`, Blueprint §17) keeps raw PCM in ephemeral memory buffers and zeroes them after framing; that design is not part of the browser pilot.
+   - Legacy transaction audio already in the database remains selectable and playable until it is purged (item 2).
 2. **Transcript Retention & Purging**:
    - Spoken transcripts (e.g., “Two Milo, four thousand naira. Thank you.”) are stored in the database solely for owner review and dispute adjudication.
-   - Operators can execute automated retention purging via `POST /api/settings/purge-transcripts?retention_days=30` (or passing `older_than` ISO timestamp), which permanently clears historical transcripts while preserving financial ledger movements, amounts, and product movements.
+   - There is no scheduled purge job. An operator clears transcripts explicitly with `POST /api/settings/purge-transcripts`, passing the window as a JSON body (`{"retention_days": 30}`, the default, or `{"older_than": "<RFC3339>"}`) or as the equivalent query parameters (`?retention_days=30` / `?older_than=...`). The handler permanently clears historical transcripts while preserving financial ledger movements, amounts, and product movements.
    - Transcripts can be audited and exported prior to purging via `GET /api/transactions/export?format=csv`.
 3. **Spreadsheet Formula Injection Defense**:
    - CSV exports sanitize leading formula trigger characters (`=`, `+`, `-`, `@`, `\t`, `\r`) by prepending a single quote `'` to protect Excel and Google Sheets consumers.
 4. **Physical Counter Placard Requirement**:
-   - In physical shop trials, a standard customer notification placard must be placed beside the microphone informing customers that audio is processed ephemerally on-device and never recorded or uploaded.
+   - In physical shop trials, a standard customer notification placard must be placed beside the microphone. It must state that the browser's speech service may send microphone audio to its provider in order to transcribe it, and that ListenLedger keeps only the written transcript and never records or stores raw audio. Use the placard copy in [STAFF_TRAINING.md](STAFF_TRAINING.md).
 
 ---
 

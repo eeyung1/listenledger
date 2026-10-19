@@ -190,3 +190,93 @@ func TestUpdateSettings_RecognitionLanguage_P4_4(t *testing.T) {
 		t.Errorf("expected recognition_language to remain yo-NG after rejected updates, got %q", after.Shop.RecognitionLanguage)
 	}
 }
+
+func TestPurgeTranscripts_QueryParameters(t *testing.T) {
+	handler, store, _, shopID := testServerFixture(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	oldTime := now.AddDate(0, 0, -45)
+	recentTime := now.Add(-2 * time.Hour)
+
+	oldTxn := models.Transaction{
+		ID:          "txn_qp_old",
+		ShopID:      shopID,
+		Type:        models.TypeSale,
+		ProductID:   "prd_milo",
+		ProductName: "Milo",
+		Quantity:    2,
+		Unit:        models.UnitPack,
+		Amount:      models.Money{Amount: 400000, Currency: "NGN"},
+		Status:      models.StatusConfirmed,
+		OccurredAt:  oldTime,
+		CreatedAt:   oldTime,
+		Transcript:  "Two Milo, four thousand naira. Thank you.",
+	}
+	if err := store.InsertTransaction(ctx, oldTxn); err != nil {
+		t.Fatalf("InsertTransaction old: %v", err)
+	}
+	recentTxn := models.Transaction{
+		ID:          "txn_qp_recent",
+		ShopID:      shopID,
+		Type:        models.TypeSale,
+		ProductID:   "prd_milo",
+		ProductName: "Milo",
+		Quantity:    1,
+		Unit:        models.UnitPack,
+		Amount:      models.Money{Amount: 200000, Currency: "NGN"},
+		Status:      models.StatusConfirmed,
+		OccurredAt:  recentTime,
+		CreatedAt:   recentTime,
+		Transcript:  "One Milo, two thousand naira. That is all.",
+	}
+	if err := store.InsertTransaction(ctx, recentTxn); err != nil {
+		t.Fatalf("InsertTransaction recent: %v", err)
+	}
+
+	// The RUNBOOK command passes retention_days as a query parameter. It must
+	// control the cutoff rather than silently falling back to the 30-day default.
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/purge-transcripts?shop_id="+shopID+"&retention_days=1", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp purgeTranscriptsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.PurgedCount != 1 {
+		t.Errorf("expected purged_count 1, got %d", resp.PurgedCount)
+	}
+	cutoff, err := time.Parse(time.RFC3339, resp.OlderThan)
+	if err != nil {
+		t.Fatalf("parse older_than %q: %v", resp.OlderThan, err)
+	}
+	if age := now.Sub(cutoff); age < 23*time.Hour || age > 25*time.Hour {
+		t.Errorf("expected a ~1 day cutoff from retention_days, got %s (age %s)", resp.OlderThan, age)
+	}
+
+	gotOld, err := store.GetTransactionByID(ctx, shopID, oldTxn.ID)
+	if err != nil {
+		t.Fatalf("GetTransactionByID old: %v", err)
+	}
+	if gotOld.Transcript != "" {
+		t.Errorf("expected the old transcript to be purged, got %q", gotOld.Transcript)
+	}
+	gotRecent, err := store.GetTransactionByID(ctx, shopID, recentTxn.ID)
+	if err != nil {
+		t.Fatalf("GetTransactionByID recent: %v", err)
+	}
+	if gotRecent.Transcript != recentTxn.Transcript {
+		t.Errorf("expected the recent transcript to be preserved, got %q", gotRecent.Transcript)
+	}
+
+	// A non-numeric retention_days is rejected instead of being ignored.
+	badReq := httptest.NewRequest(http.MethodPost, "/api/settings/purge-transcripts?shop_id="+shopID+"&retention_days=soon", nil)
+	rrBad := httptest.NewRecorder()
+	handler.ServeHTTP(rrBad, badReq)
+	if rrBad.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for a non-numeric retention_days, got %d: %s", rrBad.Code, rrBad.Body.String())
+	}
+}

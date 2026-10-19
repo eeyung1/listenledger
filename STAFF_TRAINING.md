@@ -2,11 +2,13 @@
 
 This guide establishes the operational protocols for shop cashiers and storekeepers participating in the ListenLedger controlled trials (Milestone 5: Evidence & Controlled Trials).
 
+> **Pilot scope:** the current build runs entirely in the **browser** on the counter phone or tablet. Speech is transcribed by the **browser's speech recognition service**, which may send microphone audio to its provider over the internet to do that. ListenLedger itself never receives, stores or uploads raw audio. References below to a dedicated edge capture device, hardware mute button or USB microphone describe the parked appliance design, not the browser build.
+
 ---
 
 ## 1. Cashier Spoken Protocols
 
-The counter microphone operates in continuous RAM-buffered listening mode. It **never writes raw audio to disk** and only extracts transactions when an authoritative **boundary phrase** is spoken.
+The counter microphone is the phone or tablet running the ListenLedger web app. The browser's speech recognition service transcribes speech as it is spoken; ListenLedger itself **never writes raw audio to disk** and only extracts transactions when an authoritative **boundary phrase** is spoken.
 
 ### Standard Sales Protocol
 When serving a customer at the counter:
@@ -90,23 +92,26 @@ Customer transparency and privacy trust are paramount. A prominent counter placa
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│            LISTENLEDGER VOICE-ASSISTED COUNTER         │
+│          LISTENLEDGER VOICE-ASSISTED COUNTER           │
 │                                                        │
-│  This counter uses on-device voice recognition to      │
-│  automatically log sales and stock movements.          │
+│  This counter uses speech recognition to automatically │
+│  log sales and stock movements.                        │
 │                                                        │
-│  • Privacy Guaranteed: Speech is processed locally in  │
-│    temporary memory and deleted immediately.           │
-│  • No raw audio recordings are ever stored or sent     │
-│    to the cloud.                                       │
+│  • Speech is transcribed by the browser's speech       │
+│    service, which may send microphone audio to its     │
+│    provider over the internet to do so.                │
+│  • ListenLedger does not record or store voice         │
+│    recordings; it keeps only the written transcript.   │
 │  • Only line items, quantities, and totals are logged. │
-│  • Spoken transcripts are purged after 30 days.        │
+│  • Transcripts are kept for owner review and are       │
+│    cleared by the owner's retention cleanup            │
+│    (30-day default).                                   │
 └────────────────────────────────────────────────────────┘
 ```
 
 ### Customer Communication Script
 If a customer inquires about the microphone or counter device:
-- **Staff Response**: *"It's an automated digital receipt helper. It only listens for the items and total when we conclude the sale with 'Thank you'. It doesn't save any voice recordings or upload audio anywhere."*
+- **Staff Response**: *"It's an automated digital receipt helper. It only listens for the items and total when we conclude the sale with 'Thank you'. The speech is turned into text by the browser's speech service, which may send the audio to its provider over the internet to do that. ListenLedger itself doesn't save voice recordings — it keeps a written transcript that the shop owner can clear."*
 
 ### Physical Pause / Mute Button Protocol
 - When staff take private phone calls, resolve personal matters, or step away from the counter:
@@ -118,7 +123,7 @@ If a customer inquires about the microphone or counter device:
 
 ## 6. Historical Data Retention & Purging
 
-- **30-Day Transcript Cutoff**: Spoken transcripts attached to historical transactions are maintained solely for owner review and dispute adjudication.
-- **Automated Purging**: Store owners or automated maintenance jobs trigger transcript purging (`POST /api/settings/purge-transcripts?retention_days=30`) which permanently blanks historical transcripts while preserving ledger amounts, SKUs, and stock audit trails.
+- **30-Day Transcript Cutoff**: Spoken transcripts attached to historical transactions are maintained solely for owner review and dispute adjudication. The default retention window is 30 days.
+- **Purging**: There is no scheduled purge job; the owner (or an operator) triggers cleanup explicitly with `POST /api/settings/purge-transcripts`, passing the window either as a JSON body (`{"retention_days": 30}`, the default, or `{"older_than": "<RFC3339>"}`) or as the equivalent query parameters (`?retention_days=30` / `?older_than=...`). This permanently blanks historical transcripts while preserving ledger amounts, SKUs, and stock audit trails.
 
 
