@@ -73,6 +73,7 @@ import {
   syncOfflineQueue,
 } from "../offline_queue.js";
 import { connectionStatusLabel, uiStateItem } from "../ui_state.js";
+import { setCachedCatalogue } from "../offline_catalogue.js";
 import { showCustomerBookModal } from "./customers.js";
 import type { ViewCleanup } from "./index.js";
 
@@ -440,6 +441,7 @@ export function mountHome(root: HTMLElement, shopId: string): ViewCleanup {
 
       state.transactions = [...transactions.transactions];
       state.products = [...inventory.products];
+      void setCachedCatalogue(shopId, inventory.products.filter((p) => !p.archived_at));
       state.summary = summary;
       state.onboarding = onboarding;
       state.devices = devicesRes?.devices;

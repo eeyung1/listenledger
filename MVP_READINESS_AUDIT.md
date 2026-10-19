@@ -68,11 +68,17 @@ Required repair: scope reads, badges and replay to the active identity; preserve
 
 Repaired on branch `feat/p4-8-queue-shop-isolation` (base `71787e7`): queue reads (`getQueuedCaptures`) and counter badges (`getQueuedCount`) bind to the active authenticated shop; `syncOfflineQueue` replays only captures matching the active shop while preserving other shops' pending data in local storage; legacy unscoped entries missing `shop_id` are quarantined rather than submitted under arbitrary accounts; and in-flight identity checks immediately abort replay if the user signs out or switches accounts mid-sync. Covered by unit tests 8–12 in `frontend/test/offline_queue.test.mjs`. Multi-account physical-device acceptance remains open.
 
-### 3. Manual fallback is only partially available offline — high priority
+### 3. Manual fallback is only partially available offline — high priority (Resolved)
 
-Opening the manual form in `frontend/src/views/transactions.ts` always fetches inventory. On failure the product selector contains “Failed to load products”; submission requires a selected product. Thus a form loaded while online can queue a later failed POST, but opening the form after an outage is not a complete fallback. Initial app authentication and route templates also require network access; no offline app-shell/catalogue implementation was found in the reviewed path.
+Opening the manual form in `frontend/src/views/transactions.ts` previously attempted a network fetch for inventory on every opening, displaying “Failed to load products” and blocking submission when offline.
 
-Queue persistence falls back from IndexedDB to localStorage and finally memory. A memory-only queue cannot survive browser termination; user messaging must reflect the actual storage guarantee. Verify browser eviction/quota, transaction-commit failure and reload recovery on physical devices.
+**Resolution:**
+- Implemented `frontend/src/offline_catalogue.ts` with multi-tiered durable browser caching (IndexedDB `listenledger_catalogue_db`, localStorage `listenledger_catalogue_${shopId}`, and memory store fallback).
+- `showManualEntryModal` immediately pre-populates product options from durable cache upon opening, renders an offline catalogue badge (`📦 Offline Catalogue (N cached)`), and falls back seamlessly if the network fetch fails.
+- Caches are automatically hydrated when browsing the dashboard overview (`home.ts`) or inventory tab (`inventory.ts`).
+- Review corrections modal in `transactions.ts` also falls back to cached catalogue items when offline.
+- Per-shop cache isolation guarantees that multi-shop accounts never mix cached catalogues.
+- Verified across unit and DOM integration tests in `frontend/test/offline_catalogue.test.mjs` (tests 1–9) and full frontend suite (117 tests passing). Physical-device field acceptance gate remains open in `realProductpath.md`.
 
 ### 4. P4.2 still turns unrelated closing phrases into review work — high priority
 

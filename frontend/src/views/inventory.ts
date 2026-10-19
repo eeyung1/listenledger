@@ -25,6 +25,7 @@ import {
   type Unit,
   type UpdateProductInput,
 } from "../api.js";
+import { setCachedCatalogue } from "../offline_catalogue.js";
 import {
   cell,
   clear,
@@ -692,6 +693,10 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
         getSocket()?.syncSequence(snapshot.last_seq);
       }
       products = [...snapshot.products];
+      if (!query.trim() && (currentTab === "active" || currentTab === "all")) {
+        const activeProds = snapshot.products.filter((p) => !p.archived_at);
+        void setCachedCatalogue(shopId, activeProds);
+      }
       render();
     } catch (error) {
       if (disposed || signal.aborted) return;
