@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,6 +122,27 @@ func (s *Server) handlePurgeTranscripts(w http.ResponseWriter, r *http.Request) 
 	if r.Body != nil && r.ContentLength > 0 {
 		if !decodeJSON(w, r, &req) {
 			return
+		}
+	}
+
+	// Operators run the command documented in RUNBOOK.md, which passes the
+	// window as query parameters. Accept those as well as the JSON body so the
+	// request actually controls the cutoff instead of silently falling back to
+	// the 30-day default (MVP_READINESS_AUDIT.md finding 6).
+	query := r.URL.Query()
+	if req.OlderThan == nil || *req.OlderThan == "" {
+		if raw := strings.TrimSpace(query.Get("older_than")); raw != "" {
+			req.OlderThan = &raw
+		}
+	}
+	if req.RetentionDays == nil {
+		if raw := strings.TrimSpace(query.Get("retention_days")); raw != "" {
+			days, err := strconv.Atoi(raw)
+			if err != nil || days <= 0 {
+				writeError(w, http.StatusBadRequest, "invalid retention_days (expected a positive integer)")
+				return
+			}
+			req.RetentionDays = &days
 		}
 	}
 
