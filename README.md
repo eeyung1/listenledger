@@ -45,7 +45,7 @@ Reviewed on **15 October 2026**, following PR #28 (`54b1f67`).
 |---|---|---|
 | Go HTTP server | Request tracing (`X-Request-ID`), panic recovery middleware, timeouts, graceful shutdown; owner sessions, shop isolation, confirm/reject, product edit, daily summary, device pairing, edge capture, settings, CSV export, direct TLS 1.2+ & reverse-proxy HSTS/CSP security headers | None (Core serving foundations complete) |
 | Database storage | Online backup (`VACUUM INTO`), integrity checks, migrations, shop-scoped queries, atomic individual movements/review resolution, summaries and settings | Live Supabase initialization, runtime-role verification and hosted restart/restore acceptance |
-| Catalogue | Create/update API, Add/Edit forms, aliases, packaging, CSV/JSON import, alias/SKU collision validation, historical movement guards | Real-user catalogue acceptance |
+| Catalogue | Create/update API, Add/Edit forms, aliases, Double Metaphone phonetic matching, correction-to-alias learning, packaging, CSV/JSON import, alias/SKU collision validation, historical movement guards | Real-user catalogue acceptance |
 | Transactions | Structured/text capture intake, catalogue validation, atomic individual movements and review resolution, query filters, CSV export | Full voice acceptance trials |
 | Realtime | Shop-partitioned WebSocket hub, browser reconnect/backoff, reconnect recovery across all views | Hosted browser/WebSocket acceptance |
 | Dashboard | Overview with daily summaries, ledger with server-side filters & pagination, CSV export, inventory search and low-stock display, interactive review decisions, product add/edit modals, settings & device management, guided onboarding checklist & counter test modal | Additional analytics visualizations |
