@@ -452,6 +452,7 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
     ];
 
     let lastManualInput = null;
+    let lastManualHeaders = null;
     let lastVoidedId = null;
     let lastVoidReason = null;
 
@@ -489,6 +490,7 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
 
       if (u.endsWith("/api/transactions/manual") && method === "POST") {
         lastManualInput = JSON.parse(String(init.body));
+        lastManualHeaders = init.headers;
         const newTxn = {
           id: "txn_manual_1",
           shop_id: "shop_acc_1",
@@ -568,6 +570,13 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
     assert.equal(lastManualInput.quantity, 3);
     assert.equal(lastManualInput.unit, "pack");
     assert.equal(lastManualInput.notes, "Loud generator, entered manually");
+    assert.equal(typeof lastManualInput.request_id, "string");
+    assert.ok(lastManualInput.request_id.length > 0, "manual entry carries a stable request id");
+    assert.equal(
+      lastManualHeaders["Idempotency-Key"],
+      lastManualInput.request_id,
+      "the request id is sent as the idempotency key so a retry can be deduplicated",
+    );
 
     // --- Action B: Void / Reversal of Confirmed Transaction ---
     window.prompt = () => "Customer returned unopened merchandise";

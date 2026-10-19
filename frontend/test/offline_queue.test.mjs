@@ -16,6 +16,7 @@ import {
   getActiveStorageDriver,
   generateQueueId,
 } from "../dist/offline_queue.js";
+import { createManualTransaction } from "../dist/api.js";
 
 test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => {
   setupDOMEnvironment();
@@ -227,6 +228,7 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
     const queued = await enqueueManualTransaction(
       "shop_001",
       {
+        request_id: "man_test_6",
         type: "sale",
         product_id: "prod_milo",
         quantity: 2,
@@ -257,9 +259,11 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
     // 3. Network back: the entry replays exactly once into the manual endpoint
     //    and is removed from the queue.
     const posted = [];
+    const postedHeaders = [];
     globalThis.fetch = async (url, init = {}) => {
       assert.ok(String(url).includes("/api/transactions/manual"), "manual entries go to the manual endpoint");
       posted.push(JSON.parse(String(init.body)));
+      postedHeaders.push(init.headers);
       return {
         ok: true,
         status: 201,
@@ -275,6 +279,7 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
     assert.equal(await getQueuedCount(), 0, "queue empty after replay");
     assert.deepEqual(posted, [
       {
+        request_id: "man_test_6",
         type: "sale",
         product_id: "prod_milo",
         quantity: 2,
@@ -283,8 +288,49 @@ test("Offline Spoken Capture Queue & Resilient Sync Engine Suite", async (t) => 
         notes: "Typed while network down",
       },
     ]);
+    assert.equal(
+      postedHeaders[0]["Idempotency-Key"],
+      "man_test_6",
+      "the queued entry's stable request id is sent as the idempotency key on replay",
+    );
     assert.equal(progress[0].result, undefined, "manual replays carry no CaptureResult");
     assert.equal(progress[0].item.kind, "manual-transaction");
+  });
+
+  await t.test("7. P4.8 committed manual POST whose response is lost replays with the same request id", async () => {
+    const input = {
+      request_id: "man_lost_ack_1",
+      type: "sale",
+      product_id: "prod_milo",
+      quantity: 2,
+      unit: "pack",
+    };
+
+    const bodies = [];
+    // First attempt: the server commits the movement, but the acknowledgement
+    // never reaches the device (a transport drop after commit).
+    globalThis.fetch = async (url, init = {}) => {
+      bodies.push(JSON.parse(String(init.body)));
+      throw new TypeError("Failed to fetch");
+    };
+    await assert.rejects(() => createManualTransaction(input));
+
+    // The view queues the same input, so the id is preserved verbatim on device.
+    await enqueueManualTransaction("shop_001", input, "Milo 400g");
+    const [pending] = await getQueuedCaptures();
+    assert.equal(pending.manual_payload.request_id, "man_lost_ack_1");
+
+    // Reconnect: the replay reuses the original id, which is what lets the
+    // server deduplicate a request that already committed.
+    globalThis.fetch = async (url, init = {}) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return { ok: true, status: 200, json: async () => ({ transaction: { id: "tx_manual_1" } }) };
+    };
+    const stats = await syncOfflineQueue();
+    assert.equal(stats.synced, 1);
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0].request_id, "man_lost_ack_1");
+    assert.equal(bodies[1].request_id, "man_lost_ack_1", "retry reuses the original request id");
   });
 });
 

@@ -101,7 +101,7 @@ func TestManualTransactionEndpoint(t *testing.T) {
 	initialQty := milo.Quantity
 
 	// 1. Manual sale with default price calculation (2 packs * 250000 = 500000 NGN)
-	payload := `{"type":"sale","product_id":"` + milo.ID + `","quantity":2,"unit":"pack","notes":"Cashier counter fallback"}`
+	payload := `{"request_id":"man_rev_sale_1","type":"sale","product_id":"` + milo.ID + `","quantity":2,"unit":"pack","notes":"Cashier counter fallback"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/transactions/manual", bytes.NewBufferString(payload))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -126,7 +126,7 @@ func TestManualTransactionEndpoint(t *testing.T) {
 	}
 
 	// 2. Manual restock in cartons with packaging conversion (1 carton = 12 packs => +12 packs)
-	restockPayload := `{"type":"restock","product_id":"` + milo.ID + `","quantity":1,"unit":"carton","amount":{"amount":2800000,"currency":"NGN"},"notes":"Supplier delivery"}`
+	restockPayload := `{"request_id":"man_rev_restock_1","type":"restock","product_id":"` + milo.ID + `","quantity":1,"unit":"carton","amount":{"amount":2800000,"currency":"NGN"},"notes":"Supplier delivery"}`
 	reqRestock := httptest.NewRequest(http.MethodPost, "/api/transactions/manual", bytes.NewBufferString(restockPayload))
 	recRestock := httptest.NewRecorder()
 	handler.ServeHTTP(recRestock, reqRestock)
@@ -148,7 +148,7 @@ func TestManualTransactionEndpoint(t *testing.T) {
 	}
 
 	// 3. Test insufficient stock handling on manual sale
-	excessivePayload := `{"type":"sale","product_id":"` + milo.ID + `","quantity":9999,"unit":"pack"}`
+	excessivePayload := `{"request_id":"man_rev_excessive_1","type":"sale","product_id":"` + milo.ID + `","quantity":9999,"unit":"pack"}`
 	reqOOM := httptest.NewRequest(http.MethodPost, "/api/transactions/manual", bytes.NewBufferString(excessivePayload))
 	recOOM := httptest.NewRecorder()
 	handler.ServeHTTP(recOOM, reqOOM)
