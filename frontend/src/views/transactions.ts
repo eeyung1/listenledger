@@ -166,6 +166,11 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   const ledgerBody = hook(root, "ledger-body");
   const reviewQueue = hook(root, "review-queue");
   const reviewCount = hook(root, "review-queue-count");
+  const tabAll = hook<HTMLButtonElement>(root, "tab-all-transactions");
+  const tabReview = hook<HTMLButtonElement>(root, "tab-needs-review");
+  const tabReviewBadge = hook(root, "review-tab-badge");
+  const panelReview = hook(root, "panel-review");
+  const panelLedger = hook(root, "panel-ledger");
   const typeFilter = hook<HTMLSelectElement>(root, "filter-type");
   const statusFilter = hook<HTMLSelectElement>(root, "filter-status");
   const fromFilter = hook<HTMLInputElement>(root, "filter-from");
@@ -176,15 +181,64 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   const pageInfo = hook(root, "page-info");
   const manualBtn = hook<HTMLButtonElement>(root, "manual-entry");
 
+  function switchTab(tab: "all" | "review"): void {
+    if (tab === "review") {
+      if (tabReview) {
+        tabReview.classList.add("is-active");
+        tabReview.setAttribute("aria-selected", "true");
+      }
+      if (tabAll) {
+        tabAll.classList.remove("is-active");
+        tabAll.setAttribute("aria-selected", "false");
+      }
+      if (panelReview) panelReview.hidden = false;
+      if (panelLedger) panelLedger.hidden = true;
+    } else {
+      if (tabAll) {
+        tabAll.classList.add("is-active");
+        tabAll.setAttribute("aria-selected", "true");
+      }
+      if (tabReview) {
+        tabReview.classList.remove("is-active");
+        tabReview.setAttribute("aria-selected", "false");
+      }
+      if (panelLedger) panelLedger.hidden = false;
+      if (panelReview) panelReview.hidden = true;
+    }
+  }
+
+  if (tabAll) {
+    tabAll.addEventListener("click", () => switchTab("all"));
+  }
+  if (tabReview) {
+    tabReview.addEventListener("click", () => switchTab("review"));
+  }
+
+  const initialHash = window.location.hash || "";
+  if (initialHash.includes("tab=review") || initialHash.includes("status=review_required")) {
+    switchTab("review");
+  } else {
+    switchTab("all");
+  }
+
   function reviewCard(transaction: Transaction): HTMLLIElement {
     const card = el("li", "review-card");
 
+    const pConf = transaction.confidence?.product ?? 1.0;
+    const qConf = transaction.confidence?.quantity ?? 1.0;
+    const aConf = transaction.confidence?.amount ?? 1.0;
+    const minConf = Math.min(pConf, qConf, aConf);
+
+    const isProductUncertain = pConf < 0.75 || (pConf === minConf && minConf < 0.85);
+    const isQuantityUncertain = qConf < 0.75 || (qConf === minConf && minConf < 0.85);
+    const isAmountUncertain = aConf < 0.75 || (aConf === minConf && minConf < 0.85);
+
     const head = el("div", "review-card__head");
     head.append(
-      el("span", "review-card__product", transaction.product_name),
+      el("span", `review-card__product${isProductUncertain ? " review-card__field--uncertain" : ""}`, transaction.product_name),
       el(
         "span",
-        "review-card__amount",
+        `review-card__amount${isQuantityUncertain || isAmountUncertain ? " review-card__field--uncertain" : ""}`,
         `${formatQuantity(transaction.quantity, transaction.unit)} · ${formatMoney(transaction.amount)}`,
       ),
     );
@@ -201,6 +255,24 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       head.append(rcpt);
     }
 
+    const uncertainties = el("div", "review-card__uncertainties");
+    uncertainties.setAttribute("data-hook", "review-uncertainties");
+    if (isProductUncertain) {
+      const badge = el("span", "badge badge--review", `Uncertain product (${Math.round(pConf * 100)}%)`);
+      badge.setAttribute("data-hook", "uncertain-field-product");
+      uncertainties.append(badge);
+    }
+    if (isQuantityUncertain) {
+      const badge = el("span", "badge badge--review", `Uncertain quantity (${Math.round(qConf * 100)}%)`);
+      badge.setAttribute("data-hook", "uncertain-field-quantity");
+      uncertainties.append(badge);
+    }
+    if (isAmountUncertain) {
+      const badge = el("span", "badge badge--review", `Uncertain amount (${Math.round(aConf * 100)}%)`);
+      badge.setAttribute("data-hook", "uncertain-field-amount");
+      uncertainties.append(badge);
+    }
+
     // The transcript is what the owner adjudicates against, so it is shown
     // verbatim — it is the record of what was actually said.
     const transcript = el(
@@ -214,16 +286,27 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     const scores = el("p", "review-card__scores", formatConfidenceBreakdown(transaction));
     scores.title = "Recognition confidence per anchor; the weakest one held this capture";
 
+    const consequences = el("p", "review-card__consequences");
+    consequences.setAttribute("data-hook", "review-consequences");
+    consequences.innerHTML = `<strong>Confirm:</strong> Applies stock change and confirms revenue in ledger &middot; <strong>Reject:</strong> Discards capture without modifying inventory`;
+
     const actions = el("div", "review-card__actions");
     let onboardBtn: HTMLButtonElement | null = null;
     const confirmBtn = el("button", "button button--primary button--sm", "Confirm");
+    confirmBtn.setAttribute("data-hook", "review-confirm-btn");
+    confirmBtn.setAttribute("title", "Confirming applies this change to inventory and records revenue in the ledger");
     const editBtn = el("button", "button button--secondary button--sm", "Edit & Confirm");
+    editBtn.setAttribute("data-hook", "review-edit-btn");
     const rejectBtn = el("button", "button button--secondary button--sm", "Reject");
+    rejectBtn.setAttribute("data-hook", "review-reject-btn");
+    rejectBtn.setAttribute("title", "Rejecting discards this capture without altering stock or revenue");
     const errorMsg = el("span", "review-card__error");
     errorMsg.hidden = true;
 
     if (!transaction.product_id) {
       onboardBtn = el("button", "button button--primary button--sm", "+ Add to Catalogue & Confirm");
+      onboardBtn.setAttribute("data-hook", "review-onboard-btn");
+      onboardBtn.setAttribute("title", "Add missing product to catalogue and confirm transaction");
       onboardBtn.addEventListener("click", () => {
         showOnboardProductModal(transaction);
       });
@@ -290,9 +373,9 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     const audioElement = legacyAudioControl(shopId, transaction);
 
     if (audioElement) {
-      card.append(head, transcript, audioElement, scores, actions);
+      card.append(head, transcript, uncertainties, audioElement, scores, consequences, actions);
     } else {
-      card.append(head, transcript, scores, actions);
+      card.append(head, transcript, uncertainties, scores, consequences, actions);
     }
     return card;
   }
@@ -455,6 +538,10 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     clear(reviewQueue);
 
     setText(reviewCount, String(heldTransactions.length));
+    if (tabReviewBadge) {
+      setText(tabReviewBadge, String(heldTransactions.length));
+      tabReviewBadge.hidden = heldTransactions.length === 0;
+    }
 
     if (heldTransactions.length === 0) {
       reviewQueue.append(
