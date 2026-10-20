@@ -43,11 +43,13 @@ import { uiStateRow, type UiStateOptions } from "../ui_state.js";
 import type { ViewCleanup } from "./index.js";
 
 type CatalogueTab = "active" | "archived" | "all";
+type StockFilter = "" | "low" | "out";
 
 export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   let products: Product[] = [];
   let query = "";
   let currentTab: CatalogueTab = "active";
+  let stockFilter: StockFilter = "";
   let disposed = false;
   const abortController = new AbortController();
   const signal = abortController.signal;
@@ -55,6 +57,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   const body = hook(root, "catalogue-body");
   const countLabel = hook(root, "inventory-count");
   const searchInput = hook<HTMLInputElement>(root, "catalogue-query");
+  const stockSelect = hook<HTMLSelectElement>(root, "catalogue-stock-filter");
   const addButton = hook<HTMLButtonElement>(root, "catalogue-add");
   const importButton = hook<HTMLButtonElement>(root, "catalogue-import");
   const tabButtons = root.querySelectorAll<HTMLButtonElement>("[data-hook='catalogue-tabs'] .tab");
@@ -617,6 +620,54 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     return row;
   }
 
+  /**
+   * Refreshes the counts inside the stock filter.
+   *
+   * They describe the current tab, not the whole catalogue, because that is the
+   * set the filter narrows. "Low" deliberately excludes zero stock so the two
+   * problem buckets partition instead of double-counting an empty shelf.
+   */
+  function syncStockCounts(tabProducts: readonly Product[]): void {
+    if (stockSelect === null) return;
+    let low = 0;
+    let out = 0;
+    for (const product of tabProducts) {
+      if (product.quantity <= 0) {
+        out += 1;
+      } else if (isLowStock(product)) {
+        low += 1;
+      }
+    }
+    for (const option of Array.from(stockSelect.options)) {
+      if (option.value === "") option.textContent = `All stock (${tabProducts.length})`;
+      else if (option.value === "low") option.textContent = `Low stock (${low})`;
+      else if (option.value === "out") option.textContent = `Out of stock (${out})`;
+    }
+  }
+
+  function matchesStockFilter(product: Product): boolean {
+    if (stockFilter === "") return true;
+    if (stockFilter === "out") return product.quantity <= 0;
+    return product.quantity > 0 && isLowStock(product);
+  }
+
+  /**
+   * Clears the stock filter. The search box is cleared as well because the last
+   * fetch may have been narrowed server-side by `q`; rerendering the loaded
+   * page would then hide products the server never returned.
+   */
+  function clearInventoryFilters(): void {
+    stockFilter = "";
+    if (stockSelect !== null) stockSelect.value = "";
+    if (query !== "") {
+      query = "";
+      if (searchInput !== null) searchInput.value = "";
+      void refetch();
+      return;
+    }
+    render();
+  }
+
   function render(): void {
     if (body === null) return;
     clear(body);
@@ -629,11 +680,13 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
       if (currentTab === "archived") return Boolean(product.archived_at);
       return true; // "all"
     });
+    syncStockCounts(tabProducts);
 
-    // Filter by search needle
+    // Filter by recorded stock, then by the search needle
+    const stockMatches = tabProducts.filter(matchesStockFilter);
     const matches = needle === ""
-      ? tabProducts
-      : tabProducts.filter(
+      ? stockMatches
+      : stockMatches.filter(
           (product) =>
             product.name.toLowerCase().includes(needle) ||
             product.sku.toLowerCase().includes(needle) ||
@@ -651,25 +704,49 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     }
 
     if (matches.length === 0) {
+      const stockActive = stockFilter !== "";
       let title = "No products yet. Add the first one to get started.";
-      if (needle !== "") {
+      let detail = "Products are what voice capture matches against.";
+      if (stockActive) {
+        title = needle !== ""
+          ? "No products match this search and stock filter."
+          : stockFilter === "low"
+            ? "No low-stock products in this tab."
+            : "No out-of-stock products in this tab.";
+        detail = stockFilter === "low"
+          ? "Products appear here when stock is above zero but at or below the reorder threshold."
+          : "Products appear here when recorded stock reaches zero.";
+      } else if (needle !== "") {
         title = "No products match this search.";
+        detail = "";
       } else if (currentTab === "archived") {
         title = "No archived products in catalogue.";
+        detail = "";
       } else if (currentTab === "active" && products.length > 0) {
         title = "All products are currently archived.";
+        detail = "";
       }
-      // Only an empty catalogue has an obvious next step; a filtered-to-nothing
-      // result does not, so it offers no action rather than a misleading one.
-      const brandNewCatalogue = needle === "" && products.length === 0;
-      const emptyOptions: UiStateOptions = brandNewCatalogue
-        ? {
-            title,
-            detail: "Products are what voice capture matches against.",
-            actionLabel: "Add product",
-            onAction: () => showProductModal(),
-          }
-        : { title };
+      // A brand-new catalogue has an obvious next step; a filter that matches
+      // nothing offers the recovery that actually widens the list again.
+      const brandNewCatalogue = needle === "" && products.length === 0 && !stockActive;
+      let emptyOptions: UiStateOptions;
+      if (stockActive) {
+        emptyOptions = {
+          title,
+          detail,
+          actionLabel: needle !== "" ? "Clear filters" : "Show all stock",
+          onAction: clearInventoryFilters,
+        };
+      } else if (brandNewCatalogue) {
+        emptyOptions = {
+          title,
+          detail,
+          actionLabel: "Add product",
+          onAction: () => showProductModal(),
+        };
+      } else {
+        emptyOptions = { title };
+      }
       body.append(uiStateRow("empty", emptyOptions, 7));
       return;
     }
@@ -768,6 +845,12 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     }, 250);
   };
 
+  const onStockChange = (): void => {
+    const value = stockSelect?.value ?? "";
+    stockFilter = value === "low" || value === "out" ? value : "";
+    render();
+  };
+
   const onAddClick = (): void => {
     showProductModal();
   };
@@ -787,6 +870,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   window.addEventListener("ll:product-created", onProductCreated);
   window.addEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
   searchInput?.addEventListener("input", onSearch);
+  stockSelect?.addEventListener("change", onStockChange);
   addButton?.addEventListener("click", onAddClick);
   importButton?.addEventListener("click", onImportClick);
 
@@ -799,6 +883,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     window.removeEventListener("ll:product-created", onProductCreated);
     window.removeEventListener(CONNECTION_STATUS_EVENT, onConnectionStatus);
     searchInput?.removeEventListener("input", onSearch);
+    stockSelect?.removeEventListener("change", onStockChange);
     addButton?.removeEventListener("click", onAddClick);
     importButton?.removeEventListener("click", onImportClick);
     tabButtons.forEach((btn) => {

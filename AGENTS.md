@@ -43,7 +43,8 @@ migration 0014. P2 still selects the measured default; current default is en-US.
 
 Read [realProductpath.md](realProductpath.md) before selecting work. This routing
 snapshot was checked against `origin/main` at `7d143dc` and P5.4 branch head
-`2b12af0`. Refresh remote refs and the shared logs before claiming anything.
+`2b12af0`, then reconciled with `22a32b5` after PRs #73 and #75–#79 merged.
+Refresh remote refs and the shared logs before claiming anything.
 A row below is a direction to remaining work, not a reservation or permission
 to take another agent's scopes. The roadmap's feature freeze and evidence gates
 still apply.
@@ -59,11 +60,12 @@ still apply.
 - P5.1–P5.3: catalogue-first number-brand parsing, deterministic unit selection,
   and cancellation boundary fixes.
 - P5.5 is **partially complete**: inferred quantities receive lower confidence.
-- P6 is **partially complete**: staff/runbook privacy wording is corrected and
-  the manual purge endpoint honours the documented query parameters.
-- P5.4 phonetic matching and correction-to-alias saving are implemented on
-  `feat/p5-4-phonetic-matching`, PR #73 (`2b12af0`), but are **not merged** at this
-  snapshot. Continue validation/review of that branch; do not duplicate it.
+- P6 is **partially complete**: staff/runbook privacy wording is corrected, the
+  manual purge endpoint honours the documented query parameters, scheduled
+  retention merged in PR #77, and legacy audio is fetched on demand instead of
+  riding in ordinary ledger and WebSocket payloads (PR #75).
+- P5.4 phonetic matching and correction-to-alias saving are merged (PR #73,
+  `c0b85b3`, from branch `2b12af0`); manual CI and field calibration remain open.
 
 These statements describe implementation only. Real-device, field, deployment,
 and current-revision CI acceptance remain separate.
@@ -74,7 +76,7 @@ and current-revision CI acceptance remain separate.
 |---|---|---|
 | P4.5 | Carry 3–5 recognizer alternatives and confidence through capture/queue/API, evaluate catalogue matches, and retain scores for analysis. | Existing active owner: `DeepSeek-20261019-p45`, token `af390fdfdf534215a42be13f859f08f2`. Coordinate with that owner; no takeover without explicit handover. |
 | P5.5 | Incorporate P4.5 confidence and calibrate review thresholds against labelled real outcomes. | Depends on P4.5 and P1/P2 data; do not redo the merged inferred-quantity fix or overlap the P4.5 claim. |
-| P6 | Automate deletion under an agreed retention policy; address legacy server/browser audio; exclude audio from ordinary ledger and WebSocket payloads. | Highest independent code work to scope after checking current claims. The purge endpoint exists; scheduled enforcement and payload separation do not. Reserve migrations before creating them. |
+| P6 | Verify and document deletion under the agreed retention policy, legacy server/browser audio handling, and the deployed payload behaviour. | Highest independent code work to scope after checking current claims. Scheduled enforcement merged in PR #77 and legacy audio is no longer carried in ordinary ledger/WebSocket payloads (PR #75); per-shop policy choice, legacy browser queue handling and deployed verification remain open. Reserve migrations before creating them. |
 | P6, conditional | Per-shop opt-in, review-only recording, separate audio storage and controlled retrieval. | Only if the owner chooses to re-enable recording. Keep new audio retention disabled until the policy and controls are ready. |
 | P3 | A real hold-to-talk experiment flow, followed by comparison with ambient capture. | Follow the roadmap's P1/P2 evidence order and owner experiment plan. Start/Stop listening is not a completed push-to-talk workflow. |
 | P5.6, optional | Compare catalogue-ID-constrained LLM extraction against the rules on the same real transcript set. | Requires P1/P2 data; adoption needs a measured win. Do not make this an unconditional MVP dependency. |

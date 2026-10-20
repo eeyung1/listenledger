@@ -8,15 +8,17 @@
   <header class="view__header">
     <h1 class="view__title">Shop Settings</h1>
     <p class="view__subtitle">
-      Configure this shop and its voice boundary phrases for the single-counter trial.
+      Configure your shop details, voice recognition, account details, and optional devices.
     </p>
   </header>
 
   <div class="settings-grid">
-    <!-- Shop Configuration Form -->
-    <section class="panel" aria-labelledby="shop-settings-heading">
-      <h2 class="panel__title" id="shop-settings-heading">Shop Details & Voice Boundaries</h2>
-      <form class="form settings-form" id="shop-settings-form" data-hook="settings-form">
+    <form class="form settings-form" id="shop-settings-form" data-hook="settings-form">
+      <!-- 1. Shop details -->
+      <section class="panel" aria-labelledby="shop-details-heading">
+        <h2 class="panel__title" id="shop-details-heading">Shop details</h2>
+        <p class="panel__hint">Configure this shop's name, currency, and operational timezone.</p>
+
         <label class="form__field">
           Shop Name
           <input type="text" name="name" data-hook="setting-name" required maxlength="100" />
@@ -32,6 +34,12 @@
             <input type="text" name="timezone" data-hook="setting-timezone" required />
           </label>
         </div>
+      </section>
+
+      <!-- 2. Voice settings -->
+      <section class="panel" aria-labelledby="voice-settings-heading">
+        <h2 class="panel__title" id="voice-settings-heading">Voice settings</h2>
+        <p class="panel__hint">Closing phrases and spoken language used for counter voice recognition.</p>
 
         <div class="form__row">
           <label class="form__field">
@@ -58,7 +66,7 @@
           />
           <span class="form__hint">
             Language the phone's speech recognizer listens in, as a BCP-47 tag
-            (e.g., “en-NG” for Nigerian English). P2 will confirm the best default.
+            (e.g., “en-NG” for Nigerian English).
           </span>
           <datalist id="recognition-language-options">
             <option value="en-NG">English (Nigeria)</option>
@@ -74,19 +82,41 @@
           <button type="submit" class="button button--primary" data-hook="save-settings-btn">Save Settings</button>
           <span class="form__status" data-hook="settings-status" hidden></span>
         </div>
-      </form>
+      </section>
+    </form>
+
+    <!-- 3. Account -->
+    <section class="panel" aria-labelledby="account-heading">
+      <h2 class="panel__title" id="account-heading">Account</h2>
+      <p class="panel__hint">
+        Account identifiers and access details for this shop ledger.
+      </p>
+      <div class="account-details" data-hook="account-details">
+        <div class="form__row">
+          <div class="form__field">
+            <span class="form__label">Active Shop ID</span>
+            <code class="account-id-badge" data-hook="account-shop-id">—</code>
+            <span class="form__hint">Unique identifier for this store's isolated ledger and inventory.</span>
+          </div>
+          <div class="form__field">
+            <span class="form__label">Owner Account ID</span>
+            <code class="account-id-badge" data-hook="account-owner-id">—</code>
+            <span class="form__hint">Owner account authorized to manage this shop.</span>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <!-- Edge Devices Panel -->
-    <section class="panel" hidden data-pilot-parked="devices-heading" aria-labelledby="devices-heading">
-      <h2 class="panel__title" id="devices-heading">Paired Capture Devices</h2>
+    <!-- 4. Optional devices -->
+    <section class="panel" aria-labelledby="devices-heading">
+      <h2 class="panel__title" id="devices-heading">Optional devices</h2>
       <p class="panel__hint">
         Physical microphones and external edge hubs authenticated to record transactions for this shop.
       </p>
 
-      <div class="panel__notice" style="background: #edf7f7; border-left: 4px solid #135b59; padding: 0.85rem; border-radius: 4px; margin-bottom: 1rem;">
-        <strong>📱 Mobile Phone &amp; Tablet Microphone:</strong>
-        When using your phone or counter tablet, you do not need to pair an external device. Simply open the <strong>Overview</strong> dashboard and tap <strong>"Start Listening"</strong> on the Counter Microphone dock. Screen Wake Lock automatically keeps your display awake for continuous listening, and you can enable spoken voice readout (TTS) for eyes-free confirmation of sales and restocks. The device pairing below is for optional dedicated hardware hubs (such as Raspberry Pi or Linux counter PCs).
+      <div class="panel__notice" data-hook="browser-mic-notice" style="background: #edf7f7; border-left: 4px solid #135b59; padding: 0.85rem; border-radius: 4px; margin-bottom: 1rem;">
+        <strong>📱 Browser Microphones Require No Device Pairing:</strong>
+        When running ListenLedger on your phone, tablet, or laptop, speech capture runs directly inside your browser. You do not need to pair or configure an external device. Simply open the <strong>Overview</strong> dashboard and tap <strong>“Start Listening”</strong> on the Counter Microphone dock. Screen Wake Lock automatically keeps your display awake for continuous listening, and you can enable spoken voice readout (TTS) for eyes-free confirmation of sales and restocks. The device pairing form below is only for optional dedicated hardware hubs (such as Raspberry Pi or Linux counter PCs).
       </div>
 
       <form class="pair-device-form" data-hook="pair-device-form">
@@ -115,7 +145,7 @@
         <li class="ui-state ui-state--empty" data-state="empty" role="status" data-hook="device-list-empty">
           <span class="ui-state__icon" aria-hidden="true">○</span>
           <p class="ui-state__title">No edge capture devices paired yet.</p>
-          <p class="ui-state__detail">Pairing is optional — a phone microphone works on its own.</p>
+          <p class="ui-state__detail">Pairing is optional — a phone or browser microphone works on its own.</p>
         </li>
       </ul>
     </section>
@@ -283,14 +313,14 @@
 
     </details>
 
-    <!-- Privacy & Hardware Notice -->
+    <!-- Voice Processing and Privacy Notice -->
     <section class="panel panel--privacy" aria-labelledby="privacy-heading">
       <h2 class="panel__title" id="privacy-heading">Voice processing and trial privacy</h2>
       <div class="privacy-notice">
-        <p>Use the microphone on this phone from Overview. External edge hardware is parked for this trial; do not connect the demonstration runner to a real shop.</p>
-        <p>Browser speech recognition may send audio to the browser provider and normally needs an internet connection. This pilot version sends transcripts to ListenLedger, without recording or uploading audio snippets. The server discards snippets sent by older clients. Browser-provider processing is separate from ListenLedger storage.</p>
-        <p>New raw-audio retention is disabled pending an opt-in policy and automatic deletion controls. Existing recordings and legacy device queues are not automatically erased by this change. Credit capture is parked; keep credit sales in your independent records.</p>
-        <p>Before field recording, obtain the owner's consent, inform staff and display a customer notice. Collect P1 evidence with an ordinary phone recorder, keep recordings out of git, store them encrypted and delete them after labelling.</p>
+        <p><strong>Browser-Based Speech Processing:</strong> Counter voice recognition runs directly through the Web Speech API on your phone, tablet, or computer. Audio is captured locally by your browser; browser speech engines may stream audio to the browser provider (e.g., Google or Apple) to generate speech-to-text transcripts, which requires an active internet connection. ListenLedger receives only the final text transcripts, without recording, streaming, or storing raw audio snippets on the server.</p>
+        <p><strong>No External Pairing Required:</strong> Browser microphones function completely independently on your device and do not require external device pairing or edge hub hardware. You can capture transactions immediately from the Overview dock.</p>
+        <p><strong>Data Retention & Deletion:</strong> Any retained audio snippets or debug recordings are subject to automatic 7-day scheduled retention deletion. The server automatically removes audio records past their retention window. Credit transactions are not captured automatically; maintain credit sales in your manual records.</p>
+        <p><strong>Consent & Counter Transparency:</strong> Before using voice capture at the counter, ensure shop owner consent is recorded, train cashiers on closing boundary phrases, and display clear customer-facing signage explaining ambient voice assistance.</p>
       </div>
     </section>
   </div>

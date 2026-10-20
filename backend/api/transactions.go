@@ -461,6 +461,15 @@ func (s *Server) getTransactionDecision(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusOK, dec)
 }
 
+// transactionDetailResponse is the one payload allowed to carry a legacy audio
+// snippet. The snippet is absent from models.Transaction's JSON (see
+// AudioData), so ledger lists and WebSocket transaction events cannot leak it;
+// an owner opening a single transaction can still retrieve it for playback.
+type transactionDetailResponse struct {
+	models.Transaction
+	AudioData string `json:"audio_data,omitempty"`
+}
+
 func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request, id string) {
 	shopID, ok := s.shopID(w, r)
 	if !ok {
@@ -475,7 +484,7 @@ func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request, id strin
 		s.fail(w, r, "get transaction", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	writeJSON(w, http.StatusOK, transactionDetailResponse{Transaction: t, AudioData: t.AudioData})
 }
 
 type createProductOnboard struct {
@@ -497,6 +506,8 @@ type confirmTransactionRequest struct {
 	CustomerName  string                `json:"customer_name,omitempty"`
 	Notes         string                `json:"notes,omitempty"`
 	CreateProduct *createProductOnboard `json:"create_product,omitempty"`
+	SaveAsAlias   bool                  `json:"save_as_alias,omitempty"`
+	AliasText     string                `json:"alias_text,omitempty"`
 }
 
 func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id string) {
@@ -508,6 +519,8 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 	var corrections *storage.ReviewCorrections
 	notes := ""
 	var createProdReq *createProductOnboard
+	saveAsAlias := false
+	aliasText := ""
 
 	if r.Body != nil && r.ContentLength > 0 {
 		var req confirmTransactionRequest
@@ -516,6 +529,13 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 		}
 		notes = strings.TrimSpace(req.Notes)
 		createProdReq = req.CreateProduct
+		saveAsAlias = req.SaveAsAlias
+		aliasText = strings.TrimSpace(req.AliasText)
+		if saveAsAlias && aliasText == "" {
+			if origTxn, err := s.store.GetTransactionByID(r.Context(), shopID, id); err == nil {
+				aliasText = strings.TrimSpace(origTxn.ProductName)
+			}
+		}
 
 		if req.CreateProduct != nil {
 			origTxn, err := s.store.GetTransactionByID(r.Context(), shopID, id)
@@ -673,6 +693,37 @@ func (s *Server) confirmTransaction(w http.ResponseWriter, r *http.Request, id s
 		s.publish(w, r, shopID, ws.EventInventoryUpdated, *result.Product)
 	}
 	s.publish(w, r, shopID, ws.EventTransactionUpdated, result.Transaction)
+
+	// Correction-to-alias learning (P5.4): If requested, persist the misheard mention as a product alias.
+	if saveAsAlias && aliasText != "" {
+		targetProductID := ""
+		if corrections != nil && corrections.ProductID != "" {
+			targetProductID = corrections.ProductID
+		} else if result.Transaction.ProductID != "" {
+			targetProductID = result.Transaction.ProductID
+		}
+		if targetProductID != "" {
+			prodToUpdate, err := s.store.GetProductByID(r.Context(), shopID, targetProductID)
+			if err == nil && prodToUpdate.ArchivedAt == nil {
+				alreadyHas := strings.EqualFold(prodToUpdate.Name, aliasText) || strings.EqualFold(prodToUpdate.SKU, aliasText)
+				for _, al := range prodToUpdate.Aliases {
+					if strings.EqualFold(al, aliasText) {
+						alreadyHas = true
+						break
+					}
+				}
+				if !alreadyHas {
+					prodToUpdate.Aliases = append(prodToUpdate.Aliases, aliasText)
+					if updated, err := s.store.UpdateProduct(r.Context(), prodToUpdate); err == nil {
+						s.publish(w, r, shopID, ws.EventInventoryUpdated, updated)
+						if result.Product != nil && result.Product.ID == updated.ID {
+							result.Product = &updated
+						}
+					}
+				}
+			}
+		}
+	}
 
 	// Attribute credit sale to customer's tab if not already recorded
 	if result.Transaction.Status == models.StatusConfirmed && result.Transaction.Type == models.TypeSale && result.Transaction.CustomerID != "" {
