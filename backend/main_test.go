@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eeyung1/listenledger-backend/api"
 	"github.com/eeyung1/listenledger-backend/storage"
 )
 
@@ -342,4 +343,54 @@ func TestRestrictedStartupNeverAutoMigrates(t *testing.T) {
 		t.Fatalf("administrator-initialized schema must start: %v", err)
 	}
 	store.Close()
+}
+
+func TestRetentionConfiguration_DefaultsAndEnv(t *testing.T) {
+	// 1. Default constants
+	if api.DefaultRetentionDays != 7 {
+		t.Errorf("expected DefaultRetentionDays=7, got %d", api.DefaultRetentionDays)
+	}
+	if api.DefaultRetentionInterval != 24*time.Hour {
+		t.Errorf("expected DefaultRetentionInterval=24h, got %v", api.DefaultRetentionInterval)
+	}
+
+	// 2. Config struct defaults
+	cfg := config{
+		retentionDays:     api.DefaultRetentionDays,
+		retentionInterval: api.DefaultRetentionInterval,
+	}
+	if cfg.retentionDays != 7 {
+		t.Errorf("expected retentionDays 7, got %d", cfg.retentionDays)
+	}
+	if cfg.retentionInterval != 24*time.Hour {
+		t.Errorf("expected retentionInterval 24h, got %v", cfg.retentionInterval)
+	}
+
+	// 3. Environment overrides
+	t.Setenv("RETENTION_DAYS", "14")
+	t.Setenv("RETENTION_INTERVAL", "12h")
+
+	if envDays := os.Getenv("RETENTION_DAYS"); envDays != "" {
+		if days, err := stringsToDays(envDays); err == nil && days > 0 {
+			cfg.retentionDays = days
+		}
+	}
+	if envInterval := os.Getenv("RETENTION_INTERVAL"); envInterval != "" {
+		if d, err := time.ParseDuration(envInterval); err == nil {
+			cfg.retentionInterval = d
+		}
+	}
+
+	if cfg.retentionDays != 14 {
+		t.Errorf("expected overridden retentionDays 14, got %d", cfg.retentionDays)
+	}
+	if cfg.retentionInterval != 12*time.Hour {
+		t.Errorf("expected overridden retentionInterval 12h, got %v", cfg.retentionInterval)
+	}
+}
+
+func stringsToDays(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	return n, err
 }

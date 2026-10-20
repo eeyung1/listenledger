@@ -90,8 +90,7 @@ A busy counter can accumulate reviews unrelated to transactions. Add no-anchor s
 
 - `ParseSpokenSegment` parses numbers before catalogue matching; `cleanProductMention` strips number words and numeric content. Number-bearing brands require catalogue-aware parsing, then real-transcript evaluation.
 - Unit extraction iterates `knownUnits`, a Go map, taking the first match. Mixed units can be assigned inconsistently rather than attached to their own quantities/lines.
-- `DetectCancellation` uses substring matching across the whole transcript. Ordinary instructions such as “drop that bag there…” can cancel a sale.
-- `MatchProduct` uses exact/alias/spelling similarity; phonetic matching and a measured correction-to-alias workflow are absent.
+- `MatchProduct` previously used only exact/alias/spelling similarity. P5.4 implemented Double Metaphone phonetic matching (0.88–0.92 confidence, with 0.50 ambiguous collisions) and an owner correction-to-alias learning workflow in the backend API and frontend review modal. Field evaluation on real audio/transcripts remains open.
 - Quantity defaults to one when amount/product are present, and the engine usually assigns quantity confidence 0.98. That number is a heuristic, not measured certainty.
 - Browser recognition still requests one alternative. Alternative transcripts and recognizer confidence are not used to resolve ambiguity.
 

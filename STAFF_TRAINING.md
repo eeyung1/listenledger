@@ -121,9 +121,10 @@ If a customer inquires about the microphone or counter device:
 
 ---
 
-## 6. Historical Data Retention & Purging
+## 6. Historical Data Retention & Automated Deletion
 
-- **30-Day Transcript Cutoff**: Spoken transcripts attached to historical transactions are maintained solely for owner review and dispute adjudication. The default retention window is 30 days.
-- **Purging**: There is no scheduled purge job; the owner (or an operator) triggers cleanup explicitly with `POST /api/settings/purge-transcripts`, passing the window either as a JSON body (`{"retention_days": 30}`, the default, or `{"older_than": "<RFC3339>"}`) or as the equivalent query parameters (`?retention_days=30` / `?older_than=...`). This permanently blanks historical transcripts while preserving ledger amounts, SKUs, and stock audit trails.
+- **7-Day Agreed Retention Window**: Spoken transcripts attached to historical transactions and legacy audio snippets are maintained solely for owner review and dispute adjudication under the agreed 7-day pilot retention policy.
+- **Automated Deletion**: The system automatically enforces deletion on a daily schedule. Speech transcripts and legacy audio older than 7 days are permanently cleared from the database with no manual cashier or owner action required. Ledger amounts, SKUs, stock balances, and audit trails are preserved untouched.
+- **Manual Cleanup On Demand**: The owner or an operator can also trigger an immediate cleanup at any time via `POST /api/settings/purge-transcripts` (or check scheduler status via `GET /api/settings/retention-policy`).
 
 

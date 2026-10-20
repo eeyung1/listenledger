@@ -223,8 +223,9 @@ Measure every change against the **real transcript set from P1/P2**, not hand-wr
 
 - **Problem:** fuzzy matching is Levenshtein distance on spelling (`backend/validate/matcher.go:171-194`). Speech-to-text errors are phonetic: "peek" vs "Peak" scores 0.5, so it does not match.
 - **Fix:**
-  - [ ] Add phonetic keys (for example Double Metaphone) for product names and aliases.
-  - [ ] When an owner corrects a review item (for example "peek" → Peak), offer to save the misheard text as an alias.
+  - [x] Add phonetic keys (Double Metaphone) for product names and aliases (`backend/validate/matcher.go`). High-confidence phonetic matches score 0.88–0.92 (`MatchedBy: "phonetic"`), and ambiguous phonetic collisions resolve to 0.50 ambiguous. Covered by unit tests in `backend/validate/matcher_test.go` and engine tests in `backend/validate/validate_test.go`.
+  - [x] When an owner corrects a review item (for example "peek" → Peak), offer to save the misheard text as an alias. Implemented in `backend/api/transactions.go` (`save_as_alias: true` updates `product.Aliases` and broadcasts `ws.EventInventoryUpdated`), with "Save as alias" checkbox in `frontend/src/views/transactions.ts`. Covered by `backend/api/transactions_test.go` and `frontend/test/ui_acceptance.test.mjs`.
+  - [ ] Real-world phonetic calibration: evaluate real mishearings against P1 ground-truth transcripts; verify false confirmations remain ≤1% across real phone speech.
 
 ### P5.5 Confidence scores are heuristic
 
@@ -353,7 +354,7 @@ Before closing P0b release acceptance, run the actual release against an isolate
 | P5.1 number-bearing product names | Catalogue-first parsing missing | Measure Five Alive, Seven Up, 7Up and Three Crowns on real audio/transcripts, with quantity and price variants. Verify exact product, quantity and amount after repair. |
 | P5.2 units and multi-line restocks | Unit selection iterates a Go map | After deterministic parsing, speak mixed carton/pack/bottle receipts; verify each line, conversion, supplier, receipt total and purchase cost. No silent partial receipt or sales-revenue inflation. |
 | P5.3 cancellation | Server matches cancellation substrings anywhere | Separate genuine cancellations from “drop that bag there…” and other ordinary speech. Verify cancelled/unrelated phrases never remove a genuine sale silently. |
-| P5.4 phonetic matching and aliases | Spelling matcher exists; phonetic learning missing | Evaluate real mishearings such as “peek”/Peak and similar catalogue names; test an owner's correction/alias workflow if added. Measure wrong confident matches as well as successful matches. |
+| P5.4 phonetic matching and aliases | Implemented in code + tests: Double Metaphone matcher (0.88–0.92) and review correction-to-alias learning workflow | Real-world field evaluation open: test real mishearings such as “peek”/Peak on physical phone counter captures; verify owner's alias saving and measure wrong confident matches as well as successful matches. |
 | P5.5 confidence and review thresholds | Fixed heuristic scores; defaulted quantity can score highly | Label correct/incorrect outcomes and calibrate review thresholds. Check omitted quantities and ambiguous anchors. Measure false confirmations and review effort, not just aggregate parser accuracy. |
 | P5.6 optional LLM extraction | Comparative experiment pending | Compare rules with strict catalogue-ID JSON extraction on the same real set, including latency/cost/offline effects. Adoption is conditional on a measured win, not an MVP requirement by itself. |
 | Owner onboarding, catalogue and review | APIs/UI and automated coverage exist | A new owner loads 20–50 products/opening stock, sets packaging/aliases, corrects/rejects/confirms a capture, records manual sale/restock and reverses an error without developer help. Compare resulting stock/revenue with independent records. |
