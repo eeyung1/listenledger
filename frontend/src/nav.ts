@@ -43,13 +43,42 @@ export const NAV_ORDER: readonly RoutePath[] = [
 /** The navigation containers index.html provides, one per responsive surface. */
 const NAV_HOOKS: readonly string[] = ["nav-sidebar", "nav-mobile"];
 
-function navLink(path: RoutePath): HTMLAnchorElement {
+/**
+ * Counts the navigation may present as state.
+ *
+ * Undefined and zero both mean "nothing waiting": a badge reading 0 is noise,
+ * and the owner learns nothing from it.
+ */
+export interface NavigationState {
+  /** Captures awaiting a review decision, shown on Transactions. */
+  readonly reviewCount?: number | undefined;
+}
+
+/** Keeps a three-digit queue from pushing the label out of the mobile bar. */
+const MAX_BADGE_COUNT = 9;
+
+function navLink(path: RoutePath, state: NavigationState): HTMLAnchorElement {
   const link = document.createElement("a");
   link.href = `#${path}`;
   // syncActiveNav matches on this attribute, so the router and the label stay
   // independent.
   link.setAttribute("data-route", path);
   link.textContent = NAV_ITEMS[path].label;
+
+  const reviewCount = state.reviewCount ?? 0;
+  if (path === "/transactions" && reviewCount > 0) {
+    const badge = document.createElement("span");
+    badge.className = "badge badge--review";
+    badge.setAttribute("data-hook", "nav-review-count");
+    badge.textContent = reviewCount > MAX_BADGE_COUNT ? `${MAX_BADGE_COUNT}+` : String(reviewCount);
+    link.append(badge);
+    // The number is a state, not decoration: it belongs in the link's name so a
+    // screen reader announces the queue along with the destination.
+    link.setAttribute(
+      "aria-label",
+      `${NAV_ITEMS[path].label}, ${reviewCount} awaiting review`,
+    );
+  }
   return link;
 }
 
@@ -59,11 +88,11 @@ function navLink(path: RoutePath): HTMLAnchorElement {
  * A missing container is skipped rather than thrown on: a page that omits a
  * surface should lose that navigation, not fail to start.
  */
-export function renderNavigation(root: ParentNode): void {
+export function renderNavigation(root: ParentNode, state: NavigationState = {}): void {
   for (const hook of NAV_HOOKS) {
     const container = root.querySelector<HTMLElement>(`[data-hook="${hook}"]`);
     if (container === null) continue;
-    container.replaceChildren(...NAV_ORDER.map(navLink));
+    container.replaceChildren(...NAV_ORDER.map((path) => navLink(path, state)));
   }
 }
 
