@@ -319,6 +319,7 @@ func scanTransaction(row scanner) (models.Transaction, error) {
 	transaction.CustomerID = customerID.String
 	transaction.CustomerName = customerName.String
 	transaction.AudioData = audioData.String
+	transaction.HasAudio = audioData.Valid && audioData.String != ""
 
 	if transaction.OccurredAt, err = parseTime(occurredAtRaw); err != nil {
 		return models.Transaction{}, err

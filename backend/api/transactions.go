@@ -461,6 +461,15 @@ func (s *Server) getTransactionDecision(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusOK, dec)
 }
 
+// transactionDetailResponse is the one payload allowed to carry a legacy audio
+// snippet. The snippet is absent from models.Transaction's JSON (see
+// AudioData), so ledger lists and WebSocket transaction events cannot leak it;
+// an owner opening a single transaction can still retrieve it for playback.
+type transactionDetailResponse struct {
+	models.Transaction
+	AudioData string `json:"audio_data,omitempty"`
+}
+
 func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request, id string) {
 	shopID, ok := s.shopID(w, r)
 	if !ok {
@@ -475,7 +484,7 @@ func (s *Server) getTransaction(w http.ResponseWriter, r *http.Request, id strin
 		s.fail(w, r, "get transaction", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	writeJSON(w, http.StatusOK, transactionDetailResponse{Transaction: t, AudioData: t.AudioData})
 }
 
 type createProductOnboard struct {

@@ -141,5 +141,14 @@ type Transaction struct {
 	// AudioData is the base64-encoded audio snippet of the spoken counter interaction,
 	// preserved so the shop owner can listen to what was actually spoken to resolve
 	// disputed or low-confidence line items (blueprint §17).
-	AudioData string `json:"audio_data,omitempty"`
+	//
+	// It is deliberately excluded from JSON. Legacy snippets must not ride along
+	// on every ledger list response or WebSocket event; ordinary reads report
+	// HasAudio instead, and the shop-scoped transaction detail endpoint is the
+	// only response that returns the snippet itself.
+	AudioData string `json:"-"`
+	// HasAudio reports whether a snippet exists without transmitting it, so a
+	// dashboard can offer playback and fetch it on demand from the detail
+	// endpoint. It is computed on read; it is not a database column.
+	HasAudio bool `json:"has_audio,omitempty"`
 }
