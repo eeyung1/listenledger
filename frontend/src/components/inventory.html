@@ -37,6 +37,20 @@
           data-hook="catalogue-query"
         />
       </label>
+      <!--
+        Stock filter. The counts in the option labels are filled by the view
+        from the products on the current tab, so they describe the list being
+        narrowed rather than the whole catalogue. "Low" excludes zero: an item
+        that has run out is reported under "Out of stock", not in both lists.
+      -->
+      <label class="filters__field">
+        Stock
+        <select name="stock" data-hook="catalogue-stock-filter">
+          <option value="">All stock</option>
+          <option value="low">Low stock</option>
+          <option value="out">Out of stock</option>
+        </select>
+      </label>
       <!-- Adding or importing products routes to editor or bulk onboarding -->
       <div class="filters__actions">
         <button type="button" class="button" data-hook="catalogue-add">
