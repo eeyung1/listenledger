@@ -4,6 +4,8 @@ This document sets the delivery priority for ListenLedger. It comes from a codeb
 
 **Readiness audit — 19 October 2026, source baseline `4337c78`:** approximately **55% ready / 45% remaining** to a field-validated MVP, with a judgment range of **40–50% remaining**. This is an evidence-weighted readiness estimate, not measured development effort or a delivery-date forecast. See [the detailed codebase audit](MVP_READINESS_AUDIT.md) for scoring, code findings and verification limits, and [the field acceptance register](#real-world-testing-register--19-october-2026) below for every remaining field gate. Original problem descriptions and old line numbers below describe the earlier review; dated implementation notes and this audit take precedence. No field gate is closed by a merge or automated test.
 
+**Implementation reconciliation — 20 October 2026:** checked against `origin/main` at `7d143dc` and reconciled with `22a32b5` after PRs #73, #75–#77 and #79 merged. Completed code is ticked below; unchecked items are remaining implementation or field/release gates. P4.2, the P4.8 fallback fixes, P5.1–P5.3, P5.4 phonetic matching and alias learning, inferred-quantity confidence, privacy instructions, readback protection, the legacy-audio payload change, scheduled retention and the settings reorganisation are merged. P4.5, the rest of P5.5 and the remaining P6 controls are unfinished; see [agent work routing](AGENTS.md#remaining-work-and-dependencies). The 19 October readiness percentages are historical and have not been recalculated. No CI jobs or field tests were run for this documentation update. GitHub CI is billing-blocked; the owner plans manual verification of pushed feature revisions on another machine. Implementation checkmarks are not merge approval, and the merge of PR #73 was reviewed without manual CI.
+
 ## The only question that matters
 
 > **Can a microphone + software reliably turn a structured real-world sales conversation into an accurate inventory transaction without manual data entry?** — Blueprint §24
@@ -116,6 +118,7 @@ P0a is a UI-only increment: hidden controls are not an API authorization boundar
 
 The blueprint assumes ambient listening with no button. That assumption carries most of the technical risk: segmentation, stray closing phrases, privacy, battery, and mobile browser restarts. Test it rather than assume it.
 
+- [ ] Experiment support: prepare a genuine hold-to-talk capture flow for the agreed comparison. The current continuous listener's Start/Stop control does not implement this; follow the P1/P2 evidence order before choosing or expanding the mode.
 - [ ] Run half a day in **ambient** mode and half a day in **push-to-talk** mode (hold a button, say "two Milo, four thousand").
 - [ ] Compare:
   - [ ] % of real sales captured
@@ -143,6 +146,7 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 
 - **Problem:** anyone saying "thank you", customers included, triggers a capture (`detectClosingBoundary`, `audio.ts:175-231`). Captures with no anchors are held for review as "Unintelligible speech" (`backend/validate/engine.go:204-211`).
 - **Fix:** do not submit captures that contain no anchors. On the server, log closing-phrase-only captures as a metric instead of creating review items.
+- [x] Implementation merged in PR #65 (`5b14653`): the browser suppresses no-anchor sale/restock boundaries; the validation engine drops non-empty, non-cancelling no-anchor transcripts, increments `AnchorlessSuppressedCount`, and the capture handler logs suppression. Partial anchor-bearing sales remain reviewable. Regression coverage is in the listener, validation and capture tests.
 - [ ] **Acceptance:** 10 stray "thank you"s in normal conversation create 0 review items.
 
 ### P4.3 One sale may be recorded twice — critical
@@ -165,6 +169,8 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 
 - **Problem:** `maxAlternatives = 1` (`audio.ts:782`), and the recognizer's confidence score is never sent to the server.
 - **Fix:** send the top 3–5 alternatives with their confidence scores. Let the matcher try each alternative against the catalogue, and store the scores for analysis.
+- [ ] Implementation: alternative hypotheses, recognizer confidence propagation, catalogue evaluation and score retention. Main still uses one alternative. Existing active claim belongs to `DeepSeek-20261019-p45` (`af390fdfdf534215a42be13f859f08f2`); coordinate before editing its scopes.
+- [ ] Field acceptance: compare alternative selection and review outcomes on labelled real misrecognitions.
 
 ### P4.6 Microphone contention on mobile (unverified risk)
 
@@ -189,12 +195,16 @@ These issues were found by reading the code. Each fix needs an acceptance check 
 - [x] Queue isolation (branch `feat/p4-8-queue-shop-isolation`, base `71787e7`): scoped queue reads (`getQueuedCaptures`) and counter badges (`getQueuedCount`) strictly bind to the active authenticated `shop_id`; `syncOfflineQueue` replays only captures belonging to the active shop while preserving other shops' pending data in local storage; legacy unscoped entries missing `shop_id` are quarantined rather than posted into arbitrary sessions; and active identity is dynamically verified across in-flight sync loops to halt replay immediately on account switch or logout. Covered by unit tests 8–12 in `frontend/test/offline_queue.test.mjs`. Multi-account physical-device acceptance on the row below remains open.
 - [ ] Queue isolation multi-account field acceptance: verify account A → logout → account B across network drop and multi-tab reconnect on physical devices without cross-account capture replay.
 
+**Source integration confirmed — 20 October:** manual retry idempotency is merged through PR #64 (`2e2b3a3`), queue/shop isolation through PR #66 (`648c2e7`), and offline catalogue caching through PR #70 (`e792480`). The remaining work on these fixes is validation and field acceptance, not duplicate implementation.
+
 ### P4.9 Features that do not improve accuracy
 
 - `SpeechGrammarList` "grammar boosting" (`audio.ts:761-775`) has no effect in Chrome.
 - Adaptive VAD (`audio.ts:1012-1028`) only drives UI badges. `adaptiveSilenceTimeoutMs` is computed and never used to segment or flush speech.
 - The spectral visualizer is decoration.
-- [x] Implementation on branch `feat/p4-9-remove-inert-accuracy-features`: removed `SpeechGrammarList` grammar boosting and all `catalogueWords` plumbing that existed only to feed it, removed the dead `adaptiveSilenceTimeoutMs` metric (computed, never used to segment or flush speech), and removed the decorative spectral visualizer (bars, `calculateSpectralBands`, `onSpectralBands`, `getSpectralBands`). The surviving ambient VAD/SNR/signal badges are relabelled as explicit UI-only indicators ("🎙 Voice Active (UI)", "🟢 Mic Signal Clear (UI)", tooltips state they do not affect recognition or accuracy). The dormant raw-audio recorder path is intentionally untouched because P6 will re-enable recording under per-shop opt-in. Covered by listener tests 8/17/19.
+- [x] Implementation on branch `feat/p4-9-remove-inert-accuracy-features`: removed `SpeechGrammarList` grammar boosting and all `catalogueWords` plumbing that existed only to feed it, removed the dead `adaptiveSilenceTimeoutMs` metric (computed, never used to segment or flush speech), and removed the decorative spectral visualizer (bars, `calculateSpectralBands`, `onSpectralBands`, `getSpectralBands`). The surviving ambient VAD/SNR/signal badges are relabelled as explicit UI-only indicators ("🎙 Voice Active (UI)", "🟢 Mic Signal Clear (UI)", tooltips state they do not affect recognition or accuracy). Recording remains disabled; re-enabling it is conditional on the owner's P6 decision and controls. Covered by listener tests 8/17/19.
+- [x] Readback guard merged in PR #72 (`a7a540c`): pause/abort recognition while the phone speaks, ignore superseded-session results, and resume with bounded fallback recovery. Listener regression coverage exists.
+- [ ] Readback field acceptance: verify the phone's own sale/restock announcement cannot produce another movement on Android Chrome and iOS Safari.
 - [ ] Real-device sanity: the counter still listens and records sales with the decorative widgets removed.
 
 ---
@@ -207,17 +217,22 @@ Measure every change against the **real transcript set from P1/P2**, not hand-wr
 
 - **Problem:** "Two Five Alive, one thousand naira" is traced as amount ₦2,500 (the "two-five" shorthand, `backend/validate/parser.go:219-226`), quantity defaulted to 1 (`parser.go:323-330`), and product "Alive". Seven Up and Three Crowns are affected the same way, because number words are stripped from product mentions (`parser.go:537-539`).
 - **Fix:** match catalogue names and aliases first (longest match wins) and remove them from the text before parsing numbers.
-- [ ] **Acceptance:** tests pass for Five Alive, Seven Up, 7Up and Three Crowns, including with a quantity and an amount.
+- [x] Implementation and regression coverage merged in PR #68 (`b9cb0a1`): `ParseSpokenSegmentWithProducts` matches the longest catalogue name/alias and masks it before parsing numbers. Cases cover Five Alive, Seven Up, 7Up and Three Crowns with quantity/amount, plus ordinary-product regression coverage. Passing tests were recorded in the feature handover; not rerun in this documentation update.
+- [ ] Field acceptance: measure product, quantity and amount accuracy for these names on real P1/P2 transcripts.
 
 ### P5.2 Unit chosen in random order
 
 - **Problem:** the unit is found by iterating a Go map (`parser.go:115-123`). Go map order is random, so a sentence with two unit words ("cartons … packs") gives an unpredictable unit.
 - **Fix:** scan in text order and attach each unit to the quantity it follows.
+- [x] Deterministic selection merged in PR #67 (`e85c055`): select the earliest unit word in each parsed clause instead of relying on Go map iteration.
+- [ ] Field acceptance: verify quantity/unit associations and mixed carton/pack/bottle multi-line receipts against actual counter speech; deterministic selection alone does not establish these outcomes.
 
 ### P5.3 Cancellation is too eager
 
 - **Problem:** cancellation phrases match anywhere in the transcript (`parser.go:741-768`). "Drop that bag there, two Milo…" cancels the sale.
 - **Fix:** treat a cancellation phrase as a cancellation only when it is a standalone or final clause near the boundary.
+- [x] Boundary fix merged in PR #67 (`e85c055`): cancellation matching is word-bounded, and ambiguous "drop that" cancels only as a whole/trailing clause. Regression coverage includes "drop that bag there" without losing the sale.
+- [ ] Field acceptance: test genuine corrections and ordinary speech near sale boundaries on real transcripts.
 
 ### P5.4 Matching uses spelling, not sound
 
@@ -231,6 +246,9 @@ Measure every change against the **real transcript set from P1/P2**, not hand-wr
 
 - **Problem:** product confidence is a fixed score per match type (exact name 0.98, alias 0.95, fuzzy 0.80–0.90). Quantity confidence is a constant 0.98 (`backend/validate/engine.go:246`), even when the quantity was defaulted to 1 by the parser.
 - **Fix:** lower confidence when a value was defaulted or inferred, and include the recognizer confidence from P4.5.
+- [x] Inferred-quantity handling merged in PR #71 (`cfc9c58`): the parser marks a quantity inferred from an amount, and the engine scores it at 0.60 instead of the spoken-quantity 0.98, holding it for review at the default threshold.
+- [ ] Incorporate P4.5 recognizer confidence. Coordinate with its active owner.
+- [ ] Calibrate confidence/review thresholds on labelled P1/P2 outcomes. Product heuristics and the catalogue-price amount default are not measured accuracy probabilities.
 
 ### P5.6 Evaluate LLM extraction against the rules
 
@@ -246,13 +264,19 @@ Measure every change against the **real transcript set from P1/P2**, not hand-wr
   - Historical #42 behaviour retained base64 counter audio. Merged P0b now disables new browser recording, strips new queue/upload audio and discards incoming snippets. This is implemented source behaviour, not proof of the currently deployed release.
   - Legacy audio can remain in transaction rows and old browser queues. Transaction reads still select `audio_data`, and UI playback still exists. An explicit transcript/audio purge endpoint exists, but this audit found no scheduled retention enforcement or per-shop audio opt-in. P0b is not a purge of legacy data.
   - The earlier WebM-header/playback concern applies to old recordings or a future re-enabled recorder; do not treat it as a current active recorder defect. Any future recording implementation needs a fresh playback test after 20+ seconds.
-  - `STAFF_TRAINING.md` and legacy `RUNBOOK.md` sections still say audio is never uploaded or processed in the cloud. Reconcile those instructions with the actual browser speech service before giving them to a shop. Disabling application snippet storage does not establish on-device speech processing.
+  - Historical privacy wording in `STAFF_TRAINING.md` and `RUNBOOK.md` was corrected in PR #69. Disabling application snippet storage still does not establish on-device speech processing.
+- **Implemented:**
+  - [x] Staff/runbook wording describes browser-provider speech processing, disabled new application audio retention and legacy-data limitations (PR #69, `5cee064`).
+  - [x] The manual transcript/audio purge endpoint honours `retention_days` / `older_than` query parameters, with JSON-body precedence and invalid-window regression coverage (PR #69, `5cee064`). This is not scheduled deletion.
 - **Decision for the pilot:**
-  - [ ] Audio retention is opt-in per shop, and only for review-required captures.
+  - [ ] If recording is re-enabled: audio retention is opt-in per shop and only for review-required captures. Keep new retention disabled until the owner chooses this path and controls are implemented.
   - [ ] Short retention (for example 7 days), with deletion enforced automatically.
-  - [ ] Audio is stored separately from transaction rows and excluded from ledger list responses and WebSocket events. Check whether `audio_data` is currently returned in those payloads; if so, remove it.
+  - [ ] Exclude legacy `audio_data` from ordinary ledger list responses and WebSocket events; transaction queries/models still carry it.
+  - [ ] If recording is re-enabled: store audio separately from transaction rows with controlled access.
+  - [ ] Resolve existing server audio and legacy browser queue snippets under the agreed deletion policy, with recorded verification.
   - [ ] A visible notice at the counter tells customers that audio may be processed.
-  - [ ] Owner and staff instructions match what the software actually does.
+  - [x] Owner and staff instruction documents match the implemented browser-processing and retention behaviour (PR #69).
+  - [ ] Verify the deployed behaviour matches those instructions and brief the real owner/cashier.
 
 ---
 
@@ -283,7 +307,7 @@ Agree the targets with the pilot owner **before** collecting results. The number
 These parts are solid and should be reused whatever the capture mode:
 
 - Atomic ledger and stock movements with rollback.
-- Idempotent writes with payload fingerprints (once the live capture path actually uses them, see P4.3).
+- Idempotent writes with payload fingerprints, wired into spoken capture and manual retries (P4.3/P4.8).
 - The review, correct-and-confirm, reject and reversal flow with its audit trail.
 - Shop isolation and authentication.
 - Catalogue with aliases and packaging conversions.
@@ -301,15 +325,15 @@ Fill in one row per field session. Link to the labelled ground-truth sheet, not 
 | Finding | How it was established |
 |---|---|
 | P4.1 pause handling and P4.3 capture IDs | Fixes merged and regression-tested; physical-device acceptance still open |
-| P4.2 review flood | Bare “Thank you” reproduced as a review-required engine result in the 19 October synthetic probe; suppression still missing |
+| P4.2 review flood | No-anchor suppression merged in PR #65; real-device zero-review-noise acceptance remains open |
 | P4.4 language and P4.9 inert features | Configurable language and removal implemented; en-US baseline remains pending P2; device sanity still open |
 | P4.5 single alternative | Still present in current source; evaluation support and field measurement pending |
 | P4.6 mic contention, P4.7 restart beeps | Recorder removed and restart backoff merged; analyser/recognizer coexistence and audible device behaviour remain unverified |
-| P4.8 fallback safety and availability | Manual retry duplication reproduced against a temporary API/store; all-shop replay reproduced with mocked transport; network-dependent catalogue selection confirmed by source reading |
-| P5.1 brand names, P5.2 unit order | Reproduced with current parser on 19 October: Five Alive/Seven Up/Three Crowns lose number words; one 7Up example passes; repeated mixed-unit input varies |
-| P5.3 cancellation | “Drop that bag there…” reproduced as cancellation in the current parser |
-| P5.4–P5.5 matching/confidence | Current code uses spelling similarity and heuristic confidence; default-to-one reproduced; real-transcript calibration pending |
-| P6 snippets and policy | New recording disabled; legacy audio and future recorder playback still need checking; notices and retention enforcement remain open |
+| P4.8 fallback safety and availability | Manual retry idempotency, shop-bound queue replay and cached offline catalogue merged in PRs #64/#66/#70; phone/offline acceptance remains open |
+| P5.1 brand names, P5.2 unit order | Catalogue-first brand parsing and deterministic unit selection merged in PRs #68/#67; real-transcript accuracy remains unmeasured |
+| P5.3 cancellation | Word boundaries and whole/trailing-only “drop that” handling merged in PR #67; field acceptance remains open |
+| P5.4–P5.5 matching/confidence | P5.4 implemented and merged in PR #73 (`c0b85b3`), manual CI pending; inferred-quantity confidence merged in PR #71; recognizer confidence and real-transcript calibration remain unfinished |
+| P6 snippets and policy | New recording disabled; privacy instructions/purge query fix merged in PR #69, legacy audio moved out of ordinary ledger/WebSocket payloads in PR #75 and scheduled retention merged in PR #77; deployed retention verification, legacy browser queue handling and shop notices remain open |
 | Edge mock fail-open (P0) | Code reading |
 
 Update this table when a finding is confirmed, fixed or disproved.
@@ -341,29 +365,31 @@ Before closing P0b release acceptance, run the actual release against an isolate
 | P2 recognition engine and language | Web Speech; configurable language; en-US baseline | Compare en-US, en-NG, Whisper candidates and an appropriate cloud candidate against the same P1 ground truth. Measure full-sale and per-anchor accuracy, false captures, latency, connectivity and cost. Choose the default only from measured results. |
 | P3 ambient versus push-to-talk | No measured choice; current listener is continuous | Compare each mode for one trading day using the same catalogue/protocol. Measure capture, clean capture, correction effort and cashier preference. A Start/Stop toggle alone is not evidence of a completed push-to-talk workflow. |
 | P4.1 delayed closing phrase | Rolling buffer merged | Speak a sale, wait 10 seconds, then close it; verify exactly one correct receipt. Include recognizer restarts, consecutive customers and pauses near the look-back limit. |
-| P4.2 stray closing phrases | Missing no-anchor suppression; server creates review items | After fixing the guard, 10 unrelated “thank you” phrases create zero review items; also test customer speech, adjacent sales and background conversations. |
+| P4.2 stray closing phrases | Browser/server no-anchor suppression merged in PR #65 | Verify 10 unrelated “thank you” phrases create zero review items; also test customer speech, adjacent sales and background conversations. |
 | P4.3 spoken capture deduplication | Final-result gate and stable capture ID merged | Interim/final/repeated results, session restarts and an interrupted acknowledgement must produce one receipt and one stock movement per sale on each device. Include successive sales in one recognition session. |
 | P4.4 language persistence | Canonical implementation merged | Change language, reload/restart, verify recognizer and readback use the saved tag on actual browsers. Attach P2 results before changing en-US default. Verify migration 0014 in the deployed schema. |
 | P4.5 alternatives and recognizer confidence | Still one alternative; confidence not propagated | Implement evaluation support, then compare catalogue matching with alternative hypotheses on real misrecognitions. Confirm confidence affects review safely; do not treat heuristic scores as accuracy percentages. |
 | P4.6 microphone resources | Recognizer plus getUserMedia/analyser remain; recorder removed | Start/stop repeatedly; deny/revoke permission; interrupt with a call, background the tab and lock/unlock the screen. Verify capture, truthful status, mic release and absence of resource contention. |
 | P4.7 restart and error recovery | Backoff and failure state merged | Test flaky network and repeated recognition failures for a full counter session. Observe beeps, time to recovery, battery/heat and clear “not listening” feedback. |
 | P4.8 offline voice messaging | Implemented; recognition still needs connectivity | Disconnect before start and mid-session; cashier must understand that queued transcripts are not offline recognition. Reconnect without creating duplicate captures. |
-| P4.8 manual fallback and durable queue | Queue exists; manual retry idempotency fixed in code + tests (P4.8-manual-retry); shop binding and offline catalogue gaps remain | Fix remaining gaps first; then open the form after an outage, queue entries, kill/reopen the browser, lose a server acknowledgement and reconnect. Exactly one movement per entry, no lost durable work, truthful volatile-storage warnings, and no replay into another account/shop. |
+| P4.8 manual fallback and durable queue | Manual retry idempotency, shop isolation and offline catalogue merged in PRs #64/#66/#70 | Open the form after an outage, queue entries, kill/reopen the browser, lose a server acknowledgement and reconnect. Exactly one movement per entry, no lost durable work, truthful volatile-storage warnings, and no replay into another account/shop. |
 | P4.9 simplified capture UI | Inert grammar/spectrum features removed | Verify real sales still capture and UI-only signal indicators are not understood as proof of recognition quality. |
-| Voice readback, wake lock and navigation cleanup | Implemented controls; physical behaviour unverified | With readback enabled, verify it cannot trigger a second sale/restock. Navigate away, background/foreground and stop; check streams, recognizer, wake lock and timers are released or recovered as promised. |
-| P5.1 number-bearing product names | Catalogue-first parsing missing | Measure Five Alive, Seven Up, 7Up and Three Crowns on real audio/transcripts, with quantity and price variants. Verify exact product, quantity and amount after repair. |
-| P5.2 units and multi-line restocks | Unit selection iterates a Go map | After deterministic parsing, speak mixed carton/pack/bottle receipts; verify each line, conversion, supplier, receipt total and purchase cost. No silent partial receipt or sales-revenue inflation. |
-| P5.3 cancellation | Server matches cancellation substrings anywhere | Separate genuine cancellations from “drop that bag there…” and other ordinary speech. Verify cancelled/unrelated phrases never remove a genuine sale silently. |
+| Voice readback, wake lock and navigation cleanup | Controls implemented; readback recapture guard merged in PR #72; physical behaviour unverified | With readback enabled, verify it cannot trigger a second sale/restock. Navigate away, background/foreground and stop; check streams, recognizer, wake lock and timers are released or recovered as promised. |
+| P5.1 number-bearing product names | Catalogue-first parsing merged in PR #68 | Measure Five Alive, Seven Up, 7Up and Three Crowns on real audio/transcripts, with quantity and price variants. Verify exact product, quantity and amount. |
+| P5.2 units and multi-line restocks | Deterministic per-clause unit selection merged in PR #67 | Speak mixed carton/pack/bottle receipts; verify quantity/unit associations, each line, conversion, supplier, receipt total and purchase cost. No silent partial receipt or sales-revenue inflation. |
+| P5.3 cancellation | Word-bounded matching and whole/trailing-only “drop that” merged in PR #67 | Separate genuine cancellations from “drop that bag there…” and other ordinary speech. Verify cancelled/unrelated phrases never remove a genuine sale silently. |
 | P5.4 phonetic matching and aliases | Implemented in code + tests: Double Metaphone matcher (0.88–0.92) and review correction-to-alias learning workflow | Real-world field evaluation open: test real mishearings such as “peek”/Peak on physical phone counter captures; verify owner's alias saving and measure wrong confident matches as well as successful matches. |
-| P5.5 confidence and review thresholds | Fixed heuristic scores; defaulted quantity can score highly | Label correct/incorrect outcomes and calibrate review thresholds. Check omitted quantities and ambiguous anchors. Measure false confirmations and review effort, not just aggregate parser accuracy. |
+| P5.5 confidence and review thresholds | Inferred-quantity score lowered in PR #71; recognizer confidence and calibration remain unfinished | Label correct/incorrect outcomes and calibrate review thresholds. Check omitted quantities and ambiguous anchors. Measure false confirmations and review effort, not just aggregate parser accuracy. |
 | P5.6 optional LLM extraction | Comparative experiment pending | Compare rules with strict catalogue-ID JSON extraction on the same real set, including latency/cost/offline effects. Adoption is conditional on a measured win, not an MVP requirement by itself. |
 | Owner onboarding, catalogue and review | APIs/UI and automated coverage exist | A new owner loads 20–50 products/opening stock, sets packaging/aliases, corrects/rejects/confirms a capture, records manual sale/restock and reverses an error without developer help. Compare resulting stock/revenue with independent records. |
 | Realtime, account isolation and recovery | Backend foundations and regression tests exist | Use two real accounts/devices; test login/recovery/logout, stale sessions, disconnect/reconnect, filters and daily totals. Check local queue isolation separately from server authorization. |
-| P6 notices, retention, deletion and access | New snippet retention disabled; legacy data/policy remain | Agree the pilot policy, give staff truthful instructions, show notice, exercise deletion/access controls and prove legacy audio is handled. If retention stays disabled, do not re-enable it merely to complete optional opt-in recording work. |
+| P6 notices, retention, deletion and access | New snippet retention disabled; truthful instructions/manual purge fix merged; automated retention and legacy-data/payload work remain | Agree the pilot policy, give staff truthful instructions, show notice, exercise deletion/access controls and prove legacy audio is handled. If retention stays disabled, do not re-enable it merely to complete optional opt-in recording work. |
 | Hosted operation and recovery | Deployment/backup tooling exists; current live state unverified | Verify exact deployed SHA, HTTPS/assets, readiness, schema 0014, restricted role, restart persistence, backup restoration and outage recovery in an isolated environment. Do not equate a historical /readyz 200 with this acceptance. |
 | P7 two-week controlled pilot | No completed field evidence rows | One shop/counter/cashier beside existing records; daily sales/stock reconciliation, all discrepancies investigated, metrics and willingness to pay recorded. Expand only after agreed targets pass. |
 
 ### Starting field testing versus completing the MVP
+
+The numerical estimates below are retained from the **19 October baseline**, not recalculated for the 20 October implementation reconciliation. Several defects named in that baseline are now fixed; field evidence is still missing.
 
 - **P1 observation/recording:** no additional application code is required. Start once the owner, notice, recording arrangement, secure storage and labelling plan are ready; none is evidenced complete here. This is field research, not a claim that the app is safe to depend on.
 - **Supervised app counter trial:** approximately **30% readiness work remains (25–35% judgment range)**. Use four equal readiness areas: core app availability 90%, safe capture/recovery 50%, privacy/release verification 50%, trial protocol/evidence preparation 90% for the documented plan only. Average readiness is 70%; actual owner agreement and staff preparation remain hard gates. Fix the high-impact capture/queue defects, reconcile notices, verify the release and run the device checks first. Keep independent records authoritative throughout.
