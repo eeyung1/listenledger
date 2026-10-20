@@ -7,10 +7,12 @@
  * inventory or revenue, so it is shown as awaiting a decision rather than as a
  * recorded movement.
  *
- * The filters are applied client-side. The pilot's ledger is a few hundred rows
- * and the snapshot is fetched whole, so filtering here avoids a round trip per
- * keystroke; a shop with a real history needs the filters pushed into the
- * query, which is noted in TODO.md.
+ * The ledger is paged, so every filter is part of the query: direction, status,
+ * receipt, customer and the From/To day range all narrow the server page and
+ * the CSV export. That keeps "Showing x of y" true, and it means a date range
+ * is not a client-side illusion over the newest 50 rows. The same filter shape
+ * is applied to live socket events, so a movement outside the chosen days does
+ * not appear merely because it arrived while the range was on screen.
  */
 
 import {
@@ -61,6 +63,35 @@ interface Filters {
   status: string;
   receipt_id: string;
   customer_id?: string;
+  /** First instant of the chosen start day, RFC3339 in UTC; "" when unset. */
+  from: string;
+  /** Last instant of the chosen end day, RFC3339 in UTC; "" when unset. */
+  to: string;
+}
+
+/**
+ * The inclusive instants a calendar day spans.
+ *
+ * A date input names the shopkeeper's local day, while the API compares against
+ * UTC RFC3339 instants. `from` is the first millisecond of that day and `to` the
+ * last, so a range of one day covers the whole day instead of collapsing to
+ * midnight-to-midnight and returning nothing. A value the input could not have
+ * produced (an impossible date, or anything not YYYY-MM-DD) returns null rather
+ * than a silently wrong instant.
+ */
+export function dayBounds(value: string): { from: string; to: string } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const start = new Date(year, month - 1, day);
+  // Date() rolls 2026-02-31 into March, so the round trip is the validity check.
+  if (start.getFullYear() !== year || start.getMonth() !== month - 1 || start.getDate() !== day) {
+    return null;
+  }
+  const end = new Date(year, month - 1, day + 1, 0, 0, 0, -1);
+  return { from: start.toISOString(), to: end.toISOString() };
 }
 
 /**
@@ -124,28 +155,90 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   let totalCount = 0;
   let pendingNewCount = 0;
 
-  const filters: Filters = { type: "", status: "", receipt_id: "", customer_id: "" };
+  const filters: Filters = { type: "", status: "", receipt_id: "", customer_id: "", from: "", to: "" };
+  /**
+   * Set when the two day inputs describe a range that cannot exist. It is a
+   * message rather than a bare flag because the ledger has to say what is wrong
+   * where the empty list would otherwise be.
+   */
+  let dateRangeError: string | null = null;
 
   const ledgerBody = hook(root, "ledger-body");
   const reviewQueue = hook(root, "review-queue");
   const reviewCount = hook(root, "review-queue-count");
+  const tabAll = hook<HTMLButtonElement>(root, "tab-all-transactions");
+  const tabReview = hook<HTMLButtonElement>(root, "tab-needs-review");
+  const tabReviewBadge = hook(root, "review-tab-badge");
+  const panelReview = hook(root, "panel-review");
+  const panelLedger = hook(root, "panel-ledger");
   const typeFilter = hook<HTMLSelectElement>(root, "filter-type");
   const statusFilter = hook<HTMLSelectElement>(root, "filter-status");
+  const fromFilter = hook<HTMLInputElement>(root, "filter-from");
+  const toFilter = hook<HTMLInputElement>(root, "filter-to");
   const exportLink = hook<HTMLAnchorElement>(root, "export-csv");
   const pagePrev = hook<HTMLButtonElement>(root, "page-prev");
   const pageNext = hook<HTMLButtonElement>(root, "page-next");
   const pageInfo = hook(root, "page-info");
   const manualBtn = hook<HTMLButtonElement>(root, "manual-entry");
 
+  function switchTab(tab: "all" | "review"): void {
+    if (tab === "review") {
+      if (tabReview) {
+        tabReview.classList.add("is-active");
+        tabReview.setAttribute("aria-selected", "true");
+      }
+      if (tabAll) {
+        tabAll.classList.remove("is-active");
+        tabAll.setAttribute("aria-selected", "false");
+      }
+      if (panelReview) panelReview.hidden = false;
+      if (panelLedger) panelLedger.hidden = true;
+    } else {
+      if (tabAll) {
+        tabAll.classList.add("is-active");
+        tabAll.setAttribute("aria-selected", "true");
+      }
+      if (tabReview) {
+        tabReview.classList.remove("is-active");
+        tabReview.setAttribute("aria-selected", "false");
+      }
+      if (panelLedger) panelLedger.hidden = false;
+      if (panelReview) panelReview.hidden = true;
+    }
+  }
+
+  if (tabAll) {
+    tabAll.addEventListener("click", () => switchTab("all"));
+  }
+  if (tabReview) {
+    tabReview.addEventListener("click", () => switchTab("review"));
+  }
+
+  const initialHash = window.location.hash || "";
+  if (initialHash.includes("tab=review") || initialHash.includes("status=review_required")) {
+    switchTab("review");
+  } else {
+    switchTab("all");
+  }
+
   function reviewCard(transaction: Transaction): HTMLLIElement {
     const card = el("li", "review-card");
 
+    const pConf = transaction.confidence?.product ?? 1.0;
+    const qConf = transaction.confidence?.quantity ?? 1.0;
+    const aConf = transaction.confidence?.amount ?? 1.0;
+    const minConf = Math.min(pConf, qConf, aConf);
+
+    const isProductUncertain = pConf < 0.75 || (pConf === minConf && minConf < 0.85);
+    const isQuantityUncertain = qConf < 0.75 || (qConf === minConf && minConf < 0.85);
+    const isAmountUncertain = aConf < 0.75 || (aConf === minConf && minConf < 0.85);
+
     const head = el("div", "review-card__head");
     head.append(
-      el("span", "review-card__product", transaction.product_name),
+      el("span", `review-card__product${isProductUncertain ? " review-card__field--uncertain" : ""}`, transaction.product_name),
       el(
         "span",
-        "review-card__amount",
+        `review-card__amount${isQuantityUncertain || isAmountUncertain ? " review-card__field--uncertain" : ""}`,
         `${formatQuantity(transaction.quantity, transaction.unit)} · ${formatMoney(transaction.amount)}`,
       ),
     );
@@ -162,6 +255,24 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       head.append(rcpt);
     }
 
+    const uncertainties = el("div", "review-card__uncertainties");
+    uncertainties.setAttribute("data-hook", "review-uncertainties");
+    if (isProductUncertain) {
+      const badge = el("span", "badge badge--review", `Uncertain product (${Math.round(pConf * 100)}%)`);
+      badge.setAttribute("data-hook", "uncertain-field-product");
+      uncertainties.append(badge);
+    }
+    if (isQuantityUncertain) {
+      const badge = el("span", "badge badge--review", `Uncertain quantity (${Math.round(qConf * 100)}%)`);
+      badge.setAttribute("data-hook", "uncertain-field-quantity");
+      uncertainties.append(badge);
+    }
+    if (isAmountUncertain) {
+      const badge = el("span", "badge badge--review", `Uncertain amount (${Math.round(aConf * 100)}%)`);
+      badge.setAttribute("data-hook", "uncertain-field-amount");
+      uncertainties.append(badge);
+    }
+
     // The transcript is what the owner adjudicates against, so it is shown
     // verbatim — it is the record of what was actually said.
     const transcript = el(
@@ -175,16 +286,27 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     const scores = el("p", "review-card__scores", formatConfidenceBreakdown(transaction));
     scores.title = "Recognition confidence per anchor; the weakest one held this capture";
 
+    const consequences = el("p", "review-card__consequences");
+    consequences.setAttribute("data-hook", "review-consequences");
+    consequences.innerHTML = `<strong>Confirm:</strong> Applies stock change and confirms revenue in ledger &middot; <strong>Reject:</strong> Discards capture without modifying inventory`;
+
     const actions = el("div", "review-card__actions");
     let onboardBtn: HTMLButtonElement | null = null;
     const confirmBtn = el("button", "button button--primary button--sm", "Confirm");
+    confirmBtn.setAttribute("data-hook", "review-confirm-btn");
+    confirmBtn.setAttribute("title", "Confirming applies this change to inventory and records revenue in the ledger");
     const editBtn = el("button", "button button--secondary button--sm", "Edit & Confirm");
+    editBtn.setAttribute("data-hook", "review-edit-btn");
     const rejectBtn = el("button", "button button--secondary button--sm", "Reject");
+    rejectBtn.setAttribute("data-hook", "review-reject-btn");
+    rejectBtn.setAttribute("title", "Rejecting discards this capture without altering stock or revenue");
     const errorMsg = el("span", "review-card__error");
     errorMsg.hidden = true;
 
     if (!transaction.product_id) {
       onboardBtn = el("button", "button button--primary button--sm", "+ Add to Catalogue & Confirm");
+      onboardBtn.setAttribute("data-hook", "review-onboard-btn");
+      onboardBtn.setAttribute("title", "Add missing product to catalogue and confirm transaction");
       onboardBtn.addEventListener("click", () => {
         showOnboardProductModal(transaction);
       });
@@ -251,9 +373,9 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     const audioElement = legacyAudioControl(shopId, transaction);
 
     if (audioElement) {
-      card.append(head, transcript, audioElement, scores, actions);
+      card.append(head, transcript, uncertainties, audioElement, scores, consequences, actions);
     } else {
-      card.append(head, transcript, scores, actions);
+      card.append(head, transcript, uncertainties, scores, consequences, actions);
     }
     return card;
   }
@@ -371,11 +493,25 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
         status: filters.status || undefined,
         receipt_id: filters.receipt_id || undefined,
         customer_id: filters.customer_id || undefined,
+        // The export must agree with the page: a range the table honours but
+        // the CSV ignores would hand the owner a different report than the one
+        // on screen.
+        from: filters.from || undefined,
+        to: filters.to || undefined,
       });
     }
   }
 
   function updatePaginationControls(): void {
+    if (dateRangeError !== null) {
+      // Nothing was queried for this range, so no page is current: the totals
+      // still on screen describe the previous range and would misstate what the
+      // ledger is listing.
+      if (pagePrev !== null) pagePrev.disabled = true;
+      if (pageNext !== null) pageNext.disabled = true;
+      if (pageInfo !== null) setText(pageInfo, "Fix the date range");
+      return;
+    }
     if (pagePrev !== null) {
       pagePrev.disabled = pageOffset <= 0;
     }
@@ -402,6 +538,10 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     clear(reviewQueue);
 
     setText(reviewCount, String(heldTransactions.length));
+    if (tabReviewBadge) {
+      setText(tabReviewBadge, String(heldTransactions.length));
+      tabReviewBadge.hidden = heldTransactions.length === 0;
+    }
 
     if (heldTransactions.length === 0) {
       reviewQueue.append(
@@ -484,11 +624,27 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       ledgerBody.append(pendingRow);
     }
 
+    if (dateRangeError !== null) {
+      // Refused rather than sent: the API would answer an empty page, and the
+      // ledger would then claim the shop recorded nothing, which is a different
+      // and false statement about the shop's records.
+      ledgerBody.append(
+        uiStateRow(
+          "error",
+          { title: dateRangeError, detail: "Choose a start date on or before the end date." },
+          8,
+        ),
+      );
+      return;
+    }
+
     if (transactions.length === 0) {
       const filtered =
         filters.type !== "" ||
         filters.status !== "" ||
         filters.receipt_id !== "" ||
+        filters.from !== "" ||
+        filters.to !== "" ||
         (filters.customer_id ?? "") !== "";
       ledgerBody.append(
         uiStateRow(
@@ -531,6 +687,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
             status: filters.status || undefined,
             receipt_id: filters.receipt_id || undefined,
             customer_id: filters.customer_id || undefined,
+            from: filters.from || undefined,
+            to: filters.to || undefined,
           },
           signal,
         ),
@@ -1291,6 +1449,38 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     void refetch();
   };
 
+  /**
+   * Applies both day inputs as one range.
+   *
+   * Either day may be left empty, which is how "everything since" and
+   * "everything up to" are expressed without a second control. Paging resets
+   * because page 3 of a different range is not the same rows.
+   */
+  const onDateRangeChange = (): void => {
+    const fromValue = fromFilter?.value ?? "";
+    const toValue = toFilter?.value ?? "";
+    const fromBounds = fromValue === "" ? null : dayBounds(fromValue);
+    const toBounds = toValue === "" ? null : dayBounds(toValue);
+
+    if (
+      fromBounds !== null &&
+      toBounds !== null &&
+      new Date(fromBounds.from).getTime() > new Date(toBounds.to).getTime()
+    ) {
+      dateRangeError = "The start date is after the end date.";
+      renderLedger();
+      updatePaginationControls();
+      return;
+    }
+
+    dateRangeError = null;
+    filters.from = fromBounds?.from ?? "";
+    filters.to = toBounds?.to ?? "";
+    pageOffset = 0;
+    pendingNewCount = 0;
+    void refetch();
+  };
+
   const onPrevPage = (): void => {
     if (pageOffset > 0) {
       pageOffset = Math.max(0, pageOffset - pageSize);
@@ -1333,6 +1523,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
   window.addEventListener("online", onOnlineBack);
   typeFilter?.addEventListener("change", onTypeFilter);
   statusFilter?.addEventListener("change", onStatusFilter);
+  fromFilter?.addEventListener("change", onDateRangeChange);
+  toFilter?.addEventListener("change", onDateRangeChange);
   pagePrev?.addEventListener("click", onPrevPage);
   pageNext?.addEventListener("click", onNextPage);
   manualBtn?.addEventListener("click", onManualClick);
@@ -1350,6 +1542,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     window.removeEventListener("online", onOnlineBack);
     typeFilter?.removeEventListener("change", onTypeFilter);
     statusFilter?.removeEventListener("change", onStatusFilter);
+    fromFilter?.removeEventListener("change", onDateRangeChange);
+    toFilter?.removeEventListener("change", onDateRangeChange);
     pagePrev?.removeEventListener("click", onPrevPage);
     pageNext?.removeEventListener("click", onNextPage);
     manualBtn?.removeEventListener("click", onManualClick);
