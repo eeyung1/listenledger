@@ -17,18 +17,22 @@
 
 import {
   MAX_TRANSACTION_LIMIT,
+  confirmReceipt,
   confirmTransaction,
   createManualTransaction,
   fetchInventory,
+  fetchReceipt,
   fetchTransactionDecision,
   fetchTransactions,
   generateManualRequestId,
   getExportTransactionsUrl,
+  rejectReceipt,
   rejectTransaction,
   reverseTransaction,
   ALL_UNITS,
   type ManualTransactionInput,
   type Product,
+  type ReceiptGroup,
   type ReviewCorrections,
   type ReviewDecision,
   type Transaction,
@@ -55,7 +59,7 @@ import {
   sortTransactions,
 } from "../format.js";
 import { CONNECTION_STATUS_EVENT, getSocket, type ConnectionStatusDetail } from "../ws.js";
-import { uiStateItem, uiStateRow } from "../ui_state.js";
+import { uiState, uiStateItem, uiStateRow } from "../ui_state.js";
 import type { ViewCleanup } from "./index.js";
 
 interface Filters {
@@ -424,16 +428,21 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       product.append(custBadge);
     }
     if (transaction.receipt_id) {
-      const rcptBadge = el("span", "badge badge--mono", "Receipt");
-      rcptBadge.title = `Receipt: ${transaction.receipt_id} (click to filter)`;
-      rcptBadge.style.cursor = "pointer";
-      rcptBadge.style.marginLeft = "0.5rem";
-      rcptBadge.addEventListener("click", () => {
-        filters.receipt_id = transaction.receipt_id || "";
-        pageOffset = 0;
-        void refetch();
+      // A receipt is a unit on the server, so it is one here too: the badge
+      // opens the receipt instead of narrowing the ledger, and the filter stays
+      // available as an explicit action inside that panel.
+      const rcptBtn = el("button", "badge badge--mono", "Receipt");
+      rcptBtn.type = "button";
+      rcptBtn.style.marginLeft = "0.5rem";
+      rcptBtn.style.border = "0";
+      rcptBtn.style.font = "inherit";
+      rcptBtn.style.cursor = "pointer";
+      rcptBtn.title = `Receipt: ${transaction.receipt_id}`;
+      rcptBtn.setAttribute("aria-label", `Open receipt ${transaction.receipt_id}`);
+      rcptBtn.addEventListener("click", () => {
+        showReceiptModal(transaction.receipt_id ?? "");
       });
-      product.append(rcptBadge);
+      product.append(rcptBtn);
     }
 
     const quantity = cell("table__cell", formatQuantity(transaction.quantity, transaction.unit));
@@ -1195,6 +1204,232 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
           ),
         );
       });
+  }
+
+  /**
+   * Opens the receipt behind a ledger row.
+   *
+   * A capture can produce several movements under one receipt id, and the
+   * server stores the receipt as a unit: its total, its per-status counts and
+   * whole-receipt confirm/reject. Judging those movements one row at a time
+   * throws that away, so the panel fetches the receipt and lets the owner
+   * decide on the thing the shop actually recorded.
+   */
+  function showReceiptModal(receiptId: string): void {
+    if (receiptId === "") return;
+
+    const overlay = el("div", "modal-overlay");
+    const modal = el("div", "modal-dialog");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", "receipt-modal-title");
+
+    const header = el("div", "modal-header");
+    const title = el("h3", "modal-title", `Receipt ${receiptId}`);
+    title.id = "receipt-modal-title";
+    const closeBtn = el("button", "button button--secondary button--sm", "✕");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Close receipt");
+    header.append(title, closeBtn);
+
+    const content = el("div", "modal-body");
+
+    // Lives in the footer so a failed decision does not wipe the receipt the
+    // owner is looking at.
+    const failure = el("p", "modal-help", "");
+    failure.hidden = true;
+    failure.setAttribute("role", "alert");
+
+    const footer = el("div", "modal-footer");
+    const closeFooter = el("button", "button button--secondary", "Close");
+    closeFooter.type = "button";
+    footer.append(failure, closeFooter);
+
+    modal.append(header, content, footer);
+    overlay.append(modal);
+    document.body.append(overlay);
+
+    const closeModal = (): void => {
+      overlay.remove();
+    };
+    closeBtn.addEventListener("click", closeModal);
+    closeFooter.addEventListener("click", closeModal);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) closeModal();
+    });
+    overlay.addEventListener("keydown", (event) => {
+      if ((event as KeyboardEvent).key === "Escape") closeModal();
+    });
+
+    /**
+     * Folds a decided receipt back into the lists the view already owns.
+     *
+     * The rows keep their identity: a held item leaves the review queue and
+     * becomes its ledger row, rather than being appended a second time.
+     */
+    const applyReceiptGroup = (group: ReceiptGroup): void => {
+      for (const movement of group.transactions) {
+        if (movement.status === "review_required") {
+          applyTransactionToList(heldTransactions, movement, false, MAX_TRANSACTION_LIMIT);
+        } else {
+          removeHeldTransaction(movement.id);
+        }
+        applyLedgerTransaction(movement, false);
+      }
+      renderReviewQueue();
+      updatePaginationControls();
+    };
+
+    const renderGroup = (group: ReceiptGroup): void => {
+      clear(content);
+
+      const summary = el("div", "receipt-summary");
+      const movementWord = group.total_count === 1 ? "movement" : "movements";
+      summary.append(
+        el("p", "modal-help", `Total on this receipt: ${formatMoney(group.total_amount)}`),
+        el(
+          "p",
+          "modal-help",
+          `${group.total_count} ${movementWord}: ${group.confirmed_count} confirmed, ` +
+            `${group.review_count} needs review, ${group.rejected_count} rejected.`,
+        ),
+      );
+
+      const first = group.transactions[0];
+      if (first !== undefined) {
+        summary.append(
+          el("p", "modal-help", `Captured ${formatDate(first.occurred_at)} at ${formatTime(first.occurred_at)}`),
+        );
+        if (first.customer_name) summary.append(el("p", "modal-help", `Customer: ${first.customer_name}`));
+        if (first.supplier_name) summary.append(el("p", "modal-help", `Supplier: ${first.supplier_name}`));
+      }
+      content.append(summary);
+
+      const table = el("table", "table table--compact");
+      const head = el("thead");
+      const headRow = el("tr");
+      headRow.append(el("th", "", "Product"), el("th", "", "Qty"), el("th", "", "Amount"), el("th", "", "Status"));
+      head.append(headRow);
+      const body = el("tbody");
+      for (const movement of group.transactions) {
+        const row = el("tr", `table__row table__row--${movement.status}`);
+        row.append(
+          cell("table__cell", movement.product_name),
+          cell("table__cell", formatQuantity(movement.quantity, movement.unit)),
+          cell("table__cell table__cell--amount", formatMoney(movement.amount)),
+          cell("table__cell", formatStatus(movement.status)),
+        );
+        body.append(row);
+      }
+      table.append(head, body);
+      content.append(table);
+
+      // Only what the shop actually holds: a missing transcript is not an empty
+      // claim worth printing.
+      const heard = [
+        ...new Set(
+          group.transactions
+            .map((movement) => movement.transcript)
+            .filter((line): line is string => Boolean(line)),
+        ),
+      ];
+      if (heard.length > 0) {
+        content.append(el("p", "modal-help", `Heard: ${heard.join(" / ")}`));
+      }
+      content.append(
+        el(
+          "p",
+          "modal-help",
+          "Confirming held items applies them to stock; rejecting discards them without changing stock.",
+        ),
+      );
+
+      const actions = el("div", "modal-actions");
+      const filterBtn = el("button", "button button--secondary", "Filter ledger to this receipt");
+      filterBtn.type = "button";
+      filterBtn.addEventListener("click", () => {
+        filters.receipt_id = group.receipt_id;
+        pageOffset = 0;
+        pendingNewCount = 0;
+        closeModal();
+        void refetch();
+      });
+      actions.append(filterBtn);
+
+      if (group.review_count > 0) {
+        const heldWord = group.review_count === 1 ? "held item" : "held items";
+        const confirmAll = el("button", "button button--primary", `Confirm all ${group.review_count} ${heldWord}`);
+        confirmAll.type = "button";
+        const rejectAll = el("button", "button button--secondary", `Reject all ${group.review_count} ${heldWord}`);
+        rejectAll.type = "button";
+
+        confirmAll.addEventListener("click", async () => {
+          failure.hidden = true;
+          confirmAll.disabled = true;
+          rejectAll.disabled = true;
+          confirmAll.textContent = "Confirming…";
+          try {
+            const updated = await confirmReceipt(group.receipt_id);
+            applyReceiptGroup(updated);
+            renderGroup(updated);
+          } catch (err: unknown) {
+            confirmAll.disabled = false;
+            rejectAll.disabled = false;
+            confirmAll.textContent = `Confirm all ${group.review_count} ${heldWord}`;
+            failure.hidden = false;
+            failure.textContent = err instanceof Error ? err.message : "Confirmation failed.";
+          }
+        });
+
+        rejectAll.addEventListener("click", async () => {
+          const notes = window.prompt(
+            `Reject the held items on receipt ${group.receipt_id}?\nEnter optional audit notes:`,
+          );
+          if (notes === null) return;
+          failure.hidden = true;
+          confirmAll.disabled = true;
+          rejectAll.disabled = true;
+          rejectAll.textContent = "Rejecting…";
+          try {
+            const updated = await rejectReceipt(group.receipt_id, notes.trim() || undefined);
+            applyReceiptGroup(updated);
+            renderGroup(updated);
+          } catch (err: unknown) {
+            confirmAll.disabled = false;
+            rejectAll.disabled = false;
+            rejectAll.textContent = `Reject all ${group.review_count} ${heldWord}`;
+            failure.hidden = false;
+            failure.textContent = err instanceof Error ? err.message : "Rejection failed.";
+          }
+        });
+
+        actions.append(confirmAll, rejectAll);
+      }
+
+      content.append(actions);
+    };
+
+    const load = async (): Promise<void> => {
+      clear(content);
+      failure.hidden = true;
+      content.append(uiState("loading", { title: "Loading receipt…" }));
+      try {
+        const group = await fetchReceipt(receiptId);
+        renderGroup(group);
+      } catch (err: unknown) {
+        clear(content);
+        content.append(
+          uiState("error", {
+            title: "Could not load this receipt.",
+            detail: err instanceof Error ? err.message : "The receipt was not available.",
+            actionLabel: "Retry",
+            onAction: () => void load(),
+          }),
+        );
+      }
+    };
+
+    void load();
   }
 
   function showManualEntryModal(): void {

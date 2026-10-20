@@ -84,7 +84,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 ## Phase 4 — Transactions and Inventory
 
 - [ ] F26. Redesign transaction history around receipts, supported filters, pagination, and CSV export.
-- [ ] F27. Provide receipt details with items, totals, status, transcript, customer/supplier, and supported actions.
+- [x] F27. Provide receipt details with items, totals, status, transcript, customer/supplier, and supported actions.
 - [ ] F28. Add the Needs review tab and navigation count; highlight uncertain fields and explain confirm/reject consequences.
 - [ ] F29. Preserve manual entry, correction, rejection, reversal, audit details, and live updates.
 - [x] F30. Redesign Inventory with product search, supported stock filters, Add product, desktop table, and readable mobile layout. Stock filters (low stock / out of stock, with counts for the current tab) added by `5971e56`; search, add/import and the table already existed. Automated DOM tests only; viewport and device checks remain with F40/F44.
@@ -136,6 +136,7 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 | F08 | [PR #62](https://github.com/eeyung1/listenledger/pull/62) (`0a45997`) | `npm test --prefix frontend`: TypeScript compilation and 80 tests passed, 0 failed | Mock-DOM regression checks the Home KPI label and confirms the displayed amount is unchanged | No real-browser or viewport check. KPI remains sales minus expenses; cost of goods sold is not included. |
 | F30 | Branch `feat/f30-inventory-stock-filter`, commit `5971e56` | `npm run typecheck`; `npm test`: 129/129 tests pass, including seven new stock-filter tests (low/out partition, tab counts, search composition, live inventory updates, listener cleanup) | Not run: browser viewport or physical-device checks (F40/F44) | Existing search, add/import and table preserved. Mobile remains the shared horizontally scrollable table. No hosted or field acceptance claimed. |
 | F26 (date range) | Branch `feat/f26-ledger-date-range`, commit `e1b9bee` | `npm run typecheck` clean; `npm test` 134/134 pass, including 12 new regressions for the day boundaries, composed query, export parity, inverted-range refusal, live-update windowing and cleanup | Mock-DOM only; no viewport, real-browser or device check | F26 stays unticked: the ledger is still a flat list with a per-row receipt badge, so the receipt-centred grouping the item asks for is not built, and filter/pagination behaviour on real viewports is still F32's check. Manual repository CI pending (GitHub Actions billing-blocked). |
+| F27 | Branch `feat/f27-receipt-detail`, commit `ea5f088` | `npm run typecheck` clean; `npm test` 153/153 pass after merging main, including 6 new regressions for the receipt control, item/total/status rendering, whole-receipt confirmation, load failure and retry, and the explicit ledger filter | Mock-DOM only; no viewport, real-browser or device check | Per-item reversal/correction still runs through the existing ledger row actions, not the panel. Manual repository CI pending (GitHub Actions billing-blocked). |
 
 ## Next action
 
