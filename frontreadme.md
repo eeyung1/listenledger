@@ -84,7 +84,7 @@ Preserve existing routes and supported workflows. Only expose searches/filters t
 ## Phase 4 — Transactions and Inventory
 
 - [ ] F26. Redesign transaction history around receipts, supported filters, pagination, and CSV export.
-- [ ] F27. Provide receipt details with items, totals, status, transcript, customer/supplier, and supported actions.
+- [x] F27. Provide receipt details with items, totals, status, transcript, customer/supplier, and supported actions.
 - [ ] F28. Add the Needs review tab and navigation count; highlight uncertain fields and explain confirm/reject consequences.
 - [ ] F29. Preserve manual entry, correction, rejection, reversal, audit details, and live updates.
 - [ ] F30. Redesign Inventory with product search, supported stock filters, Add product, desktop table, and readable mobile layout.
@@ -134,6 +134,7 @@ Add one row per completed feature or coherent PR. Include exact CI links and sta
 | F05 | [PR #58](https://github.com/eeyung1/listenledger/pull/58) | `npm run typecheck --prefix frontend`; `npm test --prefix frontend` (90 tests, 0 failures) | Unit tests cover the shared state blocks, form status, connection labels and the disconnected banner lifecycle; integration tests mount Inventory (failed load → shared error + Retry; empty catalogue → next step) and Transactions (empty review queue and ledger) | Automated DOM checks only; the banner and states have not been inspected at real viewports or on a device (F06/F40) |
 | F06 | [PR #61](https://github.com/eeyung1/listenledger/pull/61) | Browser harness run against `204f982`; typecheck and existing 90-test suite pass; owner reports all CI checks green on PR #61 | Headless Chrome via CDP, stubbed API, `/home`, `/transactions`, `/inventory`, `/settings` at 360/390/768/1440px: no horizontal overflow, all visible destinations reachable by Tab and activatable by Enter, focus ring and `aria-current` verified; screenshots captured | Stubbed data, not live service. Run predates F03 More-menu integration; repeat after F03 is integrated. No real-device/physical microphone checks. |
 | F08 | [PR #62](https://github.com/eeyung1/listenledger/pull/62) (`0a45997`) | `npm test --prefix frontend`: TypeScript compilation and 80 tests passed, 0 failed | Mock-DOM regression checks the Home KPI label and confirms the displayed amount is unchanged | No real-browser or viewport check. KPI remains sales minus expenses; cost of goods sold is not included. |
+| F27 | Branch `feat/f27-receipt-detail`, commit `ea5f088` | `npm run typecheck` clean; `npm test` 128/128 pass, including 6 new regressions for the receipt control, item/total/status rendering, whole-receipt confirmation, load failure and retry, and the explicit ledger filter | Mock-DOM only; no viewport, real-browser or device check | Per-item reversal/correction still runs through the existing ledger row actions, not the panel. Manual repository CI pending (GitHub Actions billing-blocked). |
 
 ## Next action
 
