@@ -21,6 +21,7 @@ import {
   updateProduct,
   ALL_UNITS,
   type CreateProductInput,
+  type PackagingRelation,
   type Product,
   type Unit,
   type UpdateProductInput,
@@ -44,6 +45,57 @@ import type { ViewCleanup } from "./index.js";
 
 type CatalogueTab = "active" | "archived" | "all";
 type StockFilter = "" | "low" | "out";
+
+/** Units a fresh packaging row offers first, in the order shops usually speak. */
+const PACKAGING_SUGGESTIONS: readonly Unit[] = ["carton", "crate", "pack", "bottle", "bag"];
+
+/**
+ * Checks a packaging chain against the rules the API enforces
+ * (models.ValidatePackaging), so the form can explain the problem instead of
+ * relaying "invalid or unsupported packaging conversion" from a 422.
+ *
+ * Returns a sentence for the owner, or null when the chain is usable.
+ */
+export function packagingProblem(
+  base: Unit,
+  relations: readonly PackagingRelation[],
+): string | null {
+  const byFrom = new Map<Unit, PackagingRelation>();
+  for (const relation of relations) {
+    if (relation.from === relation.to) {
+      return `The larger and smaller unit are both ${formatUnit(relation.from, 1)}. Pick two different units.`;
+    }
+    if (relation.from === base) {
+      return `The base unit (${formatUnit(base, 1)}) cannot contain itself. Put a larger unit on the left.`;
+    }
+    if (!Number.isInteger(relation.factor) || relation.factor < 1) {
+      return "Packaging needs a whole number of the smaller unit, at least 1.";
+    }
+    if (byFrom.has(relation.from)) {
+      return `Each larger unit can be mapped once, but ${formatUnit(relation.from, 1)} appears twice.`;
+    }
+    byFrom.set(relation.from, relation);
+  }
+
+  // Each chain has to reach the base unit, or stock held in the larger unit has
+  // no way to become stock the ledger counts.
+  for (const start of byFrom.keys()) {
+    let unit = start;
+    const seen = new Set<Unit>();
+    while (unit !== base) {
+      if (seen.has(unit)) {
+        return "This packaging loops back on itself. Each chain has to end at the base unit.";
+      }
+      seen.add(unit);
+      const relation = byFrom.get(unit);
+      if (relation === undefined) {
+        return `"${formatUnit(unit, 2)}" is never converted to the base unit (${formatUnit(base, 1)}). Add a row for it or remove it.`;
+      }
+      unit = relation.to;
+    }
+  }
+  return null;
+}
 
 export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
   let products: Product[] = [];
@@ -149,6 +201,89 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     lowStockInput.value = existing && existing.low_stock_threshold !== undefined ? String(existing.low_stock_threshold) : "5";
     lowStockLabel.append(lowStockInput);
 
+    // Packaging is how the shop says the product out loud ("two cartons") and
+    // what turns a spoken unit into base units. The catalogue already lists it,
+    // but without a field here a carton later found to hold 24 could only be
+    // corrected by re-importing the whole catalogue.
+    const packagingField = el("div", "form-field packaging-field");
+    packagingField.setAttribute("role", "group");
+    packagingField.setAttribute("aria-label", "Packaging");
+    const packagingLabel = el("span", "form-label", "Packaging");
+    const packagingHelp = el(
+      "p",
+      "modal-help",
+      "Larger units this product is sold in, e.g. 1 carton = 12 pack. Leave empty when it is only sold by the base unit.",
+    );
+    const packagingRows = el("div", "packaging-rows");
+    const addPackagingBtn = el("button", "button button--secondary button--sm", "Add packaging");
+    addPackagingBtn.type = "button";
+
+    const unitPicker = (value: Unit): HTMLSelectElement => {
+      const select = el("select", "select") as HTMLSelectElement;
+      for (const unit of ALL_UNITS) {
+        const option = el("option", "", unit) as HTMLOptionElement;
+        option.value = unit;
+        option.selected = unit === value;
+        select.append(option);
+      }
+      return select;
+    };
+
+    const addPackagingRow = (relation?: PackagingRelation): void => {
+      const base = unitSelect.value as Unit;
+      const suggested =
+        PACKAGING_SUGGESTIONS.find((unit) => unit !== base) ??
+        ALL_UNITS.find((unit) => unit !== base) ??
+        "carton";
+
+      const from = unitPicker(relation?.from ?? suggested);
+      from.setAttribute("data-role", "packaging-from");
+      from.setAttribute("aria-label", "Larger unit");
+
+      const factor = el("input", "input") as HTMLInputElement;
+      factor.type = "number";
+      factor.min = "1";
+      factor.step = "1";
+      factor.value = relation ? String(relation.factor) : "12";
+      factor.setAttribute("data-role", "packaging-factor");
+      factor.setAttribute("aria-label", "How many smaller units one larger unit holds");
+
+      const to = unitPicker(relation?.to ?? base);
+      to.setAttribute("data-role", "packaging-to");
+      to.setAttribute("aria-label", "Smaller unit");
+
+      const removeBtn = el("button", "button button--secondary button--sm", "Remove");
+      removeBtn.type = "button";
+
+      const row = el("div", "packaging-row");
+      removeBtn.addEventListener("click", () => {
+        row.remove();
+      });
+      row.append(from, el("span", "packaging-row__equals", "="), factor, el("span", "packaging-row__times", "×"), to, removeBtn);
+      packagingRows.append(row);
+    };
+
+    const readPackaging = (): PackagingRelation[] => {
+      const relations: PackagingRelation[] = [];
+      packagingRows.querySelectorAll(".packaging-row").forEach((row) => {
+        const from = row.querySelector('[data-role="packaging-from"]') as HTMLSelectElement | null;
+        const to = row.querySelector('[data-role="packaging-to"]') as HTMLSelectElement | null;
+        const factor = row.querySelector('[data-role="packaging-factor"]') as HTMLInputElement | null;
+        if (from === null || to === null || factor === null) return;
+        relations.push({
+          from: from.value as Unit,
+          to: to.value as Unit,
+          factor: Number.parseInt(factor.value, 10),
+        });
+      });
+      return relations;
+    };
+
+    for (const relation of existing?.packaging ?? []) addPackagingRow(relation);
+    addPackagingBtn.addEventListener("click", () => addPackagingRow());
+
+    packagingField.append(packagingLabel, packagingHelp, packagingRows, addPackagingBtn);
+
     const errorMsg = el("div", "form-error");
     errorMsg.hidden = true;
 
@@ -159,7 +294,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
     submitBtn.type = "submit";
     footer.append(cancelBtn, submitBtn);
 
-    form.append(nameLabel, skuLabel, priceLabel, unitLabel, qtyLabel, aliasesLabel, lowStockLabel, errorMsg, footer);
+    form.append(nameLabel, skuLabel, priceLabel, unitLabel, qtyLabel, aliasesLabel, lowStockLabel, packagingField, errorMsg, footer);
     modal.append(header, form);
     overlay.append(modal);
     root.append(overlay);
@@ -193,6 +328,12 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
           .map((a) => a.trim())
           .filter((a) => a.length > 0);
         const lowStock = parseInt(lowStockInput.value, 10) || 0;
+        const baseUnit = unitSelect.value as Unit;
+        const packaging = readPackaging();
+        const packagingIssue = packagingProblem(baseUnit, packaging);
+        if (packagingIssue !== null) {
+          throw new Error(packagingIssue);
+        }
 
         if (isEdit) {
           const updateData: UpdateProductInput = {
@@ -200,14 +341,14 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
             sku,
             aliases,
             price: { amount: priceKobo, currency: existing.price.currency },
-            base_unit: unitSelect.value as Unit,
+            base_unit: baseUnit,
+            packaging,
             low_stock_threshold: lowStock,
           };
           const updated = await updateProduct(existing.id, updateData);
           applyProduct(updated);
         } else {
           const qty = parseInt(qtyInput.value, 10) || 0;
-          const baseUnit = unitSelect.value as Unit;
           const createData: CreateProductInput = {
             name,
             sku,
@@ -215,6 +356,7 @@ export function mountInventory(root: HTMLElement, shopId: string): ViewCleanup {
             price: { amount: priceKobo, currency: "NGN" },
             quantity: qty,
             base_unit: baseUnit,
+            packaging,
             low_stock_threshold: lowStock,
           };
           const created = await createProduct(createData);
