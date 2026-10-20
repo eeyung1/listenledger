@@ -169,6 +169,13 @@ body {
   font-weight: 700;
 }
 
+/* The review count sits at the far end of its link so the labels stay aligned
+   whether or not anything is waiting. */
+.app-nav a .badge {
+  margin-left: auto;
+  flex: none;
+}
+
 .account-name {
   font-weight: 500;
   font-size: var(--text-small);

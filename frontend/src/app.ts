@@ -11,6 +11,7 @@ import { requireIdentity, addAccountControls } from "./auth.js";
  */
 
 import { renderNavigation, syncActiveNav } from "./nav.js";
+import { startReviewBadge } from "./review_badge.js";
 import { startSocket } from "./ws.js";
 import { startViews } from "./views/index.js";
 
@@ -54,6 +55,15 @@ export interface ViewMountedDetail {
 /** Token guarding against a slow template fetch overwriting a newer view. */
 let renderToken = 0;
 
+/**
+ * The route currently mounted.
+ *
+ * The navigation is redrawn when the review count changes, and a redraw drops
+ * the current-destination marking with it, so the active route has to be known
+ * outside the render that set it.
+ */
+let activeRoute: RoutePath = DEFAULT_ROUTE;
+
 function appRoot(): HTMLElement {
   const el = document.getElementById("app");
   if (el === null) {
@@ -84,6 +94,7 @@ function mount(route: RouteDefinition, html: string): void {
   const root = appRoot();
   root.innerHTML = html;
   document.title = `ListenLedger — ${route.title}`;
+  activeRoute = route.path;
   // Marks the destination on every surface (sidebar and mobile bar) at once;
   // see syncActiveNav.
   syncActiveNav(document, route.path);
@@ -151,6 +162,15 @@ async function boot(): Promise<void> {
     renderNavigation(document);
     const identity = await requireIdentity();
     addAccountControls(identity);
+    // Started before the router so the count is read alongside the first view,
+    // and redrawn on the surface that is already on screen.
+    startReviewBadge({
+      shopId: identity.shop_id,
+      onChange: (reviewCount) => {
+        renderNavigation(document, { reviewCount });
+        syncActiveNav(document, activeRoute);
+      },
+    });
     startViews({ root: appRoot(), mountedEvent: VIEW_MOUNTED_EVENT, shopId: identity.shop_id });
     startRouter();
     startSocket(identity.shop_id);
