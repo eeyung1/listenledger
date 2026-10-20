@@ -230,7 +230,7 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
         confidence: { overall: 0.88, product: 0.85, quantity: 0.95, amount: 0.9 },
         status: "review_required",
         transcript: "Customer bought one pack of Milo",
-        audio_data: "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=",
+        has_audio: true,
         occurred_at: "2026-10-14T10:10:00Z",
         created_at: "2026-10-14T10:10:00Z",
       },
@@ -268,10 +268,24 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
     let mockLedger = [];
     let lastCorrectionPayload = null;
     let lastRejectionNotes = null;
+    let audioDetailFetches = 0;
 
     globalThis.fetch = async (url, init) => {
       const u = String(url);
       const method = init?.method ?? "GET";
+
+      if (u.includes("/api/transactions/txn_rev_clean?") && method === "GET") {
+        audioDetailFetches += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: "txn_rev_clean",
+            has_audio: true,
+            audio_data: "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=",
+          }),
+        };
+      }
 
       if (u.includes("/api/inventory")) {
         return {
@@ -363,12 +377,16 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
     // --- Action A: Quick Confirm ---
     const cleanCard = reviewCards[0];
     const audioWrapper = cleanCard.querySelector(".review-card__audio");
-    assert.notEqual(audioWrapper, null, "cleanCard with audio_data must render audio player wrapper");
-    const audioElem = audioWrapper.querySelector("audio");
-    assert.notEqual(audioElem, null, "audio element must be rendered");
-    assert.equal(audioElem.getAttribute("src"), "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8=");
+    assert.notEqual(audioWrapper, null, "cleanCard with has_audio must render an audio control");
+    const playAudioBtn = audioWrapper.querySelector("button");
+    assert.notEqual(playAudioBtn, null, "audio control must be a button");
+    assert.match(playAudioBtn.textContent, /Play audio/);
+    assert.equal(audioDetailFetches, 0, "rendering the list must not fetch the snippet");
+    playAudioBtn.dispatchEvent(new MockEvent("click"));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(audioDetailFetches, 1, "requesting playback must fetch the shop-scoped detail snippet");
 
-    // Second review card without audio snippet must not render audio player
+    // Second review card without has_audio must not render an audio control
     assert.equal(reviewCards[1].querySelector(".review-card__audio"), null);
 
     const confirmBtn = cleanCard.querySelector(".button--primary");
