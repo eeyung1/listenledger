@@ -42,12 +42,13 @@ const maxBodyBytes = 1 << 20 // 1 MiB
 
 // Server holds the dependencies shared by the handlers.
 type Server struct {
-	store          *storage.Store
-	publisher      Publisher
-	resolveShop    auth.ShopResolver
-	log            *slog.Logger
-	validateEngine *validate.Engine
-	captureLimiter *RateLimiter
+	store           *storage.Store
+	publisher       Publisher
+	resolveShop     auth.ShopResolver
+	log             *slog.Logger
+	validateEngine  *validate.Engine
+	captureLimiter  *RateLimiter
+	retentionWorker *RetentionWorker
 }
 
 // New builds the /api/ handler tree, to be mounted at the "/api/" prefix.
@@ -56,6 +57,11 @@ type Server struct {
 // record the change but tell nobody about it, which is the correct behaviour
 // for a process that has no hub.
 func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolver, logger *slog.Logger) http.Handler {
+	return NewWithRetention(store, publisher, resolveShop, logger, nil)
+}
+
+// NewWithRetention builds the /api/ handler tree with an attached RetentionWorker.
+func NewWithRetention(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolver, logger *slog.Logger, retentionWorker *RetentionWorker) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -64,12 +70,13 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	}
 
 	server := &Server{
-		store:          store,
-		publisher:      publisher,
-		resolveShop:    resolveShop,
-		log:            logger,
-		validateEngine: validate.NewEngine(),
-		captureLimiter: NewRateLimiter(60, time.Minute),
+		store:           store,
+		publisher:       publisher,
+		resolveShop:     resolveShop,
+		log:             logger,
+		validateEngine:  validate.NewEngine(),
+		captureLimiter:  NewRateLimiter(60, time.Minute),
+		retentionWorker: retentionWorker,
 	}
 
 	mux := http.NewServeMux()
@@ -86,6 +93,8 @@ func New(store *storage.Store, publisher Publisher, resolveShop auth.ShopResolve
 	mux.HandleFunc("/api/settings", server.handleSettings)
 	mux.HandleFunc("/api/settings/target-gates", server.handleTargetGates)
 	mux.HandleFunc("/api/settings/purge-transcripts", server.handlePurgeTranscripts)
+	mux.HandleFunc("/api/settings/retention-policy", server.handleRetentionPolicy)
+	mux.HandleFunc("/api/settings/retention", server.handleRetentionPolicy)
 	mux.HandleFunc("/api/captures", server.captureLimiter.LimitMiddleware(server.handleCaptures))
 	mux.HandleFunc("/api/receipts/", server.handleReceiptDetail)
 	mux.HandleFunc("/api/devices", server.handleDevices)
