@@ -16,14 +16,41 @@
     </p>
   </header>
 
-  <section class="panel panel--review" aria-labelledby="review-queue-heading">
+  <!-- Navigation tabs between All transactions and Needs review -->
+  <div class="tabs" role="tablist" aria-label="Transaction views" data-hook="transactions-tabs">
+    <button
+      type="button"
+      class="tab is-active"
+      role="tab"
+      id="tab-all-txns"
+      aria-selected="true"
+      aria-controls="panel-ledger"
+      data-hook="tab-all-transactions"
+    >
+      All transactions
+    </button>
+    <button
+      type="button"
+      class="tab"
+      role="tab"
+      id="tab-needs-review"
+      aria-selected="false"
+      aria-controls="panel-review"
+      data-hook="tab-needs-review"
+    >
+      Needs review
+      <span class="badge badge--review" data-hook="review-tab-badge">0</span>
+    </button>
+  </div>
+
+  <section class="panel panel--review" id="panel-review" role="tabpanel" aria-labelledby="tab-needs-review" data-hook="panel-review">
     <h2 class="panel__title" id="review-queue-heading">
       Review queue
       <span class="badge" data-hook="review-queue-count">0</span>
     </h2>
-    <p class="panel__hint">
+    <p class="panel__hint" data-hook="review-panel-hint">
       Low-confidence captures. Correct the product, quantity or amount, then
-      confirm or reject. Confirming is what applies the change to stock.
+      confirm or reject. <strong>Confirming</strong> applies the change to stock and records revenue; <strong>rejecting</strong> discards the capture without changing inventory.
     </p>
     <!--
       One card per held transaction. Each shows the per-anchor confidence
@@ -39,11 +66,19 @@
     </ul>
   </section>
 
-  <section class="panel" aria-labelledby="ledger-heading">
+  <section class="panel" id="panel-ledger" role="tabpanel" aria-labelledby="tab-all-txns" data-hook="panel-ledger">
     <h2 class="panel__title" id="ledger-heading">Ledger</h2>
 
     <!-- data-hook: ledger filters (date range, type, status) -->
     <form class="filters" data-hook="ledger-filters">
+      <label class="filters__field">
+        From date
+        <input type="date" name="from" data-hook="filter-from" autocomplete="off">
+      </label>
+      <label class="filters__field">
+        To date
+        <input type="date" name="to" data-hook="filter-to" autocomplete="off">
+      </label>
       <label class="filters__field">
         Direction
         <select name="type" data-hook="filter-type">
