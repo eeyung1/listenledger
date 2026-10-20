@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -40,15 +41,17 @@ func main() {
 }
 
 type config struct {
-	addr            string
-	dbPath          string
-	frontendDir     string
-	devMode         bool
-	allowedOrigins  []string
-	tlsCertFile     string
-	tlsKeyFile      string
-	requirePostgres bool
-	skipMigrations  bool
+	addr              string
+	dbPath            string
+	frontendDir       string
+	devMode           bool
+	allowedOrigins    []string
+	tlsCertFile       string
+	tlsKeyFile        string
+	requirePostgres   bool
+	skipMigrations    bool
+	retentionDays     int
+	retentionInterval time.Duration
 }
 
 func run() error {
@@ -65,6 +68,10 @@ func run() error {
 	flag.BoolVar(&cfg.skipMigrations, "skip-migrations", false, "verify PostgreSQL schema without DDL; use a restricted runtime role")
 	flag.StringVar(&cfg.tlsCertFile, "tls-cert", "", "path to TLS certificate PEM file (or LISTENLEDGER_TLS_CERT env)")
 	flag.StringVar(&cfg.tlsKeyFile, "tls-key", "", "path to TLS private key PEM file (or LISTENLEDGER_TLS_KEY env)")
+	flag.IntVar(&cfg.retentionDays, "retention-days", api.DefaultRetentionDays,
+		"retention window in days for automated transcript and audio deletion (default 7)")
+	flag.DurationVar(&cfg.retentionInterval, "retention-interval", api.DefaultRetentionInterval,
+		"interval between scheduled retention purge cycles, e.g. 24h (0 disables automated purge)")
 	origins := flag.String("allowed-origins", os.Getenv("ALLOWED_ORIGINS"),
 		"comma-separated browser origins permitted to open a WebSocket (empty = same-origin only)")
 	flag.Parse()
@@ -81,6 +88,17 @@ func run() error {
 	}
 	if err := validateDatabaseConfig(cfg); err != nil {
 		return err
+	}
+
+	if envDays := os.Getenv("RETENTION_DAYS"); envDays != "" {
+		if days, err := strconv.Atoi(envDays); err == nil && days > 0 {
+			cfg.retentionDays = days
+		}
+	}
+	if envInterval := os.Getenv("RETENTION_INTERVAL"); envInterval != "" {
+		if d, err := time.ParseDuration(envInterval); err == nil {
+			cfg.retentionInterval = d
+		}
 	}
 
 	if port := os.Getenv("PORT"); port != "" && cfg.addr == ":8080" {
@@ -167,7 +185,13 @@ func serve(logger *slog.Logger, cfg config) error {
 	identity := &auth.Service{Store: store, SecureCookies: !cfg.devMode}
 	mux.Handle("/api/auth/", identity.Handler())
 	mux.Handle("/ws", ws.NewHandler(hub, identity.ResolveShop, cfg.allowedOrigins, logger))
-	mux.Handle("/api/", auth.ProtectWrites(api.New(store, hub, identity.ResolveShop, logger)))
+
+	retentionWorker := api.NewRetentionWorker(store, api.RetentionConfig{
+		RetentionDays: cfg.retentionDays,
+		Interval:      cfg.retentionInterval,
+		Logger:        logger,
+	})
+	mux.Handle("/api/", auth.ProtectWrites(api.NewWithRetention(store, hub, identity.ResolveShop, logger, retentionWorker)))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -237,6 +261,10 @@ func serve(logger *slog.Logger, cfg config) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if cfg.retentionInterval > 0 {
+		go retentionWorker.Start(ctx)
+	}
+
 	listenErr := make(chan error, 1)
 	go func() {
 		if cfg.tlsCertFile != "" && cfg.tlsKeyFile != "" {
@@ -263,6 +291,7 @@ func serve(logger *slog.Logger, cfg config) error {
 	// connections, and every WebSocket is hijacked. Closing the hub first is
 	// what actually disconnects the dashboards.
 	hub.Shutdown()
+	retentionWorker.Stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
