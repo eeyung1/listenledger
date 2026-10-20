@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,6 +85,94 @@ func testServerFixture(t *testing.T) (http.Handler, *storage.Store, *testPublish
 	pub := &testPublisher{}
 	handler := New(store, pub, auth.QueryShopResolver, nil)
 	return handler, store, pub, shopID
+}
+
+func TestLedgerPayloadsOmitLegacyAudio(t *testing.T) {
+	handler, store, _, shopID := testServerFixture(t)
+	ctx := context.Background()
+
+	const snippet = "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8="
+	legacy := models.Transaction{
+		ID:          "txn_audio_legacy",
+		ShopID:      shopID,
+		Type:        models.TypeSale,
+		ProductID:   "prd_milo",
+		ProductName: "Milo",
+		Quantity:    1,
+		Unit:        models.UnitPack,
+		Amount:      models.Money{Amount: 200000, Currency: "NGN"},
+		Status:      models.StatusConfirmed,
+		OccurredAt:  time.Now(),
+		CreatedAt:   time.Now(),
+		AudioData:   snippet,
+	}
+	if err := store.InsertTransaction(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ordinary ledger snapshots must advertise the snippet without shipping it.
+	listReq := httptest.NewRequest(http.MethodGet, "/api/transactions?shop_id="+shopID, nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d: %s", listRec.Code, listRec.Body.String())
+	}
+	if strings.Contains(listRec.Body.String(), "audio_data") {
+		t.Fatalf("ledger list leaked audio_data: %s", listRec.Body.String())
+	}
+	var snapshot transactionsResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, txn := range snapshot.Transactions {
+		if txn.ID == legacy.ID {
+			found = true
+			if !txn.HasAudio {
+				t.Error("legacy transaction must report has_audio in the list")
+			}
+			if txn.AudioData != "" {
+				t.Errorf("list transaction retained raw audio: %q", txn.AudioData)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("legacy transaction missing from ledger list")
+	}
+
+	// WebSocket transaction events marshal the same model; they must not carry
+	// the snippet either.
+	wire, err := json.Marshal(models.Transaction{AudioData: snippet, HasAudio: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "audio_data") {
+		t.Fatalf("transaction event payload leaked audio_data: %s", wire)
+	}
+	if !strings.Contains(string(wire), `"has_audio":true`) {
+		t.Fatalf("transaction event payload lost has_audio: %s", wire)
+	}
+
+	// The shop-scoped detail endpoint remains the explicit playback path.
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/transactions/"+legacy.ID+"?shop_id="+shopID, nil)
+	detailRec := httptest.NewRecorder()
+	handler.ServeHTTP(detailRec, detailReq)
+	if detailRec.Code != http.StatusOK {
+		t.Fatalf("detail status = %d: %s", detailRec.Code, detailRec.Body.String())
+	}
+	var detail struct {
+		AudioData string `json:"audio_data"`
+		HasAudio  bool   `json:"has_audio"`
+	}
+	if err := json.Unmarshal(detailRec.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.AudioData != snippet {
+		t.Errorf("detail audio_data = %q, want snippet", detail.AudioData)
+	}
+	if !detail.HasAudio {
+		t.Error("detail must report has_audio for a legacy snippet")
+	}
 }
 
 func TestReviewConfirmAndRejectEndpoints(t *testing.T) {
@@ -219,5 +308,86 @@ func TestProductDetailAndPatchEndpoints(t *testing.T) {
 	}
 	if updated.Name != newName || updated.Price.Amount != 250000 || len(updated.Aliases) != 2 {
 		t.Fatalf("unexpected updated product: %+v", updated)
+	}
+}
+
+func TestConfirmTransaction_SaveAsAlias(t *testing.T) {
+	ctx := context.Background()
+	handler, store, pub, shopID := testServerFixture(t)
+
+	prod := models.Product{
+		ID:       "prd_peak",
+		ShopID:   shopID,
+		Name:     "Peak Milk 400g",
+		SKU:      "PEAK-400",
+		Aliases:  []string{"Peak"},
+		Price:    models.Money{Amount: 350000, Currency: "NGN"},
+		Quantity: 20,
+		BaseUnit: models.UnitTin,
+	}
+	if err := store.InsertProduct(ctx, prod); err != nil {
+		t.Fatal(err)
+	}
+
+	// Held review transaction with misheard product name "peek"
+	heldTx := models.Transaction{
+		ID:          "txn_review_peek",
+		ShopID:      shopID,
+		Type:        models.TypeSale,
+		ProductID:   "",
+		ProductName: "peek",
+		Quantity:    2,
+		Unit:        models.UnitTin,
+		Amount:      models.Money{Amount: 700000, Currency: "NGN"},
+		Status:      models.StatusReviewRequired,
+		OccurredAt:  time.Now(),
+		CreatedAt:   time.Now(),
+	}
+	if _, err := store.RecordMovement(ctx, heldTx, "req_alias_1", "hash_alias_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Confirm with save_as_alias: true (omitting alias_text to test auto-derivation from origTxn.ProductName)
+	confirmBody, _ := json.Marshal(map[string]any{
+		"product_id":    "prd_peak",
+		"quantity":      2,
+		"unit":          models.UnitTin,
+		"amount":        models.Money{Amount: 700000, Currency: "NGN"},
+		"save_as_alias": true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/transactions/txn_review_peek/confirm?shop_id="+shopID, bytes.NewReader(confirmBody))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on confirm, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the product now has "peek" in its aliases
+	updatedProd, err := store.GetProductByID(ctx, shopID, "prd_peak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasPeek := false
+	for _, a := range updatedProd.Aliases {
+		if a == "peek" {
+			hasPeek = true
+			break
+		}
+	}
+	if !hasPeek {
+		t.Fatalf("expected 'peek' in aliases, got %v", updatedProd.Aliases)
+	}
+
+	// Verify EventInventoryUpdated was published
+	hasInvUpdated := false
+	for _, ev := range pub.events {
+		if ev == ws.EventInventoryUpdated {
+			hasInvUpdated = true
+			break
+		}
+	}
+	if !hasInvUpdated {
+		t.Errorf("expected EventInventoryUpdated event published, got %v", pub.events)
 	}
 }

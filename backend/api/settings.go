@@ -157,8 +157,12 @@ func (s *Server) handlePurgeTranscripts(w http.ResponseWriter, r *http.Request) 
 	} else if req.RetentionDays != nil && *req.RetentionDays > 0 {
 		cutoff = time.Now().UTC().AddDate(0, 0, -*req.RetentionDays)
 	} else {
-		// Default to 30 days retention policy
-		cutoff = time.Now().UTC().AddDate(0, 0, -30)
+		// Default to configured retention policy (7 days for pilot, or active retention worker window)
+		days := DefaultRetentionDays
+		if s.retentionWorker != nil {
+			days = s.retentionWorker.RetentionDays()
+		}
+		cutoff = time.Now().UTC().AddDate(0, 0, -days)
 	}
 
 	purged, err := s.store.PurgeTranscripts(r.Context(), shopID, cutoff)

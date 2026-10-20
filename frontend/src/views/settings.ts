@@ -49,6 +49,8 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
   const settingsForm = hook<HTMLFormElement>(root, "settings-form");
   const settingsStatus = hook(root, "settings-status");
   const saveBtn = hook<HTMLButtonElement>(root, "save-settings-btn");
+  const accountShopId = hook(root, "account-shop-id");
+  const accountOwnerId = hook(root, "account-owner-id");
 
   const pairForm = hook<HTMLFormElement>(root, "pair-device-form");
   const deviceNameInput = hook<HTMLInputElement>(root, "device-name-input");
@@ -178,6 +180,8 @@ export function mountSettings(root: HTMLElement, shopId: string): ViewCleanup {
     if (salePhraseInput) salePhraseInput.value = shop.sale_phrase;
     if (restockPhraseInput) restockPhraseInput.value = shop.restock_phrase;
     if (recognitionLanguageInput) recognitionLanguageInput.value = shop.recognition_language ?? "";
+    if (accountShopId) setText(accountShopId, shop.id);
+    if (accountOwnerId) setText(accountOwnerId, shop.owner_id);
   }
 
   async function loadTargetGates(): Promise<void> {

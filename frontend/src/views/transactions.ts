@@ -63,6 +63,55 @@ interface Filters {
   customer_id?: string;
 }
 
+/**
+ * `has_audio` is computed by the backend when a legacy snippet exists. The
+ * snippet itself is deliberately absent from ledger snapshots and WebSocket
+ * events, so it is fetched from the shop-scoped detail endpoint only when the
+ * owner asks to hear it.
+ */
+type AudioBearingTransaction = Transaction & { has_audio?: boolean };
+
+function hasLegacyAudio(transaction: Transaction): boolean {
+  return (transaction as AudioBearingTransaction).has_audio === true;
+}
+
+async function playLegacyAudio(shopId: string, transaction: Transaction): Promise<void> {
+  try {
+    const response = await fetch(
+      `/api/transactions/${encodeURIComponent(transaction.id)}?shop_id=${encodeURIComponent(shopId)}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!response.ok) return;
+    const detail = (await response.json()) as { audio_data?: string };
+    if (!detail.audio_data) return;
+    const player = document.createElement("audio");
+    player.src = detail.audio_data;
+    if (typeof player.play === "function") {
+      try {
+        await player.play();
+      } catch {
+        // Autoplay policy may require a further gesture; the fetch still warmed it.
+      }
+    }
+  } catch {
+    // Legacy playback is optional; a failed fetch must not break the ledger.
+  }
+}
+
+function legacyAudioControl(shopId: string, transaction: Transaction): HTMLElement | null {
+  if (!hasLegacyAudio(transaction)) return null;
+  const wrapper = el("div", "review-card__audio");
+  const label = el("span", "review-card__audio-label", "🎙 Spoken Counter Audio:");
+  const playBtn = el("button", "button button--secondary button--sm button--audio-replay", "▶ Play audio");
+  playBtn.type = "button";
+  playBtn.title = "Load the legacy audio snippet recorded for this transaction";
+  playBtn.addEventListener("click", () => {
+    void playLegacyAudio(shopId, transaction);
+  });
+  wrapper.append(label, playBtn);
+  return wrapper;
+}
+
 export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanup {
   setActiveQueueShop(shopId);
   let transactions: Transaction[] = [];
@@ -199,17 +248,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       actions.append(confirmBtn, editBtn, rejectBtn, errorMsg);
     }
 
-    let audioElement: HTMLElement | null = null;
-    if (transaction.audio_data) {
-      audioElement = el("div", "review-card__audio");
-      const audioLabel = el("span", "review-card__audio-label", "🎙 Spoken Counter Audio:");
-      const audioPlayer = document.createElement("audio");
-      audioPlayer.controls = true;
-      audioPlayer.src = transaction.audio_data;
-      audioPlayer.className = "review-card__audio-player";
-      audioPlayer.preload = "none";
-      audioElement.append(audioLabel, audioPlayer);
-    }
+    const audioElement = legacyAudioControl(shopId, transaction);
 
     if (audioElement) {
       card.append(head, transcript, audioElement, scores, actions);
@@ -307,17 +346,12 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     });
     actionCell.append(auditBtn);
 
-    if (transaction.audio_data) {
+    if (hasLegacyAudio(transaction)) {
       const playBtn = el("button", "button button--secondary button--sm button--audio-replay", "▶ Audio");
       playBtn.type = "button";
-      playBtn.title = "Listen to counter audio snippet recorded for this transaction";
+      playBtn.title = "Listen to the legacy audio snippet recorded for this transaction";
       playBtn.addEventListener("click", () => {
-        try {
-          const snd = new Audio(transaction.audio_data);
-          void snd.play();
-        } catch {
-          // ignore playback issues
-        }
+        void playLegacyAudio(shopId, transaction);
       });
       actionCell.append(playBtn);
     }
@@ -695,18 +729,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       }
     });
 
-    let audioContainer: HTMLElement | null = null;
-    if (transaction.audio_data) {
-      audioContainer = el("div", "review-card__audio");
-      audioContainer.style.marginBottom = "0.75rem";
-      const audioLabel = el("span", "review-card__audio-label", "🎙 Spoken Counter Audio:");
-      const audioPlayer = document.createElement("audio");
-      audioPlayer.controls = true;
-      audioPlayer.src = transaction.audio_data;
-      audioPlayer.className = "review-card__audio-player";
-      audioPlayer.preload = "none";
-      audioContainer.append(audioLabel, audioPlayer);
-    }
+    const audioContainer = legacyAudioControl(shopId, transaction);
+    if (audioContainer) audioContainer.style.marginBottom = "0.75rem";
 
     if (audioContainer) {
       form.append(help, transcriptInfo, audioContainer, nameLabel, skuLabel, unitLabel, priceLabel, qtyLabel);
@@ -778,6 +802,20 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     notesInput.placeholder = "e.g. Verified with storekeeper; corrected pack to carton";
     notesLabel.append(notesInput);
 
+    const aliasLabel = el("label", "form-field form-field--checkbox");
+    const aliasCheckbox = el("input", "checkbox") as HTMLInputElement;
+    aliasCheckbox.type = "checkbox";
+    aliasCheckbox.id = "save-as-alias-checkbox";
+    aliasCheckbox.checked = false;
+    const aliasTextSpan = el(
+      "span",
+      "checkbox-label",
+      transaction.product_name
+        ? `Save “${transaction.product_name}” as alias for selected product`
+        : "Save spoken product name as alias",
+    );
+    aliasLabel.append(aliasCheckbox, aliasTextSpan);
+
     const errorMsg = el("div", "form-error");
     errorMsg.hidden = true;
 
@@ -788,23 +826,13 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     submitBtn.type = "submit";
     footer.append(cancelBtn, submitBtn);
 
-    let audioContainer: HTMLElement | null = null;
-    if (transaction.audio_data) {
-      audioContainer = el("div", "review-card__audio");
-      audioContainer.style.marginBottom = "0.75rem";
-      const audioLabel = el("span", "review-card__audio-label", "🎙 Spoken Counter Audio:");
-      const audioPlayer = document.createElement("audio");
-      audioPlayer.controls = true;
-      audioPlayer.src = transaction.audio_data;
-      audioPlayer.className = "review-card__audio-player";
-      audioPlayer.preload = "none";
-      audioContainer.append(audioLabel, audioPlayer);
-    }
+    const audioContainer = legacyAudioControl(shopId, transaction);
+    if (audioContainer) audioContainer.style.marginBottom = "0.75rem";
 
     if (audioContainer) {
-      form.append(help, transcriptInfo, audioContainer, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, errorMsg, footer);
+      form.append(help, transcriptInfo, audioContainer, productLabel, qtyLabel, unitLabel, amountLabel, aliasLabel, notesLabel, errorMsg, footer);
     } else {
-      form.append(help, transcriptInfo, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, errorMsg, footer);
+      form.append(help, transcriptInfo, productLabel, qtyLabel, unitLabel, amountLabel, aliasLabel, notesLabel, errorMsg, footer);
     }
     modal.append(header, form);
     overlay.append(modal);
@@ -883,6 +911,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       submitBtn.textContent = "Confirming…";
 
       try {
+        const saveAsAlias = aliasCheckbox.checked;
         const corrections: ReviewCorrections = {
           product_id: selectedProductId,
           quantity: qty,
@@ -892,6 +921,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
             currency: transaction.amount.currency,
           },
           notes: notesInput.value.trim() || undefined,
+          save_as_alias: saveAsAlias ? true : undefined,
+          alias_text: saveAsAlias ? (transaction.product_name || undefined) : undefined,
         };
         const updated = await confirmTransaction(transaction.id, corrections);
         removeHeldTransaction(updated.id);
