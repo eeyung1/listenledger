@@ -753,6 +753,35 @@ a {
   font-weight: 600;
 }
 
+/* Packaging rows read as a sentence: 1 carton = 12 pack. */
+.packaging-rows {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.packaging-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.packaging-row .select {
+  flex: 1 1 7rem;
+}
+
+.packaging-row input[type="number"] {
+  width: 5rem;
+}
+
+/* The sentence under the label is guidance, not a second label. */
+.packaging-field .modal-help {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: 400;
+  color: var(--color-muted);
+}
+
 .form-error {
   padding: 0.65rem;
   background: var(--color-danger-soft);
