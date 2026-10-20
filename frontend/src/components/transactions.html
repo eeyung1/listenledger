@@ -45,6 +45,14 @@
     <!-- data-hook: ledger filters (date range, type, status) -->
     <form class="filters" data-hook="ledger-filters">
       <label class="filters__field">
+        From date
+        <input type="date" name="from" data-hook="filter-from" autocomplete="off">
+      </label>
+      <label class="filters__field">
+        To date
+        <input type="date" name="to" data-hook="filter-to" autocomplete="off">
+      </label>
+      <label class="filters__field">
         Direction
         <select name="type" data-hook="filter-type">
           <option value="">All</option>
