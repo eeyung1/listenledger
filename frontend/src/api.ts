@@ -365,6 +365,8 @@ export interface ReviewCorrections {
   readonly customer_name?: string | undefined;
   readonly notes?: string | undefined;
   readonly create_product?: CreateProductOnboard | undefined;
+  readonly save_as_alias?: boolean | undefined;
+  readonly alias_text?: string | undefined;
 }
 
 export type ReviewDecisionType = "confirmed" | "corrected_and_confirmed" | "rejected";

@@ -778,6 +778,20 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     notesInput.placeholder = "e.g. Verified with storekeeper; corrected pack to carton";
     notesLabel.append(notesInput);
 
+    const aliasLabel = el("label", "form-field form-field--checkbox");
+    const aliasCheckbox = el("input", "checkbox") as HTMLInputElement;
+    aliasCheckbox.type = "checkbox";
+    aliasCheckbox.id = "save-as-alias-checkbox";
+    aliasCheckbox.checked = false;
+    const aliasTextSpan = el(
+      "span",
+      "checkbox-label",
+      transaction.product_name
+        ? `Save “${transaction.product_name}” as alias for selected product`
+        : "Save spoken product name as alias",
+    );
+    aliasLabel.append(aliasCheckbox, aliasTextSpan);
+
     const errorMsg = el("div", "form-error");
     errorMsg.hidden = true;
 
@@ -802,9 +816,9 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
     }
 
     if (audioContainer) {
-      form.append(help, transcriptInfo, audioContainer, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, errorMsg, footer);
+      form.append(help, transcriptInfo, audioContainer, productLabel, qtyLabel, unitLabel, amountLabel, aliasLabel, notesLabel, errorMsg, footer);
     } else {
-      form.append(help, transcriptInfo, productLabel, qtyLabel, unitLabel, amountLabel, notesLabel, errorMsg, footer);
+      form.append(help, transcriptInfo, productLabel, qtyLabel, unitLabel, amountLabel, aliasLabel, notesLabel, errorMsg, footer);
     }
     modal.append(header, form);
     overlay.append(modal);
@@ -883,6 +897,7 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
       submitBtn.textContent = "Confirming…";
 
       try {
+        const saveAsAlias = aliasCheckbox.checked;
         const corrections: ReviewCorrections = {
           product_id: selectedProductId,
           quantity: qty,
@@ -892,6 +907,8 @@ export function mountTransactions(root: HTMLElement, shopId: string): ViewCleanu
             currency: transaction.amount.currency,
           },
           notes: notesInput.value.trim() || undefined,
+          save_as_alias: saveAsAlias ? true : undefined,
+          alias_text: saveAsAlias ? (transaction.product_name || undefined) : undefined,
         };
         const updated = await confirmTransaction(transaction.id, corrections);
         removeHeldTransaction(updated.id);

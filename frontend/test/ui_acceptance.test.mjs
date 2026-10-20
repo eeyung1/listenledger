@@ -407,6 +407,10 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
     amountInput.value = "700000"; // NGN 7,000
     notesInput.value = "Corrected Indomie supplier restock";
 
+    const aliasCheckbox = editDialog.querySelector("#save-as-alias-checkbox");
+    assert.ok(aliasCheckbox, "Save as alias checkbox rendered");
+    aliasCheckbox.checked = true;
+
     const editForm = editDialog.querySelector("form");
     editForm.dispatchEvent(new MockEvent("submit"));
     await new Promise((r) => setTimeout(r, 20));
@@ -416,6 +420,8 @@ test("UI End-to-End Acceptance Suite: Catalogue, Reviews, Manual Fallback & Reve
     assert.equal(lastCorrectionPayload.unit, "carton");
     assert.equal(lastCorrectionPayload.amount.amount, 700000);
     assert.equal(lastCorrectionPayload.notes, "Corrected Indomie supplier restock");
+    assert.equal(lastCorrectionPayload.save_as_alias, true);
+    assert.equal(lastCorrectionPayload.alias_text, "Uncertain Item");
 
     assert.equal(queueCountBadge.textContent, "1");
 

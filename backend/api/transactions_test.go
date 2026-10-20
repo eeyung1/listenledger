@@ -221,3 +221,84 @@ func TestProductDetailAndPatchEndpoints(t *testing.T) {
 		t.Fatalf("unexpected updated product: %+v", updated)
 	}
 }
+
+func TestConfirmTransaction_SaveAsAlias(t *testing.T) {
+	ctx := context.Background()
+	handler, store, pub, shopID := testServerFixture(t)
+
+	prod := models.Product{
+		ID:       "prd_peak",
+		ShopID:   shopID,
+		Name:     "Peak Milk 400g",
+		SKU:      "PEAK-400",
+		Aliases:  []string{"Peak"},
+		Price:    models.Money{Amount: 350000, Currency: "NGN"},
+		Quantity: 20,
+		BaseUnit: models.UnitTin,
+	}
+	if err := store.InsertProduct(ctx, prod); err != nil {
+		t.Fatal(err)
+	}
+
+	// Held review transaction with misheard product name "peek"
+	heldTx := models.Transaction{
+		ID:          "txn_review_peek",
+		ShopID:      shopID,
+		Type:        models.TypeSale,
+		ProductID:   "",
+		ProductName: "peek",
+		Quantity:    2,
+		Unit:        models.UnitTin,
+		Amount:      models.Money{Amount: 700000, Currency: "NGN"},
+		Status:      models.StatusReviewRequired,
+		OccurredAt:  time.Now(),
+		CreatedAt:   time.Now(),
+	}
+	if _, err := store.RecordMovement(ctx, heldTx, "req_alias_1", "hash_alias_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Confirm with save_as_alias: true (omitting alias_text to test auto-derivation from origTxn.ProductName)
+	confirmBody, _ := json.Marshal(map[string]any{
+		"product_id":    "prd_peak",
+		"quantity":      2,
+		"unit":          models.UnitTin,
+		"amount":        models.Money{Amount: 700000, Currency: "NGN"},
+		"save_as_alias": true,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/transactions/txn_review_peek/confirm?shop_id="+shopID, bytes.NewReader(confirmBody))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on confirm, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the product now has "peek" in its aliases
+	updatedProd, err := store.GetProductByID(ctx, shopID, "prd_peak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasPeek := false
+	for _, a := range updatedProd.Aliases {
+		if a == "peek" {
+			hasPeek = true
+			break
+		}
+	}
+	if !hasPeek {
+		t.Fatalf("expected 'peek' in aliases, got %v", updatedProd.Aliases)
+	}
+
+	// Verify EventInventoryUpdated was published
+	hasInvUpdated := false
+	for _, ev := range pub.events {
+		if ev == ws.EventInventoryUpdated {
+			hasInvUpdated = true
+			break
+		}
+	}
+	if !hasInvUpdated {
+		t.Errorf("expected EventInventoryUpdated event published, got %v", pub.events)
+	}
+}
