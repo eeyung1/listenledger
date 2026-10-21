@@ -153,7 +153,7 @@ func onboardPilotShop(t *testing.T, app *cohortPilotApp, email, name string) *sh
 }
 
 // TestMultiShopCohortTrial_PhasedProgressionAndExpansionGates executes the complete
-// pilot journey from README §11:
+// pilot journey from README.md#product-roadmap and README.md#field-evidence:
 // 1. Controlled trial in 1 shop (Mama Tolu Provisions) alongside independent paper records.
 // 2. Investigates unexplained discrepancies to 0 root causes.
 // 3. Qualifies and unlocks Phase 2 (1–2 shops alongside independent records, onboarding Emeka Supermarket).
@@ -251,7 +251,7 @@ func TestMultiShopCohortTrial_PhasedProgressionAndExpansionGates(t *testing.T) {
 	}
 
 	// =========================================================================
-	// INVESTIGATE EVERY UNEXPLAINED DIFFERENCE (README §11 requirement)
+	// INVESTIGATE EVERY UNEXPLAINED DIFFERENCE (README.md#field-evidence requirement)
 	// =========================================================================
 	for _, d := range recResp1.Reconciliation.Discrepancies {
 		rootCause := "cashier_protocol_drift"

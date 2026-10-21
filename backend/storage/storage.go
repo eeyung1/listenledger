@@ -31,8 +31,8 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	// CGO SQLite driver. Requires CGO_ENABLED=1 and a C toolchain; see
-	// TODO.md for the pure-Go alternative if that becomes a problem for
-	// cross-compiling the orchestrator.
+	// README.md#development. A pure-Go driver would be a separate portability
+	// decision if cross-compiling the backend becomes a problem.
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -143,7 +143,7 @@ func openPostgres(connStr string, migrate bool) (*Store, error) {
 		return nil, fmt.Errorf("storage: open postgres: %w", err)
 	}
 
-	// Production-grade connection pooling per DATABASE_MIGRATION.md §1
+	// Connection pool settings are documented in README.md#persistence.
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(5 * time.Minute)

@@ -125,10 +125,11 @@ func (s *Server) handlePurgeTranscripts(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Operators run the command documented in RUNBOOK.md, which passes the
-	// window as query parameters. Accept those as well as the JSON body so the
-	// request actually controls the cutoff instead of silently falling back to
-	// the 30-day default (MVP_READINESS_AUDIT.md finding 6).
+	// Accept query parameters as well as JSON, as documented in README.md#operations;
+	// supplied JSON values take precedence. The historical audit in README.md#history
+	// found query-only requests falling back to the then-default 30-day window.
+	// Omitted windows now use the active worker policy or DefaultRetentionDays
+	// (seven days by default).
 	query := r.URL.Query()
 	if req.OlderThan == nil || *req.OlderThan == "" {
 		if raw := strings.TrimSpace(query.Get("older_than")); raw != "" {

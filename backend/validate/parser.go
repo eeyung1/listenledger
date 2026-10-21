@@ -205,8 +205,8 @@ func catalogueNamePattern(name string) *regexp.Regexp {
 // catalogue name or alias first and masking it out of the text before numbers
 // are read. Number words inside brand names are otherwise mistaken for the
 // quantity or the "<base>-five" price shorthand: "Two Five Alive, one thousand
-// naira" parsed as product "Alive", quantity 1, ₦2,500 (MVP_READINESS_AUDIT.md
-// finding 5, roadmap P5.1). The longest matching name wins, so "Seven Up" beats
+// naira" parsed as product "Alive", quantity 1, ₦2,500 (the historical audit in
+// README.md#history, roadmap P5.1). The longest matching name wins, so "Seven Up" beats
 // "Up".
 func ParseSpokenSegmentWithProducts(text, defaultCurrency string, productNames []string) ParsedAnchors {
 	if len(productNames) == 0 {
@@ -873,7 +873,7 @@ var cancellationPhrases = []string{
 // trailingCancellationPhrases are ordinary verbs with an implicit object
 // ("drop that"). They only cancel when they are the whole utterance or its
 // trailing clause, so "drop that bag there" stays a shop instruction instead of
-// silently voiding a sale (MVP_READINESS_AUDIT.md finding 5 / P5.3).
+// silently voiding a sale (README.md#history, historical audit finding 5 / P5.3).
 var trailingCancellationPhrases = []string{
 	"drop that",
 }

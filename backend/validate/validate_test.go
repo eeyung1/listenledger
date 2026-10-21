@@ -1244,7 +1244,7 @@ func TestParseSpokenSegment_QuantityInferredFlag(t *testing.T) {
 
 // P5.5: an inferred quantity is a guess, so it must score below a spoken one and
 // hold the movement for a human instead of auto-confirming stock from a number
-// nobody said (MVP_READINESS_AUDIT.md finding 5).
+// nobody said (README.md#history, historical audit finding 5).
 func TestValidate_InferredQuantityIsHeldForReview(t *testing.T) {
 	engine := validate.NewEngine()
 	catalogue := sampleCatalogue()

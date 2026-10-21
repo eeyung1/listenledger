@@ -7,7 +7,7 @@ import { requireIdentity, addAccountControls } from "./auth.js";
  * model, so navigation never triggers a full page reload.
  *
  * The router deliberately owns no business data. Server-pushed WebSocket
- * events update the mounted view in place; see TODO.md.
+ * events update the mounted view in place; see README.md#frontend.
  */
 
 import { renderNavigation, syncActiveNav } from "./nav.js";

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ListenLedger — Production Cutover, Cold Reboot & Disaster Recovery Rehearsal
-# References: DATABASE_MIGRATION.md §6, §7, §8; README.md §10
+# References: README.md#testing and README.md#operations
 
 set -euo pipefail
 

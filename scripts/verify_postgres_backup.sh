@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ListenLedger — Automated PostgreSQL Disaster Restoration & Logical Backup Verification
-# Reference: DATABASE_MIGRATION.md §6, §8
+# References: README.md#testing and README.md#operations
 #
 # Verifies non-blocking logical backup, schema migration idempotency, clean-room
 # restoration into an isolated target, and live application-layer query verification.
