@@ -41,7 +41,7 @@ migration 0014. P2 still selects the measured default; current default is en-US.
 
 ## Implementation routing — 20 October 2026
 
-Read [realProductpath.md](realProductpath.md) before selecting work. This routing
+Read the [README product roadmap](README.md#product-roadmap) before selecting work. This routing
 snapshot was checked against `origin/main` at `7d143dc` and P5.4 branch head
 `2b12af0`, then reconciled with `22a32b5` after PRs #73 and #75–#79 merged.
 Refresh remote refs and the shared logs before claiming anything.

@@ -1,5 +1,5 @@
 # Docker Compose for ListenLedger local staging & rehearsal
-# Reference: DATABASE_MIGRATION.md §6, §7
+# References: README.md#deployment-architecture and README.md#operations
 
 services:
   postgres:

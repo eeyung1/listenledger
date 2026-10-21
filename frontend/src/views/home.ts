@@ -6,10 +6,9 @@
  * a snapshot on mount and after any gap in the stream, and otherwise applies
  * events to what it already holds.
  *
- * The KPIs are derived from the transaction page the snapshot returns, not from
- * a server-side aggregate — none exists yet. They are therefore correct only
- * over that page, which is why the fetch asks for the maximum the server will
- * return and why the limitation is noted in TODO.md.
+ * KPIs use the server's daily summary when available. If it is unavailable,
+ * the fallback uses the loaded transaction page and may be incomplete even
+ * though the fetch requests the maximum page size. See README.md#backend.
  */
 
 import {

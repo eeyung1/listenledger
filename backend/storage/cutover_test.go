@@ -15,8 +15,8 @@ import (
 
 // TestCutover_FullLifecycleColdRebootAndDisasterRecovery simulates the complete
 // production cutover lifecycle: cold schema provisioning, full multi-tenant trading,
-// abrupt server process shutdown/restart, and clean disaster recovery reconciliation.
-// References: DATABASE_MIGRATION.md §6, §7, §8
+// connection close/reopen, and clean disaster recovery reconciliation.
+// References: README.md#testing and README.md#operations.
 func TestCutover_FullLifecycleColdRebootAndDisasterRecovery(t *testing.T) {
 	ctx := context.Background()
 
