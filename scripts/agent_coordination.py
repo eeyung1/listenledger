@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serialize repository claims in the shared meeting log; never run the orchestrator."""
+"""Legacy migration validator. Ownership writes are retired in favor of the Go ORCHESTRATOR."""
 import argparse
 import contextlib
 import datetime as dt
@@ -109,6 +109,11 @@ def main():
     parser.add_argument("--token")
     args = parser.parse_args()
     root = shared_root(Path(args.repo).resolve())
+    if args.command != "migrations":
+        raise ValueError(
+            "Legacy ownership commands are disabled. "
+            "Use the Go ORCHESTRATOR as the sole coordination authority."
+        )
     if args.command == "migrations":
         # Validate this checkout, rather than the shared root, for PR CI.
         checkout = Path(git(args.repo, "rev-parse", "--show-toplevel"))
